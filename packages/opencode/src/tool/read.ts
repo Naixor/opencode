@@ -9,6 +9,14 @@ import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
 import { assertExternalDirectory } from "./external-directory"
 import { InstructionPrompt } from "../session/instruction"
+import { SecurityAccess } from "../security/access"
+import { SecurityConfig } from "../security/config"
+import { SecuritySchema } from "../security/schema"
+import { SecuritySegments } from "../security/segments"
+import { SecurityRedact } from "../security/redact"
+import { Log } from "../util/log"
+
+const securityLog = Log.create({ service: "security-read" })
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -60,6 +68,23 @@ export const ReadTool = Tool.define("read", {
       throw new Error(`File not found: ${filepath}`)
     }
 
+    // Security access control check
+    const config = SecurityConfig.getSecurityConfig()
+    const currentRole = getDefaultRole(config)
+
+    // Check file-level access
+    const accessResult = SecurityAccess.checkAccess(filepath, "read", currentRole)
+    securityLog.debug("read access check", {
+      path: filepath,
+      role: currentRole,
+      allowed: accessResult.allowed,
+      reason: accessResult.reason,
+    })
+
+    if (!accessResult.allowed) {
+      throw new Error(`Security: ${accessResult.reason}`)
+    }
+
     const instructions = await InstructionPrompt.resolve(ctx.messages, filepath, ctx.messageID)
 
     // Exclude SVG (XML-based) and vnd.fastbidsheet (.fbs extension, commonly FlatBuffers schema files)
@@ -95,7 +120,20 @@ export const ReadTool = Tool.define("read", {
 
     const limit = params.limit ?? DEFAULT_READ_LIMIT
     const offset = params.offset || 0
-    const lines = await file.text().then((text) => text.split("\n"))
+
+    // Read file content and apply segment-level redaction if needed
+    let fileContent = await file.text()
+    const protectedSegments = findProtectedSegments(filepath, fileContent, config, currentRole)
+
+    if (protectedSegments.length > 0) {
+      securityLog.debug("redacting protected segments", {
+        path: filepath,
+        segmentCount: protectedSegments.length,
+      })
+      fileContent = SecurityRedact.redactContent(fileContent, protectedSegments)
+    }
+
+    const lines = fileContent.split("\n")
 
     const raw: string[] = []
     let bytes = 0
@@ -208,4 +246,98 @@ async function isBinaryFile(filepath: string, file: Bun.BunFile): Promise<boolea
   }
   // If >30% non-printable characters, consider it binary
   return nonPrintableCount / bytes.length > 0.3
+}
+
+/**
+ * Get the default role from security config.
+ * Returns the lowest level role, or "viewer" if no roles defined.
+ * Note: This is a placeholder until US-027 implements proper role detection.
+ */
+function getDefaultRole(config: SecuritySchema.SecurityConfig): string {
+  const roles = config.roles ?? []
+  if (roles.length === 0) {
+    return "viewer"
+  }
+  // Find the role with the lowest level (least privileges)
+  const lowestRole = roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0])
+  return lowestRole.name
+}
+
+/**
+ * Find protected segments in file content that should be redacted.
+ * Checks both marker-based and AST-based segment rules.
+ */
+function findProtectedSegments(
+  filepath: string,
+  content: string,
+  config: SecuritySchema.SecurityConfig,
+  currentRole: string,
+): SecurityRedact.Segment[] {
+  const segments: SecurityRedact.Segment[] = []
+  const segmentsConfig = config.segments
+
+  if (!segmentsConfig) {
+    return segments
+  }
+
+  const roles = config.roles ?? []
+  const roleLevel = getRoleLevel(currentRole, roles)
+
+  // Find marker-based segments
+  if (segmentsConfig.markers && segmentsConfig.markers.length > 0) {
+    const markerSegments = SecuritySegments.findMarkerSegments(content, segmentsConfig.markers)
+    for (const segment of markerSegments) {
+      // Check if this segment denies "read" and the role is not allowed
+      if (segment.rule.deniedOperations.includes("read") && !isRoleAllowed(currentRole, roleLevel, segment.rule.allowedRoles, roles)) {
+        segments.push({ start: segment.start, end: segment.end })
+      }
+    }
+  }
+
+  // Find AST-based segments
+  if (segmentsConfig.ast && segmentsConfig.ast.length > 0) {
+    const astSegments = SecuritySegments.findASTSegments(filepath, content, segmentsConfig.ast)
+    for (const segment of astSegments) {
+      // Check if this segment denies "read" and the role is not allowed
+      if (segment.rule.deniedOperations.includes("read") && !isRoleAllowed(currentRole, roleLevel, segment.rule.allowedRoles, roles)) {
+        segments.push({ start: segment.start, end: segment.end })
+      }
+    }
+  }
+
+  return segments
+}
+
+/**
+ * Get the level for a given role name.
+ */
+function getRoleLevel(roleName: string, roles: SecuritySchema.Role[]): number {
+  const role = roles.find((r) => r.name === roleName)
+  return role?.level ?? 0
+}
+
+/**
+ * Check if a role is allowed based on role hierarchy.
+ * Higher level roles can access content allowed for lower levels.
+ */
+function isRoleAllowed(
+  roleName: string,
+  roleLevel: number,
+  allowedRoles: string[],
+  allRoles: SecuritySchema.Role[],
+): boolean {
+  // Direct match
+  if (allowedRoles.includes(roleName)) {
+    return true
+  }
+
+  // Check role hierarchy - higher level roles can access lower level content
+  for (const allowedRoleName of allowedRoles) {
+    const allowedRoleLevel = getRoleLevel(allowedRoleName, allRoles)
+    if (roleLevel > allowedRoleLevel) {
+      return true
+    }
+  }
+
+  return false
 }
