@@ -2,6 +2,7 @@ import { minimatch } from "minimatch"
 import { SecuritySchema } from "./schema"
 import { SecurityConfig } from "./config"
 import { Log } from "../util/log"
+import path from "path"
 
 export namespace SecurityAccess {
   const log = Log.create({ service: "security-access" })
@@ -11,9 +12,68 @@ export namespace SecurityAccess {
     reason?: string
   }
 
+  export interface InheritedRule {
+    rule: SecuritySchema.Rule
+    matchType: "direct" | "inherited"
+    inheritedFrom?: string
+  }
+
+  /**
+   * Get the inheritance chain of applicable rules for a path.
+   * Returns rules that apply directly or are inherited from parent directories.
+   */
+  export function getInheritanceChain(filePath: string): InheritedRule[] {
+    const config = SecurityConfig.getSecurityConfig()
+
+    if (!config.rules || config.rules.length === 0) {
+      return []
+    }
+
+    const inheritedRules: InheritedRule[] = []
+    const normalizedPath = filePath.replace(/\\/g, "/")
+
+    // Get all parent paths from root to the file
+    const parentPaths = getParentPaths(normalizedPath)
+
+    // Check each rule against all parent paths and the file itself
+    for (const rule of config.rules) {
+      const normalizedPattern = rule.pattern.replace(/\\/g, "/")
+
+      // Check for direct match on the file path
+      if (matchPath(normalizedPath, normalizedPattern, rule.type)) {
+        inheritedRules.push({
+          rule,
+          matchType: "direct",
+        })
+        continue
+      }
+
+      // Check for inherited match from parent directories (directory rules only)
+      if (rule.type === "directory") {
+        for (const parentPath of parentPaths) {
+          if (matchDirectoryPattern(parentPath, normalizedPattern)) {
+            inheritedRules.push({
+              rule,
+              matchType: "inherited",
+              inheritedFrom: parentPath,
+            })
+            break // Only add once per rule
+          }
+        }
+      }
+    }
+
+    return inheritedRules
+  }
+
   /**
    * Check if access is allowed for a given path, operation, and role.
-   * Uses glob pattern matching and respects role hierarchy.
+   * Uses glob pattern matching, respects role hierarchy, and applies rule inheritance.
+   *
+   * Inheritance rules:
+   * - Child paths inherit parent directory protection rules
+   * - More restrictive child rules take precedence over inherited rules
+   * - Less restrictive child rules do NOT override parent restrictions
    */
   export function checkAccess(
     filePath: string,
@@ -29,15 +89,16 @@ export namespace SecurityAccess {
     const roles = config.roles || []
     const roleLevel = getRoleLevel(role, roles)
 
-    // Find all matching rules for this path
-    const matchingRules = config.rules.filter((rule) => matchPath(filePath, rule.pattern, rule.type))
+    // Get all applicable rules including inherited ones
+    const inheritedRules = getInheritanceChain(filePath)
 
-    if (matchingRules.length === 0) {
+    if (inheritedRules.length === 0) {
       return { allowed: true }
     }
 
-    // Check each matching rule
-    for (const rule of matchingRules) {
+    // Check each applicable rule (both direct and inherited)
+    // Parent restrictions cannot be overridden by child rules, so we check all
+    for (const { rule, matchType, inheritedFrom } of inheritedRules) {
       // Check if this operation is denied by this rule
       if (!rule.deniedOperations.includes(operation)) {
         continue
@@ -48,14 +109,48 @@ export namespace SecurityAccess {
         continue
       }
 
-      log.debug("access denied", { path: filePath, operation, role, rule: rule.pattern })
+      const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
+      log.debug("access denied", { path: filePath, operation, role, rule: rule.pattern, matchType, inheritedFrom })
       return {
         allowed: false,
-        reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'. Allowed roles: ${rule.allowedRoles.join(", ")}`,
+        reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
       }
     }
 
     return { allowed: true }
+  }
+
+  /**
+   * Get all parent directory paths from root to the given path
+   */
+  function getParentPaths(filePath: string): string[] {
+    const parts = filePath.split("/").filter(Boolean)
+    const parents: string[] = []
+
+    let current = ""
+    for (let i = 0; i < parts.length - 1; i++) {
+      current = current + "/" + parts[i]
+      parents.push(current)
+    }
+
+    return parents
+  }
+
+  /**
+   * Check if a path matches a directory pattern (for inheritance checking)
+   */
+  function matchDirectoryPattern(dirPath: string, pattern: string): boolean {
+    // Normalize both paths
+    const normalizedDir = dirPath.endsWith("/") ? dirPath.slice(0, -1) : dirPath
+    const normalizedPattern = pattern.endsWith("/") ? pattern.slice(0, -1) : pattern
+
+    // Direct match
+    if (normalizedDir === normalizedPattern) {
+      return true
+    }
+
+    // Glob match
+    return minimatch(normalizedDir, normalizedPattern, { matchBase: true })
   }
 
   /**
