@@ -8,7 +8,6 @@ import { getActiveSandbox } from "../sandbox"
 >>>>>>> 1a0f0d327 (feat: US-004 - Enforce allowlist in checkAccess with evaluation order and audit logging)
 import { Log } from "../util/log"
 import path from "path"
-import fs from "fs"
 
 export namespace SecurityAccess {
   const log = Log.create({ service: "security-access" })
@@ -53,6 +52,59 @@ export namespace SecurityAccess {
   /**
    * Get the inheritance chain of applicable rules for a path.
    * Returns rules that apply directly or are inherited from parent directories.
+   */
+  export function getInheritanceChain(filePath: string): InheritedRule[] {
+    const config = SecurityConfig.getSecurityConfig()
+
+    if (!config.rules || config.rules.length === 0) {
+      return []
+    }
+
+    const inheritedRules: InheritedRule[] = []
+    const normalizedPath = filePath.replace(/\\/g, "/")
+
+    // Get all parent paths from root to the file
+    const parentPaths = getParentPaths(normalizedPath)
+
+    // Check each rule against all parent paths and the file itself
+    for (const rule of config.rules) {
+      const normalizedPattern = rule.pattern.replace(/\\/g, "/")
+
+      // Check for direct match on the file path
+      if (matchPath(normalizedPath, normalizedPattern, rule.type)) {
+        inheritedRules.push({
+          rule,
+          matchType: "direct",
+        })
+        continue
+      }
+
+      // Check for inherited match from parent directories (directory rules only)
+      if (rule.type === "directory") {
+        for (const parentPath of parentPaths) {
+          if (matchDirectoryPattern(parentPath, normalizedPattern)) {
+            inheritedRules.push({
+              rule,
+              matchType: "inherited",
+              inheritedFrom: parentPath,
+            })
+            break // Only add once per rule
+          }
+        }
+      }
+    }
+
+    return inheritedRules
+  }
+
+  /**
+   * Check if access is allowed for a given path, operation, and role.
+   * Uses glob pattern matching, respects role hierarchy, and applies rule inheritance.
+   *
+   * Inheritance rules:
+   * - Child paths inherit parent directory protection rules
+   * - More restrictive child rules take precedence over inherited rules
+   * - Less restrictive child rules do NOT override parent restrictions
    */
   export function getInheritanceChain(filePath: string): InheritedRule[] {
     const config = SecurityConfig.getSecurityConfig()
@@ -159,119 +211,30 @@ export namespace SecurityAccess {
     const roles = config.roles || []
     const roleLevel = getRoleLevel(role, roles)
 
-=======
->>>>>>> 1a0f0d327 (feat: US-004 - Enforce allowlist in checkAccess with evaluation order and audit logging)
-    // Resolve symbolic links before checking access
-    const resolved = resolveSymlink(filePath)
-    const pathToCheck = resolved?.realPath ?? filePath
-    const isSymlink = resolved?.isSymlink ?? false
+    // Get all applicable rules including inherited ones
+    const inheritedRules = getInheritanceChain(filePath)
 
-    // Normalize to relative paths for pattern matching against rules/allowlist
-    const relativePathToCheck = normalizePath(pathToCheck)
-    const relativeFilePath = normalizePath(filePath)
+    if (inheritedRules.length === 0) {
+      return { allowed: true }
+    }
 
-    // 1. Check deny rules first — deny always wins
-    if (config.rules && config.rules.length > 0) {
-      const roles = config.roles || []
-      const roleLevel = getRoleLevel(role, roles)
-
-      // If path is a symlink, check both the symlink path and the target path
-      // Access is denied if either the symlink itself or its target is protected
-      const pathsToCheck = isSymlink ? [relativeFilePath, relativePathToCheck] : [relativePathToCheck]
-
-      for (const checkPath of pathsToCheck) {
-        const isTargetPath = isSymlink && checkPath === relativePathToCheck && checkPath !== relativeFilePath
-
-        // Get all applicable rules including inherited ones
-        const inheritedRules = getInheritanceChain(checkPath)
-
-        if (inheritedRules.length === 0) {
-          continue
-        }
-
-        // Check each applicable rule (both direct and inherited)
-        // Parent restrictions cannot be overridden by child rules, so we check all
-        for (const { rule, matchType, inheritedFrom } of inheritedRules) {
-          // Check if this operation is denied by this rule
-          if (!rule.deniedOperations.includes(operation)) {
-            continue
-          }
-
-          // Check if the user's role is allowed
-          if (isRoleAllowed(role, roleLevel, rule.allowedRoles, roles)) {
-            continue
-          }
-
-          const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
-          const symlinkInfo = isTargetPath ? " (symlink target is protected)" : ""
-
-          log.debug("access denied", {
-            path: filePath,
-            relativePath: relativeFilePath,
-            operation,
-            role,
-            rule: rule.pattern,
-            matchType,
-            inheritedFrom,
-            isSymlink,
-            targetPath: isTargetPath ? pathToCheck : undefined,
-          })
-
-          return {
-            allowed: false,
-            reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}${symlinkInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
-          }
-        }
+    // Check each applicable rule (both direct and inherited)
+    // Parent restrictions cannot be overridden by child rules, so we check all
+    for (const { rule, matchType, inheritedFrom } of inheritedRules) {
+      // Check if this operation is denied by this rule
+      if (!rule.deniedOperations.includes(operation)) {
+        continue
       }
-    }
-
-    // 2. Allowlist applies to 'llm' AND 'read' operations
-    // This ensures LLM tools (Read, Glob, Grep) cannot access files outside the allowlist
-    if (operation !== "llm" && operation !== "read") {
-      return { allowed: true }
-    }
-
-    // 3. If no allowlist configured, all files are accessible
-    if (config.resolvedAllowlist.length === 0) {
-      return { allowed: true }
-    }
 
     // 4. Check file against every allowlist layer (AND across layers, OR within entries)
     // Use normalized relative path for allowlist matching
     const normalizedPath = relativePathToCheck.replace(/\\/g, "/")
 
-    for (const layer of config.resolvedAllowlist) {
-      const matched = layer.entries.some((entry) => {
-        const normalizedPattern = normalizePath(entry.pattern).replace(/\\/g, "/")
-        return matchPath(normalizedPath, normalizedPattern, entry.type)
-      })
-
-      if (!matched) {
-        const displayPath = relativeFilePath || filePath
-        const reason =
-          `Access denied: file '${displayPath}' is not in the allowlist defined in '${layer.source}'. ` +
-          `Add a matching entry to the allowlist, e.g.: { "pattern": "${path.dirname(displayPath).replace(/\\/g, "/")}/**", "type": "directory" }`
-
-        log.debug("access denied by allowlist", {
-          path: filePath,
-          relativePath: relativeFilePath,
-          operation,
-          role,
-          layer: layer.source,
-        })
-
-        SecurityAudit.logSecurityEvent({
-          path: filePath,
-          operation,
-          role,
-          allowed: false,
-          reason: `Allowlist denial: file not matched by layer '${layer.source}'`,
-        })
-
-        return {
-          allowed: false,
-          reason,
-        }
+      const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
+      log.debug("access denied", { path: filePath, operation, role, rule: rule.pattern, matchType, inheritedFrom })
+      return {
+        allowed: false,
+        reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
       }
     }
 
@@ -302,6 +265,39 @@ export namespace SecurityAccess {
       }
       return { layer, matched: false }
     })
+  }
+
+  /**
+   * Get all parent directory paths from root to the given path
+   */
+  function getParentPaths(filePath: string): string[] {
+    const parts = filePath.split("/").filter(Boolean)
+    const parents: string[] = []
+
+    let current = ""
+    for (let i = 0; i < parts.length - 1; i++) {
+      current = current + "/" + parts[i]
+      parents.push(current)
+    }
+
+    return parents
+  }
+
+  /**
+   * Check if a path matches a directory pattern (for inheritance checking)
+   */
+  function matchDirectoryPattern(dirPath: string, pattern: string): boolean {
+    // Normalize both paths
+    const normalizedDir = dirPath.endsWith("/") ? dirPath.slice(0, -1) : dirPath
+    const normalizedPattern = pattern.endsWith("/") ? pattern.slice(0, -1) : pattern
+
+    // Direct match
+    if (normalizedDir === normalizedPattern) {
+      return true
+    }
+
+    // Glob match
+    return minimatch(normalizedDir, normalizedPattern, { matchBase: true })
   }
 
   /**
