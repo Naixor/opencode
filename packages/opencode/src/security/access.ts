@@ -3,6 +3,7 @@ import { SecuritySchema } from "./schema"
 import { SecurityConfig } from "./config"
 import { Log } from "../util/log"
 import path from "path"
+import fs from "fs"
 
 export namespace SecurityAccess {
   const log = Log.create({ service: "security-access" })
@@ -67,8 +68,38 @@ export namespace SecurityAccess {
   }
 
   /**
+   * Resolve a path, following symbolic links to get the real path.
+   * Handles chains of symlinks by fully resolving to the final target.
+   * Returns null if the path doesn't exist or can't be resolved.
+   */
+  export function resolveSymlink(filePath: string): { realPath: string; isSymlink: boolean } | null {
+    const normalizedPath = filePath.replace(/\\/g, "/")
+
+    // Check if file exists using lstat (doesn't follow symlinks)
+    const lstatResult = fs.lstatSync(normalizedPath, { throwIfNoEntry: false })
+    if (!lstatResult) {
+      return null
+    }
+
+    const isSymlink = lstatResult.isSymbolicLink()
+
+    if (!isSymlink) {
+      return { realPath: normalizedPath, isSymlink: false }
+    }
+
+    // Resolve symlink to its real path (follows all chains)
+    const realPathResult = fs.realpathSync(normalizedPath, { encoding: "utf8" })
+    return { realPath: realPathResult.replace(/\\/g, "/"), isSymlink: true }
+  }
+
+  /**
    * Check if access is allowed for a given path, operation, and role.
    * Uses glob pattern matching, respects role hierarchy, and applies rule inheritance.
+   *
+   * Symbolic link handling:
+   * - Resolves symbolic links to their targets before checking access rules
+   * - If symlink target is protected, denies access to the symlink
+   * - Handles chains of symlinks (resolves fully before checking)
    *
    * Inheritance rules:
    * - Child paths inherit parent directory protection rules
@@ -89,31 +120,56 @@ export namespace SecurityAccess {
     const roles = config.roles || []
     const roleLevel = getRoleLevel(role, roles)
 
-    // Get all applicable rules including inherited ones
-    const inheritedRules = getInheritanceChain(filePath)
+    // Resolve symbolic links before checking access
+    const resolved = resolveSymlink(filePath)
+    const pathToCheck = resolved?.realPath ?? filePath
+    const isSymlink = resolved?.isSymlink ?? false
 
-    if (inheritedRules.length === 0) {
-      return { allowed: true }
-    }
+    // If path is a symlink, check both the symlink path and the target path
+    // Access is denied if either the symlink itself or its target is protected
+    const pathsToCheck = isSymlink ? [filePath, pathToCheck] : [pathToCheck]
 
-    // Check each applicable rule (both direct and inherited)
-    // Parent restrictions cannot be overridden by child rules, so we check all
-    for (const { rule, matchType, inheritedFrom } of inheritedRules) {
-      // Check if this operation is denied by this rule
-      if (!rule.deniedOperations.includes(operation)) {
+    for (const checkPath of pathsToCheck) {
+      const isTargetPath = isSymlink && checkPath === pathToCheck && checkPath !== filePath
+
+      // Get all applicable rules including inherited ones
+      const inheritedRules = getInheritanceChain(checkPath)
+
+      if (inheritedRules.length === 0) {
         continue
       }
 
-      // Check if the user's role is allowed
-      if (isRoleAllowed(role, roleLevel, rule.allowedRoles, roles)) {
-        continue
-      }
+      // Check each applicable rule (both direct and inherited)
+      // Parent restrictions cannot be overridden by child rules, so we check all
+      for (const { rule, matchType, inheritedFrom } of inheritedRules) {
+        // Check if this operation is denied by this rule
+        if (!rule.deniedOperations.includes(operation)) {
+          continue
+        }
 
-      const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
-      log.debug("access denied", { path: filePath, operation, role, rule: rule.pattern, matchType, inheritedFrom })
-      return {
-        allowed: false,
-        reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
+        // Check if the user's role is allowed
+        if (isRoleAllowed(role, roleLevel, rule.allowedRoles, roles)) {
+          continue
+        }
+
+        const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
+        const symlinkInfo = isTargetPath ? " (symlink target is protected)" : ""
+
+        log.debug("access denied", {
+          path: filePath,
+          operation,
+          role,
+          rule: rule.pattern,
+          matchType,
+          inheritedFrom,
+          isSymlink,
+          targetPath: isTargetPath ? pathToCheck : undefined,
+        })
+
+        return {
+          allowed: false,
+          reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}${symlinkInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
+        }
       }
     }
 
