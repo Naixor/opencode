@@ -212,3 +212,17 @@
   - The Bash tool (src/tool/bash.ts) already uses tree-sitter for command parsing and path extraction for a different purpose (directory permission checks)
 ---
 
+## 2026-02-05 - US-016
+- What was implemented: Integrated security access control with the Bash tool to block commands that would access protected files
+- Files changed:
+  - packages/opencode/src/tool/bash.ts (modified)
+- **Learnings for future iterations:**
+  - The Bash tool uses BashScanner.scanBashCommand() to detect file paths before executing the command
+  - Security check happens BEFORE tree-sitter parsing and permission checks for early rejection
+  - Both read and write access are checked for each scanned path (read first, then write if read passes)
+  - When access is denied, each denied path is logged via SecurityAudit.logSecurityEvent() individually
+  - Error message includes all denied paths and their reasons for clear user feedback
+  - The cwd parameter from workdir or Instance.directory is passed to BashScanner for relative path resolution
+  - Security log uses "security-bash" service name following the tool-specific naming pattern
+---
+

@@ -17,11 +17,17 @@ import { Shell } from "@/shell/shell"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
 import { Plugin } from "@/plugin"
+import { BashScanner } from "../security/bash-scanner"
+import { SecurityAccess } from "../security/access"
+import { SecurityConfig } from "../security/config"
+import { SecuritySchema } from "../security/schema"
+import { SecurityAudit } from "../security/audit"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 
 export const log = Log.create({ service: "bash-tool" })
+const securityLog = Log.create({ service: "security-bash" })
 
 const resolveWasm = (asset: string) => {
   if (asset.startsWith("file://")) return fileURLToPath(asset)
@@ -81,6 +87,57 @@ export const BashTool = Tool.define("bash", async () => {
         throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
       }
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
+      // Security access control: scan command for protected file accesses
+      const securityConfig = SecurityConfig.getSecurityConfig()
+      const currentRole = getDefaultRole(securityConfig)
+      const scannedPaths = BashScanner.scanBashCommand(params.command, cwd)
+
+      if (scannedPaths.length > 0) {
+        const deniedPaths: Array<{ path: string; operation: SecuritySchema.Operation; reason: string }> = []
+
+        for (const scannedPath of scannedPaths) {
+          // Check both read and write operations - use "read" as default since most commands read files
+          const readResult = SecurityAccess.checkAccess(scannedPath, "read", currentRole)
+          if (!readResult.allowed) {
+            deniedPaths.push({ path: scannedPath, operation: "read", reason: readResult.reason ?? "" })
+            continue
+          }
+
+          // Also check write for commands that modify files (sed -i, etc.)
+          const writeResult = SecurityAccess.checkAccess(scannedPath, "write", currentRole)
+          if (!writeResult.allowed) {
+            deniedPaths.push({ path: scannedPath, operation: "write", reason: writeResult.reason ?? "" })
+          }
+        }
+
+        if (deniedPaths.length > 0) {
+          for (const denied of deniedPaths) {
+            SecurityAudit.logSecurityEvent({
+              role: currentRole,
+              operation: denied.operation,
+              path: denied.path,
+              allowed: false,
+              reason: denied.reason,
+              content: params.command,
+            })
+          }
+
+          securityLog.info("bash command blocked due to protected file access", {
+            command: params.command,
+            blockedPaths: deniedPaths.map((d) => d.path),
+          })
+
+          const reasons = deniedPaths.map((d) => `  - ${d.reason}`).join("\n")
+          throw new Error(`Security: Command blocked. The following file accesses are restricted:\n${reasons}`)
+        }
+
+        securityLog.debug("bash security scan passed", {
+          command: params.command,
+          scannedPaths,
+          role: currentRole,
+        })
+      }
+
       const tree = await parser().then((p) => p.parse(params.command))
       if (!tree) {
         throw new Error("Failed to parse command")
@@ -267,3 +324,17 @@ export const BashTool = Tool.define("bash", async () => {
     },
   }
 })
+
+/**
+ * Get the default role from security config.
+ * Returns the lowest level role, or "viewer" if no roles defined.
+ * Note: This is a placeholder until US-027 implements proper role detection.
+ */
+function getDefaultRole(config: SecuritySchema.SecurityConfig): string {
+  const roles = config.roles ?? []
+  if (roles.length === 0) {
+    return "viewer"
+  }
+  const lowestRole = roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0])
+  return lowestRole.name
+}
