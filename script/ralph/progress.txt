@@ -333,3 +333,17 @@
   - New subcommands only need to be added to security/index.ts builder chain (already registered in src/index.ts)
 ---
 
+## 2026-02-05 - US-023
+- What was implemented: Created security CLI init command that generates a template `.opencode-security.json` file
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/init.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityInitCommand)
+- **Learnings for future iterations:**
+  - The init command uses a static TEMPLATE object for the default config, serialized with JSON.stringify(template, null, 2)
+  - Use fs.existsSync() to check if file already exists before writing (fail with error, don't overwrite)
+  - Use fs.writeFileSync() for simple file creation (no need for bootstrap or Bun.file() since this is a standalone CLI operation)
+  - The template includes common sensitive path patterns: .env*, secrets/, credentials.*, *.pem
+  - process.exitCode = 1 is preferred over process.exit(1) to allow cleanup
+  - New subcommands only need to be added to security/index.ts builder chain (already registered in src/index.ts)
+---
+
