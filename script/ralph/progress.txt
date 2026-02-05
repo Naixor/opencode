@@ -360,3 +360,18 @@
   - Default log path and entry format match SecurityAudit module's AuditLogEntry interface
 ---
 
+## 2026-02-05 - US-025
+- What was implemented: Added security status indicator to the TUI session header showing the current role when security config is active
+- Files changed:
+  - packages/opencode/src/cli/cmd/tui/routes/session/header.tsx (modified - added SecurityIndicator component)
+- **Learnings for future iterations:**
+  - TUI header is in packages/opencode/src/cli/cmd/tui/routes/session/header.tsx
+  - Header has two layouts: standard (Match when={true}) and subagent (Match when={session()?.parentID})
+  - Both layouts have a right-side info box with ContextInfo and version - security indicator goes before these
+  - SecurityConfig.getSecurityConfig() is synchronous and returns the cached config (loaded during bootstrap)
+  - The SecurityIndicator component checks for active rules/segments and only renders when security is configured
+  - Uses theme.textMuted for subtle styling consistent with version and context info
+  - The indicator format is `[secured: roleName]` for clear but non-intrusive display
+  - OpenTUI uses `<text>` for text elements and `<box>` for layout containers with flexbox properties
+---
+
