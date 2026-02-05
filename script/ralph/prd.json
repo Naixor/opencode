@@ -138,8 +138,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 8 CASE-READ test cases passing (21 tests total). Covers file-level access denial, segment redaction with REDACTED placeholder, offset/limit interaction with redaction, image/PDF code path (file-level check runs first), premature end marker injection, string literal false positives, Unicode lookalike markers, and stack-based nested marker handling. Key findings: [MEDIUM] premature @secure-end truncates protection, [MEDIUM] unmatched @secure-start = no protection, [INFO] markers in string literals are detected (over-protection), [INFO] images/PDFs skip segment redaction."
     },
     {
       "id": "US-008",
