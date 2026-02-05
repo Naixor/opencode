@@ -118,8 +118,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 10 CASE-PATH test cases passing (19 tests total). Covers path traversal with ../, URL encoding, null bytes, symlink resolution, symlink chains, directory symlinks, circular symlinks, case sensitivity, Unicode normalization, and absolute vs relative path matching. Key findings: [HIGH] ../ traversal bypasses minimatch (no path normalization), [HIGH] symlink resolution returns absolute paths that don't match relative rules, [MEDIUM] null bytes cause unhandled TypeError, [MEDIUM] directory symlinks may bypass, [INFO] case-sensitive matching on case-insensitive FS, [LOW] Unicode NFC/NFD mismatch."
     },
     {
       "id": "US-007",

@@ -21,6 +21,12 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - Role matching is case-sensitive: `"Admin" !== "admin"` — `isKnownRole()` uses exact string match
 - `SecurityRole.resetCache()` must be called in afterEach when testing getCurrentRole
 - `isRoleAllowed()` uses `roleLevel > allowedRoleLevel` (strict greater-than) for hierarchy — so a role at the same level as an allowed role is NOT permitted via hierarchy, only via direct name match
+- **Path checking**: `checkAccess()` does NOT normalize `../` in paths — minimatch treats them literally. Tools must call `path.normalize()` before `checkAccess()`.
+- **Symlinks**: `resolveSymlink()` uses `fs.realpathSync()` which returns absolute canonical paths (e.g., `/private/var/...` on macOS). Relative glob patterns like `secrets/**` won't match absolute resolved paths — use absolute patterns for symlink protection.
+- **macOS temp dirs**: `os.tmpdir()` returns `/var/folders/...` but `fs.realpathSync()` returns `/private/var/folders/...`. When creating absolute rule patterns for temp dirs, always use `fs.realpathSync()` on the dir first.
+- **Null bytes**: Paths with `\x00` cause `TypeError` from `fs.lstatSync` — not caught by `resolveSymlink()`. The error prevents bypass but is not a clean security denial.
+- **Circular symlinks**: `resolveSymlink()` throws `ELOOP` error — not caught. Does not hang (OS kernel limit prevents infinite loop).
+- **Case sensitivity**: `minimatch` is case-sensitive by default. On macOS case-insensitive FS, `SECRETS/key.pem` bypasses `secrets/**` rule.
 ---
 
 ## 2026-02-05 - US-001
@@ -73,4 +79,22 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - `Number.MAX_SAFE_INTEGER` works correctly with JS comparison operators — no overflow issues.
   - Need `SecurityRole.resetCache()` in `afterEach` when testing `getCurrentRole` — cache persists across tests otherwise.
   - Local `signJWT` helper needed in test file since helpers.ts doesn't export it — needed for custom payloads (no exp, custom jti, etc.).
+---
+
+## 2026-02-05 - US-006
+- Implemented CASE-PATH-001 through CASE-PATH-010 path traversal and symlink attack test cases
+- 19 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/path-traversal.test.ts (new)
+- **Learnings for future iterations:**
+  - [HIGH] `checkAccess()` does NOT normalize `../` segments — `public/../secrets/key.pem` bypasses `secrets/**` rule because minimatch treats `..` literally. Tools must normalize paths before calling checkAccess.
+  - [HIGH] Symlink resolution via `realpathSync` returns absolute paths (e.g., `/private/var/.../secrets/key.pem`) which won't match relative rules like `secrets/**`. Symlink attacks bypass relative pattern rules.
+  - [MEDIUM] Null bytes in paths cause unhandled `TypeError` from `fs.lstatSync` — prevents bypass but crashes instead of clean denial.
+  - [MEDIUM] Directory symlinks: accessing `symlink-to-secrets/data.txt` may not be caught if `realpathSync` result doesn't match the protection pattern.
+  - [INFO] Case sensitivity: `minimatch` is case-sensitive. `SECRETS/key.pem` is NOT matched by `secrets/**`. On macOS case-insensitive FS, this is a bypass vector.
+  - [LOW] Unicode NFC vs NFD: NFC pattern does not match NFD path (macOS uses NFD for filesystem). Minor bypass vector for non-ASCII rule patterns.
+  - [INFO] Absolute paths like `/project/secrets/key.pem` don't match relative rules like `secrets/**`. Tools should always pass relative paths.
+  - macOS `os.tmpdir()` returns `/var/...` but `realpathSync` returns `/private/var/...` — always canonicalize temp dir paths with `fs.realpathSync()` when using them in absolute rule patterns.
+  - URL-encoded paths (`%2F`, `%2e%2e`) are treated as literal strings — correct behavior since filesystem doesn't decode URLs. The risk is if tools decode URLs before calling checkAccess.
+  - Circular symlinks throw `ELOOP` from `realpathSync` — error is not caught by `resolveSymlink()` but prevents hanging (OS kernel imposes limit).
 ---
