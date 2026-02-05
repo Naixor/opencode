@@ -286,4 +286,28 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - Single wildcard `src/*/private/**` matches exactly one directory level between `src/` and `private/` — `src/a/b/private/secret.ts` (two levels) is NOT matched.
   - Character class `[!.]env` matches exactly one non-dot character followed by "env" — 4-char strings only. `.env` correctly not matched, `myenv` (5 chars) also not matched.
   - Complementary glob patterns from merged configs are additive: `**/*.pem` from configA + `**/*.key` from configB both active after merge.
+- **Audit logging**: `SecurityAudit.logSecurityEvent()` uses async `fs.appendFile` — non-blocking, errors logged as warnings but never crash security enforcement.
+- **Audit log path**: `getLogPath()` reads from `config.logging.path`, defaults to `.opencode-security-audit.log`. No validation for symlinks, writability, or existence before write.
+- **Content hashing**: `hashContent()` uses `crypto.createHash("sha256")` truncated to 16 hex chars. `createContentSummary()` includes a hash + truncated preview (up to 50 chars of raw content).
+- **Log format**: NDJSON (one JSON object per line via `JSON.stringify(entry) + "\n"`). `JSON.stringify` escapes newlines and control characters in string values, preventing log injection via malicious paths or reasons.
+- **Audit log self-protection**: Neither `.opencode-security-audit.log` nor `.opencode-security.json` are protected by default security rules. Both read and write are allowed for any role.
+---
+
+## 2026-02-05 - US-016
+- Implemented CASE-RACE-001 through CASE-RACE-003 race condition test cases and CASE-LOG-001 through CASE-LOG-006 audit evasion test cases
+- 32 tests total across 2 files (7 race-condition + 25 audit-evasion), all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/race-condition.test.ts (new)
+  - packages/opencode/test/security/access_control_cases/unit/audit-evasion.test.ts (new)
+- **Learnings for future iterations:**
+  - [INFO] TOCTOU timing window: Config is loaded once via `loadSecurityConfig()` and cached in `currentConfig`. File changes after load have NO effect on security checks. The window exists only at load time — an attacker who modifies the config file before load could inject permissive rules.
+  - [INFO] Config cache: `getSecurityConfig()` returns the in-memory `currentConfig`. Even deleting the config file after load doesn't remove protection. Only an explicit `loadSecurityConfig()` call refreshes the cache.
+  - [INFO] Symlink swap timing: `fs.realpathSync()` resolves the symlink once per security check call. No persistent symlink resolution cache, but also no re-verification between check and actual file I/O.
+  - [INFO] Audit resilience: `/dev/null`, non-writable paths, and empty string log paths all handle gracefully — `fs.appendFile` error callback logs a warning but never throws or blocks security enforcement.
+  - [LOW] `createContentSummary()` includes up to 50 chars of raw content in the preview portion alongside the hash. Short secrets (< 50 chars) appear in full in audit log summaries.
+  - [INFO] `JSON.stringify` properly escapes newlines/tabs/null bytes in string values. Malicious paths or reason fields with control characters do not corrupt the NDJSON log format.
+  - [HIGH] `rm`, `rm -f`, `rm -rf`, `unlink`, `shred` are all NOT in BashScanner.FILE_ACCESS_COMMANDS. Audit log deletion is completely invisible to the bash scanner.
+  - [HIGH] `>`, `truncate`, `: >`, `cp /dev/null`, `tee`, `echo >` — all log truncation methods undetected. Shell redirection operators are not parsed by BashScanner.
+  - [MEDIUM] Audit log symlink redirect: `fs.appendFile` follows symlinks by default. An attacker can replace the audit log with a symlink to `/dev/null` (silent discard), another file (corruption), or an attacker-controlled location (data exfiltration of access patterns).
+  - [MEDIUM] Audit log is not self-protected: `checkAccess(".opencode-security-audit.log", "read"|"write", "viewer")` returns `allowed: true`. No default rule protects the audit log.
 ---

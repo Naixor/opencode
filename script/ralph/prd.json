@@ -312,8 +312,8 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 3 CASE-RACE and 6 CASE-LOG test cases passing (32 tests total across 2 files). Covers TOCTOU timing window documentation (config loaded once, cached in memory), config cache persistence after file deletion/modification, symlink swap timing window documentation, audit log path resilience (/dev/null, non-writable, empty), content hashing with sha256 (truncated preview leaks up to 50 chars), control character handling in JSON log format, audit log deletion/truncation via rm/truncate/redirect (all undetected by BashScanner), and symlink redirect attack surface. Key findings: [HIGH] rm/truncate/redirect on audit log not detected by BashScanner, [MEDIUM] audit log not self-protected by default rules, [MEDIUM] symlink redirect silently redirects audit data, [LOW] createContentSummary leaks up to 50 chars of raw content in preview, [INFO] TOCTOU window exists only at load time."
     },
     {
       "id": "US-017",
