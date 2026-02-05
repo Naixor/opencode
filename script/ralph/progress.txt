@@ -347,3 +347,16 @@
   - New subcommands only need to be added to security/index.ts builder chain (already registered in src/index.ts)
 ---
 
+## 2026-02-05 - US-024
+- What was implemented: Created security CLI logs command that displays recent audit log entries with filtering
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/logs.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityLogsCommand)
+- **Learnings for future iterations:**
+  - Use Zod's `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse(line)` pattern for safe JSON parsing without try/catch
+  - Audit log entries are JSON lines (one JSON object per line) in the file at config.logging.path or `.opencode-security-audit.log`
+  - Use `.flatMap()` with empty array return for filtering+mapping in one step (instead of map+filter with null)
+  - The `--tail` flag with alias `-n` follows the unix tail convention for user familiarity
+  - Default log path and entry format match SecurityAudit module's AuditLogEntry interface
+---
+
