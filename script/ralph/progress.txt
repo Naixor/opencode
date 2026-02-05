@@ -1,45 +1,36 @@
 # Ralph Progress Log
-# Feature: Security Access Control Bypass Test Cases
-# Branch: ralph/security-bypass-cases
-# Started:
-# ============================================
+Started: Thu  5 Feb 2026 17:57:58 CST
 
 ## Codebase Patterns
-- Use namespace pattern for modules (e.g., `export namespace SecuritySchema { ... }`)
-- Use Zod for schema validation with `z` import from "zod"
-- Follow code style: no try/catch (use .catch()), no any types, no else statements, prefer const
-- Run typecheck with `~/.bun/bin/bun run tsc --noEmit` in packages/opencode directory
-- Use minimatch (already available) for glob pattern matching
-- Use Log.create({ service: "service-name" }) for logging within namespaces
-- SecurityConfig.loadSecurityConfig(projectRoot) loads .opencode-security.json and caches it
-- SecurityConfig.getSecurityConfig() returns cached config (synchronous)
-- SecurityConfig.resetConfig() resets to empty config (useful for test teardown)
-- SecurityAccess.checkAccess(path, operation, role) returns { allowed: boolean, reason?: string }
-- SecurityAccess.getInheritanceChain(path) returns applicable rules with match type info
-- SecurityAccess.resolveSymlink(path) returns { realPath, isSymlink } or null
-- SecuritySegments.findMarkerSegments(content, markers) finds comment-based protected segments
-- SecuritySegments.findASTSegments(filePath, content, astRules) finds AST-based protected segments (TS/JS only)
-- SecurityToken.verifyRoleToken(tokenPath, publicKey, revokedTokens?) verifies JWT tokens
-- SecurityRole.getCurrentRole(projectRoot, config) detects role from token files
-- SecurityRedact.redactContent(content, segments) replaces protected ranges with [REDACTED: Security Protected]
-- BashScanner.scanBashCommand(command, cwd) returns array of file paths the command may access
-- LLMScanner.scanForProtectedContent(content, config) scans for protected patterns in text
-- SecurityConfig.mergeSecurityConfigs(configs) merges nested configs (rules unioned, roles must match)
-- SecurityConfig.getMcpPolicy(serverName) returns "enforced" | "trusted" | "blocked"
-- SecurityAudit.logSecurityEvent(event) writes to audit log with hashed content
-- All security modules are in packages/opencode/src/security/
-- Tool files are in packages/opencode/src/tool/ (read.ts, write.ts, edit.ts, grep.ts, glob.ts, bash.ts)
-- Tools currently use getDefaultRole() placeholder instead of SecurityRole.getCurrentRole() — this is a CRITICAL finding
-- SKILL.md files are loaded via ConfigMarkdown.parse() -> Bun.file().text() WITHOUT SecurityAccess.checkAccess() — HIGH severity bypass (skill/skill.ts, config/markdown.ts)
-- Instruction files (CLAUDE.md, AGENTS.md, CONTEXT.md) are loaded via Bun.file().text() in session/instruction.ts WITHOUT security checks — HIGH severity bypass
-- Subagents spawned via Task tool DO inherit security-wrapped tools (task.ts creates proper session with tool resolution)
-- The LLM scanner middleware in session/llm.ts is the second line of defense — it may catch protected content loaded from instruction/skill files
-- macOS fs_usage (requires sudo) captures ALL filesystem syscalls including reads: `sudo fs_usage -f filesystem -w -p <pid>`
-- macOS opensnoop and dtrace also available at /usr/bin/opensnoop and /usr/sbin/dtrace (both require root)
-- fs.watch() on macOS uses kqueue — only detects write/create/delete/rename, NOT reads
-- FSEvents (watchdog) also cannot detect reads — only modify/create/delete events
-- access-guard dual mode: privileged (fs_usage, captures reads) and unprivileged (kqueue, write-only fallback)
-- Auto-detect sudo availability: spawn `sudo -n true` and check exit code 0
-
+- Security modules are in `packages/opencode/src/security/` — config.ts, access.ts, role.ts, token.ts, segments.ts, redact.ts, audit.ts, bash-scanner.ts, llm-scanner.ts
+- Security config schema in `schema.ts` uses Zod with namespace `SecuritySchema`
+- Tool implementations with security checks: `packages/opencode/src/tool/{read,write,edit,grep,glob,bash}.ts`
+- Root `.gitignore` includes `.env` — test fixture `.env` files must be `git add -f` to track
+- All tools use `getDefaultRole(config)` which returns the lowest role — `SecurityRole.getCurrentRole()` exists but is not integrated into tools
+- Typecheck: `bun turbo typecheck`; Tests: `bun test --cwd packages/opencode`
+- Test files go in `packages/opencode/test/security/access_control_cases/`
+- Config validation: `SecuritySchema.securityConfigSchema.parse()`
+- Path matching uses `minimatch` library; symlinks resolved via `fs.realpathSync()`
 ---
 
+## 2026-02-05 - US-001
+- Created directory structure: access_control_cases/{fixtures,unit,integration,report}
+- Created base-security-config.json with roles, rules, segments, logging, auth, MCP policies
+- Created protected-files fixtures: secrets/key.pem, .env, .env.production, marked-code.ts, ast-code.ts, mixed-code.ts
+- Added report/ to .gitignore
+- Typecheck passes
+- Files changed:
+  - .gitignore (added report/ ignore)
+  - packages/opencode/test/security/access_control_cases/fixtures/base-security-config.json (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/secrets/key.pem (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/.env (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/.env.production (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/marked-code.ts (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/ast-code.ts (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/mixed-code.ts (new)
+- **Learnings for future iterations:**
+  - Root .gitignore has `.env` which catches ALL .env files — must `git add -f` for test fixture .env files
+  - SecuritySchema.Authentication requires `revokedTokens` as required array (not optional) — include `[]` in fixtures
+  - ast-code.ts functions: encryptData, decryptPayload, signToken, verifySignature (matching pattern `encrypt|decrypt|sign|verify`)
+  - mixed-code.ts has both marker regions and AST-matching functions for overlapping protection tests
+---

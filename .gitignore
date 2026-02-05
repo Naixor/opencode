@@ -27,3 +27,6 @@ target
 opencode-dev
 logs/
 *.bun-build
+
+# Security test reports
+packages/opencode/test/security/access_control_cases/report/

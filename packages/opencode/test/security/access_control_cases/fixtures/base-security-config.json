@@ -1,0 +1,65 @@
+{
+  "version": "1.0",
+  "roles": [
+    { "name": "admin", "level": 100 },
+    { "name": "developer", "level": 50 },
+    { "name": "viewer", "level": 10 }
+  ],
+  "rules": [
+    {
+      "pattern": "secrets/**",
+      "type": "directory",
+      "deniedOperations": ["read", "write", "llm"],
+      "allowedRoles": ["admin"]
+    },
+    {
+      "pattern": "**/.env*",
+      "type": "file",
+      "deniedOperations": ["read", "write", "llm"],
+      "allowedRoles": ["admin"]
+    },
+    {
+      "pattern": "src/auth/keys.ts",
+      "type": "file",
+      "deniedOperations": ["read", "write", "llm"],
+      "allowedRoles": ["admin"]
+    }
+  ],
+  "segments": {
+    "markers": [
+      {
+        "start": "@secure-start",
+        "end": "@secure-end",
+        "deniedOperations": ["read", "llm"],
+        "allowedRoles": ["admin", "developer"]
+      }
+    ],
+    "ast": [
+      {
+        "languages": ["typescript", "javascript"],
+        "nodeTypes": ["function", "arrow_function"],
+        "namePattern": "encrypt|decrypt|sign|verify",
+        "deniedOperations": ["read", "llm"],
+        "allowedRoles": ["admin"]
+      }
+    ]
+  },
+  "logging": {
+    "path": ".opencode-security-audit.log",
+    "level": "verbose",
+    "maxSizeMB": 10,
+    "retentionDays": 30
+  },
+  "authentication": {
+    "publicKey": "PLACEHOLDER_PUBLIC_KEY",
+    "revokedTokens": []
+  },
+  "mcp": {
+    "defaultPolicy": "enforced",
+    "servers": {
+      "trusted-server": "trusted",
+      "blocked-server": "blocked",
+      "enforced-server": "enforced"
+    }
+  }
+}

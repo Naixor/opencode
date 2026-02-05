@@ -19,8 +19,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. .env fixtures force-added to git despite root .gitignore."
     },
     {
       "id": "US-002",
