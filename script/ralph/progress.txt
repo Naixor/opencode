@@ -1,79 +1,242 @@
 # Ralph Progress Log
-Started: Sat Feb 14 11:28:47 CST 2026
----
+# Feature: Security Access Control
+# Branch: ralph/security-access-control
+# Started:
+# ============================================
 
 ## Codebase Patterns
-- OpenCode enables Kitty keyboard protocol via `useKittyKeyboard: {}` in `app.tsx:171` (flags: disambiguate + alternateKeys)
-- OpenTUI's `ParsedKey` has fields: name, ctrl, meta, shift, option, super, hyper, capsLock, numLock, source ("raw" | "kitty"), eventType
-- OpenTUI's `KeyBinding` matching uses `getKeyBindingKey()`: `"${name}:${ctrl}:${shift}:${meta}:${super}"` - exact match required
-- In standard terminals, Ctrl+J (0x0A) parses to `{ name: "linefeed" }`, NOT `{ name: "j", ctrl: true }` - the linefeed check in parseKeypress happens before the ctrl+letter check
-- Default key aliases in OpenTUI: only `enter` → `return` and `esc` → `escape`
-- Textarea keybindings flow: config.ts defaults → Keybind.parse() → keybind context → mapTextareaKeybindings() → OpenTUI KeyBinding[]
-- Hardcoded fallback bindings in useTextareaKeybindings: `{ name: "return", action: "submit" }`, `{ name: "return", meta: true, action: "newline" }`, and `{ name: "linefeed", action: "newline" }`
-- Config-driven bindings are appended AFTER hardcoded ones (last-write-wins in OpenTUI's buildKeyBindingsMap)
+- Use namespace pattern for modules (e.g., `export namespace SecuritySchema { ... }`)
+- Use Zod for schema validation with `z` import from "zod"
+- Export both the Zod schema and inferred type (e.g., `export const Foo = z.object({...})` and `export type Foo = z.infer<typeof Foo>`)
+- Follow code style: no try/catch (use .catch()), no any types, no else statements, prefer const
+- Run typecheck with `~/.bun/bin/bun run tsc --noEmit` in packages/opencode directory
+- Use minimatch (already available) for glob pattern matching
+- Use Log.create({ service: "service-name" }) for logging within namespaces
 
 ---
 
-## 2026-02-14 - US-001
-- Diagnosed terminal Shift+Enter support through source code analysis
-- Created KEYBINDING-DIAGNOSIS.md documenting all findings
+## 2026-02-04 - US-001
+- What was implemented: Created security configuration Zod schema for `.opencode-security.json`
 - Files changed:
-  - packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md (new)
+  - packages/opencode/src/security/schema.ts (created)
 - **Learnings for future iterations:**
-  - OpenTUI's standard keypress parser handles `\n` (0x0A / Ctrl+J) as `name: "linefeed"` BEFORE reaching the ctrl+letter branch, so `ctrl+j` config binding won't match in non-Kitty terminals
-  - OpenTUI's Kitty keyboard parser correctly handles Ctrl+J as `{ name: "j", ctrl: true }` via the CSI u protocol
-  - Shift+Enter works correctly in Kitty-protocol terminals but is indistinguishable from Enter in standard terminals
-  - Alt+Enter is the most reliable modifier+Enter combo across terminal types (works via `\x1b\r` → `{ name: "return", meta: true }`)
-  - The diagnosis was done entirely through source code analysis - no runtime debug logging was needed since OpenTUI's parser source is available in node_modules
+  - The codebase uses namespace pattern extensively (see config/config.ts for examples)
+  - Zod schemas should export both the validator and the inferred type
+  - bun is required but may not be in PATH - use `~/.bun/bin/bun` directly
+  - turbo typecheck may fail due to binary path issues; use `bun run tsc --noEmit` directly in package directory
+  - Use minimatch (already in package.json) for glob pattern matching
 ---
 
-## 2026-02-14 - US-002
-- Verified config-driven keybindings register correctly in OpenTUI
-- Added unit test at packages/opencode/test/tui/textarea-keybindings.test.ts (8 tests)
+## 2026-02-04 - US-002
+- What was implemented: Created configuration loader for `.opencode-security.json`
 - Files changed:
-  - packages/opencode/test/tui/textarea-keybindings.test.ts (new)
+  - packages/opencode/src/security/config.ts (created)
 - **Learnings for future iterations:**
-  - Cannot directly import from textarea-keybindings.ts in tests due to SolidJS/OpenTUI JSX runtime dependency - re-implement pure logic in test instead
-  - mapTextareaKeybindings converts false booleans to undefined (via `|| undefined`) to match OpenTUI's KeyBinding type which uses optional booleans
-  - The config key convention is `input_${action.replace(/-/g, "_")}` - e.g., "move-left" → "input_move_left"
+  - Use Bun.file() API for file operations
+  - Follow fail-open pattern for security config loading (log warning, return empty config)
+  - Use Log.create({ service: "service-name" }) for logging
 ---
 
-## 2026-02-14 - US-003
-- Verified Shift+Enter newline works in Kitty-protocol terminals (no code changes needed)
-- Documented terminal limitation: standard terminals can't distinguish Shift+Enter from Enter
-- Updated KEYBINDING-DIAGNOSIS.md with full end-to-end verification details
+## 2026-02-04 - US-003
+- What was implemented: Created path-based access checker with glob pattern matching and role hierarchy
 - Files changed:
-  - packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md (updated)
+  - packages/opencode/src/security/access.ts (created)
 - **Learnings for future iterations:**
-  - Shift+Enter support is purely a terminal capability question — the keybinding pipeline handles it correctly
-  - OpenTUI textarea natively handles the "newline" action (inserts \n, expands height, moves cursor)
-  - The `maxHeight={6}` on textarea controls the auto-expand limit
-  - When a feature depends on terminal capabilities, verify the pipeline is correct and document the limitation rather than trying to work around it
+  - minimatch from package.json provides glob pattern matching
+  - Role hierarchy: higher level numbers = more access (admin > developer > viewer)
+  - Access checker returns `{ allowed: boolean, reason?: string }` for clear error messages
+  - For directory rules, need to handle both the directory itself and files within it
 ---
 
-## 2026-02-14 - US-004
-- Fixed Ctrl+J to work as universal newline shortcut in all terminal types
-- Added hardcoded `{ name: "linefeed", action: "newline" }` fallback in useTextareaKeybindings()
-- Added test verifying both standard terminal (linefeed) and Kitty terminal (ctrl+j) paths
-- Updated KEYBINDING-DIAGNOSIS.md with fix details and compatibility table
+## 2026-02-04 - US-004
+- What was implemented: Added rule inheritance for subdirectories to security access checker
 - Files changed:
-  - packages/opencode/src/cli/cmd/tui/component/textarea-keybindings.ts (modified - added linefeed fallback)
-  - packages/opencode/test/tui/textarea-keybindings.test.ts (modified - updated for 3 hardcoded fallbacks, added linefeed test)
-  - packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md (updated - replaced Recommendations with fix details)
+  - packages/opencode/src/security/access.ts (modified)
 - **Learnings for future iterations:**
-  - When a key produces different ParsedKey names across terminal types (e.g., Ctrl+J → "linefeed" vs "j"+ctrl), add hardcoded fallbacks for the variant that the config system can't express
-  - Hardcoded fallbacks in useTextareaKeybindings are the simplest fix for terminal compatibility gaps — no OpenTUI changes needed
-  - The linefeed key name has no other bindings in the TUI, so it's safe to unconditionally map to newline
+  - Rule inheritance works by walking up parent directories and checking for matching directory rules
+  - getInheritanceChain() returns both direct matches and inherited rules with metadata
+  - The inheritance model is additive: parent restrictions cannot be removed by child rules
+  - The InheritedRule interface tracks matchType ("direct" | "inherited") and inheritedFrom path
+  - Path operations should normalize slashes with .replace(/\\/g, "/") for cross-platform support
 ---
 
-## 2026-02-14 - US-005
-- Verified user-customizable submit and newline keybindings via config
-- Added 5 new tests to packages/opencode/test/tui/textarea-keybindings.test.ts (total: 14 tests)
+## 2026-02-04 - US-005
+- What was implemented: Added symbolic link resolution to access checker
 - Files changed:
-  - packages/opencode/test/tui/textarea-keybindings.test.ts (modified - added 5 config override tests)
+  - packages/opencode/src/security/access.ts (modified)
 - **Learnings for future iterations:**
-  - Keybind.parse("none") returns [] which causes mapTextareaKeybindings to produce no bindings for that action
-  - The config layer (Zod schema in config.ts) provides defaults before keybinds reach the TUI — mapTextareaKeybindings never sees missing config in practice
-  - Hardcoded fallbacks (return→submit, meta+return→newline, linefeed→newline) always remain regardless of config; they provide baseline functionality
-  - When config sets input_submit to a modified key (e.g. ctrl+return), the hardcoded plain return→submit still exists but gets overridden by last-write-wins only if the key name matches
+  - Use fs.lstatSync with { throwIfNoEntry: false } to check if a file exists without throwing
+  - fs.realpathSync resolves the entire symlink chain automatically
+  - When checking symlinks, check both the symlink path and its target path for security
+  - Add "(symlink target is protected)" to denial messages for clarity
+  - Export resolveSymlink() function for potential reuse in other security modules
 ---
+
+## 2026-02-04 - US-006
+- What was implemented: Created marker-based segment detector for protected code segments
+- Files changed:
+  - packages/opencode/src/security/segments.ts (created)
+- **Learnings for future iterations:**
+  - The findMarkerSegments function uses a stack-based approach to handle nested markers correctly
+  - Common comment styles supported: // (JS/TS/C/C++/Java), # (Python/Ruby/Shell), <!-- --> (HTML/XML), /* */ (C/JS), """ and ''' (Python docstrings)
+  - Regex special characters in marker text are properly escaped with escapeRegExp()
+  - Segments are sorted by start position for consistent output
+  - The MarkerSegment interface has { start: number, end: number, rule: MarkerConfig }
+---
+
+## 2026-02-04 - US-007
+- What was implemented: Added AST-based segment detector for TypeScript/JavaScript using TypeScript compiler API
+- Files changed:
+  - packages/opencode/src/security/segments.ts (modified)
+- **Learnings for future iterations:**
+  - TypeScript is available as a devDependency in the project
+  - Use `import ts from "typescript"` to access the TypeScript compiler API
+  - ts.createSourceFile() parses source code into an AST; it doesn't throw on syntax errors
+  - The findASTSegments function detects: function declarations, arrow functions (variable declarations), class declarations, and class methods (including arrow function properties)
+  - Node types mapped to rule nodeTypes: "function", "arrow_function", "class", "method"
+  - Use ts.forEachChild for AST traversal and node.getStart(sourceFile)/node.getEnd() for positions
+  - Language detection uses file extension; supports ts, tsx, js, jsx, mjs, cjs
+  - The ASTSegment interface has { start: number, end: number, rule: ASTConfig, nodeType: string }
+---
+
+## 2026-02-04 - US-008
+- What was implemented: Created content redaction utility for replacing protected segments with placeholder text
+- Files changed:
+  - packages/opencode/src/security/redact.ts (created)
+- **Learnings for future iterations:**
+  - The redactContent function accepts any segment type with start/end properties (MarkerSegment, ASTSegment, or generic Segment)
+  - Overlapping segments must be merged before redacting to avoid double-processing
+  - Line numbers are preserved by counting newlines in the original text and adding the same number after the placeholder
+  - Processing segments from end to start preserves character indices during replacement
+  - The REDACTED_PLACEHOLDER constant is "[REDACTED: Security Protected]"
+  - The SecurityRedact namespace exports: Segment interface, REDACTED_PLACEHOLDER constant, mergeSegments(), and redactContent()
+---
+
+## 2026-02-04 - US-009
+- What was implemented: Integrated security access control with the Read tool
+- Files changed:
+  - packages/opencode/src/tool/read.ts (modified)
+- **Learnings for future iterations:**
+  - Tool files are in packages/opencode/src/tool/ directory, each tool has its own file (read.ts, write.ts, edit.ts, etc.)
+  - Tools use Tool.define() pattern with description, parameters (Zod schema), and execute function
+  - Security check should happen after file existence check and before reading content
+  - For segment-level protection, read the file first, then find protected segments and apply redaction
+  - Role detection is a placeholder (getDefaultRole) until US-027 implements proper token-based role detection
+  - Helper functions getRoleLevel() and isRoleAllowed() are duplicated from access.ts - consider moving to a shared utility in future
+  - Use Log.create({ service: "security-read" }) for tool-specific security logging
+---
+
+## 2026-02-04 - US-010
+- What was implemented: Integrated security access control with the Write tool
+- Files changed:
+  - packages/opencode/src/tool/write.ts (modified)
+- **Learnings for future iterations:**
+  - Write tool follows the same pattern as Read tool for security integration
+  - Security check should happen early in execute(), after path resolution and before file operations
+  - The getDefaultRole() helper function is duplicated from read.ts - this pattern is repeated across tools until US-027 implements centralized role detection
+  - Write tool only needs file-level protection (no segment-level check needed for write operations)
+  - Import SecurityAccess, SecurityConfig, SecuritySchema, and Log from their respective modules
+  - Use securityLog.debug() to log security check results for debugging
+---
+
+## 2026-02-04 - US-011
+- What was implemented: Integrated security access control with the Edit tool, including both file-level and segment-level protection
+- Files changed:
+  - packages/opencode/src/tool/edit.ts (modified)
+- **Learnings for future iterations:**
+  - Edit tool requires both file-level and segment-level protection checks (unlike Write which only needs file-level)
+  - Segment-level check must happen AFTER reading file content but BEFORE calling replace()
+  - Use findEditRange() to locate where the edit will occur using the same replacer logic as replace()
+  - Check for overlap between edit range and protected segments using simple interval overlap logic
+  - The edit tool uses multiple "replacer" functions to find matches (SimpleReplacer, LineTrimmedReplacer, etc.)
+  - Protected segments check for "write" operation (not "read") in deniedOperations
+  - Error messages should include the protected segment positions to help users understand what's protected
+  - Security log uses "security-edit" service name for tool-specific logging
+---
+
+## 2026-02-04 - US-012
+- What was implemented: Integrated security access control with the Glob tool to filter out protected files from results
+- Files changed:
+  - packages/opencode/src/tool/glob.ts (modified)
+- **Learnings for future iterations:**
+  - Glob tool filters files AFTER collecting results but BEFORE returning them
+  - Use `SecurityAccess.checkAccess(path, "read", currentRole).allowed` to filter files
+  - Log only the count of filtered files, not the paths (for security)
+  - The same getDefaultRole() pattern is used as in other tools (read.ts, write.ts, edit.ts)
+  - Security log service name follows pattern: "security-glob"
+  - The metadata.count should reflect the filtered count (allowedFiles.length), not the original count
+---
+
+## 2026-02-04 - US-013
+- What was implemented: Integrated security access control with the Grep tool to filter protected files and redact protected segments
+- Files changed:
+  - packages/opencode/src/tool/grep.ts (modified)
+- **Learnings for future iterations:**
+  - Grep tool requires both file-level filtering AND segment-level redaction (like Read, but with different output format)
+  - Use caching (fileAccessCache, fileSegmentCache, fileContentCache) to avoid re-checking the same file multiple times
+  - Line position calculation: getLineStartPosition() counts newlines to find where a given line number starts in file content
+  - Overlap detection for segment protection: `lineStartPos < seg.end && lineEndPos > seg.start`
+  - When segment is protected, replace lineText with SecurityRedact.REDACTED_PLACEHOLDER but still show file:lineNum
+  - Security log uses "security-grep" service name
+  - Log both filteredFileCount and redactedMatchCount separately for better debugging
+  - The match still appears in output but with redacted content, allowing user to know a match exists without seeing the sensitive content
+---
+
+## 2026-02-04 - US-014
+- What was implemented: Created audit logging system for security events
+- Files changed:
+  - packages/opencode/src/security/audit.ts (created)
+- **Learnings for future iterations:**
+  - The SecurityAudit namespace provides logSecurityEvent() function for logging security events
+  - Log format is JSON with: timestamp, role, operation, path, result (allowed/denied), reason, ruleTriggered, contentHash
+  - Log level is configurable via config.logging.level: "verbose" logs all access, "normal" logs denials only
+  - Content is hashed (sha256, first 16 chars) and truncated (50 chars max) to avoid storing sensitive data
+  - Log path comes from config.logging.path, defaults to ".opencode-security-audit.log"
+  - The createContentSummary() helper creates a safe summary string for logs: [hash:xxxxx] truncated content...
+  - Use fs.appendFile for async non-blocking log writes
+  - Both structured JSON logging (to file) and regular Log.create() logging (to app log) are used
+---
+
+## 2026-02-05 - US-015
+- What was implemented: Created Bash command security scanner that parses shell commands to detect file access patterns
+- Files changed:
+  - packages/opencode/src/security/bash-scanner.ts (created)
+- **Learnings for future iterations:**
+  - The BashScanner namespace exports scanBashCommand(command, cwd) which returns an array of resolved file paths
+  - Supports pipeline splitting (|, ;, &&, ||) and handles quoted strings and escaped characters
+  - Detects file access in: cat, less, head, tail, vim, nano, grep, find, sed, awk
+  - Command-specific logic: awk patterns and sed expressions are filtered out to avoid false positives
+  - Flags with value arguments (e.g., grep -e, head -n) are handled to avoid treating the flag value as a file path
+  - Handles sudo prefix by skipping to the actual command name
+  - Handles full paths to commands (e.g., /usr/bin/cat) by extracting basename
+  - The Bash tool (src/tool/bash.ts) already uses tree-sitter for command parsing and path extraction for a different purpose (directory permission checks)
+---
+
+## 2026-02-05 - US-016
+- What was implemented: Integrated security access control with the Bash tool to block commands that would access protected files
+- Files changed:
+  - packages/opencode/src/tool/bash.ts (modified)
+- **Learnings for future iterations:**
+  - The Bash tool uses BashScanner.scanBashCommand() to detect file paths before executing the command
+  - Security check happens BEFORE tree-sitter parsing and permission checks for early rejection
+  - Both read and write access are checked for each scanned path (read first, then write if read passes)
+  - When access is denied, each denied path is logged via SecurityAudit.logSecurityEvent() individually
+  - Error message includes all denied paths and their reasons for clear user feedback
+  - The cwd parameter from workdir or Instance.directory is passed to BashScanner for relative path resolution
+  - Security log uses "security-bash" service name following the tool-specific naming pattern
+---
+
+## 2026-02-05 - US-017
+- What was implemented: Created LLM request content scanner that checks outgoing content for protected patterns
+- Files changed:
+  - packages/opencode/src/security/llm-scanner.ts (created)
+- **Learnings for future iterations:**
+  - The LLMScanner namespace exports scanForProtectedContent(content, config) returning ProtectedMatch[]
+  - Scans for two types of protection: marker-based segments (using SecuritySegments.findMarkerSegments) and path patterns from rules
+  - Only considers rules/markers that have "llm" in their deniedOperations array
+  - For path pattern scanning, extracts literal strings from glob patterns (stripping **/ prefix and wildcards)
+  - matchedText is truncated to 100 chars for marker segments to avoid storing large content chunks
+  - The ProtectedMatch interface includes: start, end, matchedText, ruleType ("marker" | "ast" | "pattern"), and the triggering rule
+  - extractLiteralFromGlob() handles common glob patterns: strips leading **/  and uses longest literal prefix before any wildcard
+---
+
