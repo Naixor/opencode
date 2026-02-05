@@ -226,3 +226,17 @@
   - Security log uses "security-bash" service name following the tool-specific naming pattern
 ---
 
+## 2026-02-05 - US-017
+- What was implemented: Created LLM request content scanner that checks outgoing content for protected patterns
+- Files changed:
+  - packages/opencode/src/security/llm-scanner.ts (created)
+- **Learnings for future iterations:**
+  - The LLMScanner namespace exports scanForProtectedContent(content, config) returning ProtectedMatch[]
+  - Scans for two types of protection: marker-based segments (using SecuritySegments.findMarkerSegments) and path patterns from rules
+  - Only considers rules/markers that have "llm" in their deniedOperations array
+  - For path pattern scanning, extracts literal strings from glob patterns (stripping **/ prefix and wildcards)
+  - matchedText is truncated to 100 chars for marker segments to avoid storing large content chunks
+  - The ProtectedMatch interface includes: start, end, matchedText, ruleType ("marker" | "ast" | "pattern"), and the triggering rule
+  - extractLiteralFromGlob() handles common glob patterns: strips leading **/  and uses longest literal prefix before any wildcard
+---
+
