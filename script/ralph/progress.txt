@@ -22,7 +22,9 @@
 - Commands needing project context use `bootstrap(process.cwd(), async () => { ... })` from cli/bootstrap.ts
 - SecurityConfig.findSecurityConfigs(startPath) walks up to git root collecting all .opencode-security.json files
 - SecurityConfig.mergeSecurityConfigs(configs) merges configs: rules unioned, roles must match, MCP most-restrictive-wins
+- For synchronous safe JSON parsing (no try/catch): use `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse(str)`
 - Git root detection: walk up directories looking for .git using fs.statSync with { throwIfNoEntry: false }
+- SecurityRole.getCurrentRole(projectRoot, config) replaces all getDefaultRole() placeholders in tool files for centralized role detection
 
 ---
 
@@ -373,5 +375,50 @@
   - Uses theme.textMuted for subtle styling consistent with version and context info
   - The indicator format is `[secured: roleName]` for clear but non-intrusive display
   - OpenTUI uses `<text>` for text elements and `<box>` for layout containers with flexbox properties
+---
+
+## 2026-02-05 - US-026
+- What was implemented: Created JWT token verification module for RS256 role token authentication
+- Files changed:
+  - packages/opencode/src/security/token.ts (created)
+- **Learnings for future iterations:**
+  - Use Zod's `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse()` pattern for safe JSON parsing in synchronous context (avoids try/catch)
+  - JWT format: 3 base64url-encoded parts separated by dots (header.payload.signature)
+  - Base64url decoding: replace `-` with `+` and `_` with `/` then use Buffer.from(str, "base64")
+  - RS256 verification: use `crypto.createVerify("RSA-SHA256")`, update with signatureInput (header.payload), verify with publicKey and signature buffer
+  - Token expiration check: compare `Math.floor(Date.now() / 1000)` against `payload.exp`
+  - Token revocation check: match `payload.jti` against the revokedTokens array from config
+  - fs.statSync with `{ throwIfNoEntry: false }` is preferred over try/catch for file existence checks
+  - The verifyRoleToken function takes a third optional `revokedTokens` parameter (not just tokenPath and publicKey)
+---
+
+## 2026-02-05 - US-027
+- What was implemented: Created current role detection module that auto-detects user role from JWT token files
+- Files changed:
+  - packages/opencode/src/security/role.ts (created)
+- **Learnings for future iterations:**
+  - SecurityRole.getCurrentRole(projectRoot, config) is the centralized role detection function that replaces all getDefaultRole() placeholders in tool files
+  - Token lookup order: project-local `.opencode-role.token` first, then global `~/.config/opencode/role.token`
+  - If no authentication.publicKey is configured, skips token verification entirely and returns lowest role
+  - Result is cached per session via cacheInitialized flag - use SecurityRole.resetCache() for testing
+  - Token roles are validated against config's roles list - unknown roles in tokens fall back to lowest role
+  - The getLowestRole() helper uses the same logic as the getDefaultRole() placeholder functions in tool files
+  - os.homedir() is used for the global token path, consistent with other opencode config patterns
+---
+
+## 2026-02-05 - US-028
+- What was implemented: Created CLI command to generate RSA key pair for signing role tokens
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/init-keys.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityInitKeysCommand)
+- **Learnings for future iterations:**
+  - crypto.generateKeyPairSync("rsa", options) generates RSA key pairs synchronously with configurable encoding
+  - Use modulusLength: 2048 for RSA key pairs (standard security level)
+  - For encrypted private keys, use PKCS8 format with aes-256-cbc cipher and a passphrase
+  - For unencrypted private keys, use PKCS8 format without cipher/passphrase
+  - Public key uses SPKI format (standard for PEM public keys)
+  - The RSAKeyPairOptions<"pem", "pem"> type correctly types the return value as { publicKey: string, privateKey: string }
+  - Check for existing key file before overwriting to prevent accidental key loss
+  - Warn user to add private key file to .gitignore for security
 ---
 
