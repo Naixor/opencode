@@ -404,8 +404,8 @@
         "Create access_control_cases/integration/run-all.sh that runs all integration scripts and aggregates results"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. Created 3 shell scripts in integration/ directory: test-config-manipulation.sh (10 TAP tests — valid/malformed/truncated/missing/empty/cached/nested/conflicting/1000+ rules/schema-invalid configs), test-symlink-attacks.sh (12 TAP tests — direct/chain/directory/circular/traversal/safe/dangling/relative/multiple/swap/hardlink/external symlinks), run-all.sh (aggregates all test-*.sh scripts with summary). All 22 tests passing. Scripts use bun run - with @/ imports to invoke SecurityConfig/SecurityAccess/checkAccess directly. Key findings: [KNOWN_LIMITATION] directory symlinks bypass resolveSymlink (intermediate path components not resolved), [KNOWN_LIMITATION] hard links bypass symlink-based security entirely."
     },
     {
       "id": "US-022",
