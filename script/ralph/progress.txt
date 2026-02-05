@@ -27,6 +27,10 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **Null bytes**: Paths with `\x00` cause `TypeError` from `fs.lstatSync` — not caught by `resolveSymlink()`. The error prevents bypass but is not a clean security denial.
 - **Circular symlinks**: `resolveSymlink()` throws `ELOOP` error — not caught. Does not hang (OS kernel limit prevents infinite loop).
 - **Case sensitivity**: `minimatch` is case-sensitive by default. On macOS case-insensitive FS, `SECRETS/key.pem` bypasses `secrets/**` rule.
+- **Segment redaction**: `SecurityRedact.redactContent()` replaces protected ranges with `[REDACTED: Security Protected]` + preserved newlines. Processes segments end-to-start to preserve indices. `mergeSegments()` combines overlapping ranges.
+- **Marker detection**: `SecuritySegments.findMarkerSegments()` uses regex patterns for `//`, `#`, `<!-- -->`, `/* */`, `"""`, `'''` comment styles. Stack-based matching for nested markers. Matches by rule (start/end pair).
+- **Read tool pipeline**: (1) file-level `checkAccess()`, (2) images/PDFs return raw base64 without segment redaction, (3) `findProtectedSegments()` for marker+AST, (4) `redactContent()`, (5) split lines, (6) offset/limit slicing.
+- **Read tool roles**: `findProtectedSegments()` in read.ts has its own local `isRoleAllowed()` and `getRoleLevel()` functions — not imported from security modules.
 ---
 
 ## 2026-02-05 - US-001
@@ -97,4 +101,22 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - macOS `os.tmpdir()` returns `/var/...` but `realpathSync` returns `/private/var/...` — always canonicalize temp dir paths with `fs.realpathSync()` when using them in absolute rule patterns.
   - URL-encoded paths (`%2F`, `%2e%2e`) are treated as literal strings — correct behavior since filesystem doesn't decode URLs. The risk is if tools decode URLs before calling checkAccess.
   - Circular symlinks throw `ELOOP` from `realpathSync` — error is not caught by `resolveSymlink()` but prevents hanging (OS kernel imposes limit).
+---
+
+## 2026-02-05 - US-007
+- Implemented CASE-READ-001 through CASE-READ-008 Read tool bypass test cases
+- 21 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/read-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - Read tool pipeline: file-level checkAccess → image/PDF early return (no segment redaction) → findProtectedSegments → redactContent → line splitting → offset/limit
+  - `findProtectedSegments()` in read.ts has its own local `isRoleAllowed()` and `getRoleLevel()` — not imported from security/access.ts. Tests should use the same logic.
+  - Redaction preserves line count by appending newlines matching the original: `REDACTED_PLACEHOLDER + "\n".repeat(newlineCount)`
+  - Offset/limit is applied AFTER redaction — so partial reads cannot bypass redaction
+  - [MEDIUM] Premature `@secure-end` injection truncates protection: stack-based parser matches first end to the start, exposing content between injected and real end markers
+  - [MEDIUM] Unmatched `@secure-start` (no corresponding end) = NO protection at all — developer forgets end marker → secrets exposed
+  - [INFO] Marker regex is not AST-aware — `// @secure-start` inside a string literal is detected (false positive, but safe default: over-protects)
+  - [INFO] Images/PDFs skip segment redaction entirely — they return raw base64 bytes. File-level rules still block access.
+  - Unicode lookalike characters (fullwidth @, etc.) do NOT trigger marker false positives — regex correctly matches only ASCII `@`
+  - Stack-based marker matching uses rule matching (start/end pair identity) — different marker types can nest without cross-matching
 ---
