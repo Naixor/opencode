@@ -167,3 +167,48 @@
   - The metadata.count should reflect the filtered count (allowedFiles.length), not the original count
 ---
 
+## 2026-02-04 - US-013
+- What was implemented: Integrated security access control with the Grep tool to filter protected files and redact protected segments
+- Files changed:
+  - packages/opencode/src/tool/grep.ts (modified)
+- **Learnings for future iterations:**
+  - Grep tool requires both file-level filtering AND segment-level redaction (like Read, but with different output format)
+  - Use caching (fileAccessCache, fileSegmentCache, fileContentCache) to avoid re-checking the same file multiple times
+  - Line position calculation: getLineStartPosition() counts newlines to find where a given line number starts in file content
+  - Overlap detection for segment protection: `lineStartPos < seg.end && lineEndPos > seg.start`
+  - When segment is protected, replace lineText with SecurityRedact.REDACTED_PLACEHOLDER but still show file:lineNum
+  - Security log uses "security-grep" service name
+  - Log both filteredFileCount and redactedMatchCount separately for better debugging
+  - The match still appears in output but with redacted content, allowing user to know a match exists without seeing the sensitive content
+---
+
+## 2026-02-04 - US-014
+- What was implemented: Created audit logging system for security events
+- Files changed:
+  - packages/opencode/src/security/audit.ts (created)
+- **Learnings for future iterations:**
+  - The SecurityAudit namespace provides logSecurityEvent() function for logging security events
+  - Log format is JSON with: timestamp, role, operation, path, result (allowed/denied), reason, ruleTriggered, contentHash
+  - Log level is configurable via config.logging.level: "verbose" logs all access, "normal" logs denials only
+  - Content is hashed (sha256, first 16 chars) and truncated (50 chars max) to avoid storing sensitive data
+  - Log path comes from config.logging.path, defaults to ".opencode-security-audit.log"
+  - The createContentSummary() helper creates a safe summary string for logs: [hash:xxxxx] truncated content...
+  - Use fs.appendFile for async non-blocking log writes
+  - Both structured JSON logging (to file) and regular Log.create() logging (to app log) are used
+---
+
+## 2026-02-05 - US-015
+- What was implemented: Created Bash command security scanner that parses shell commands to detect file access patterns
+- Files changed:
+  - packages/opencode/src/security/bash-scanner.ts (created)
+- **Learnings for future iterations:**
+  - The BashScanner namespace exports scanBashCommand(command, cwd) which returns an array of resolved file paths
+  - Supports pipeline splitting (|, ;, &&, ||) and handles quoted strings and escaped characters
+  - Detects file access in: cat, less, head, tail, vim, nano, grep, find, sed, awk
+  - Command-specific logic: awk patterns and sed expressions are filtered out to avoid false positives
+  - Flags with value arguments (e.g., grep -e, head -n) are handled to avoid treating the flag value as a file path
+  - Handles sudo prefix by skipping to the actual command name
+  - Handles full paths to commands (e.g., /usr/bin/cat) by extracting basename
+  - The Bash tool (src/tool/bash.ts) already uses tree-sitter for command parsing and path extraction for a different purpose (directory permission checks)
+---
+
