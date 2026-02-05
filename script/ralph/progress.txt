@@ -43,6 +43,12 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **BashScanner path resolution**: `resolvePath(filePath, cwd)` uses `path.resolve(cwd, filePath)` which normalizes `../` — unlike raw `checkAccess()`.
 - **BashScanner limitations**: Does NOT parse `$()`, backtick, `<()`, `>()`, `<<<`, `<< EOF`, or any shell metacharacter-based file access. Tokenizer is space-based, not shell-grammar-aware.
 - **LLMScanner**: Two layers — (1) marker scanning via `findMarkerSegments()` for markers with `deniedOperations` including "llm", (2) path pattern scanning via `extractLiteralFromGlob()` for rules with "llm" in deniedOperations. Operates on raw text only — no base64/hex/URL decoding. Pattern matching uses literal substring search (over-matches = safe default).
+- **Marker regex `\s*`**: `buildMarkerPatterns()` uses `\s*` which matches newlines. Multi-line block comments like `/*\n @secure-start\n*/` ARE detected by the `/* @marker */` pattern. This is good security behavior.
+- **AST method detection**: `getNodeInfo()` checks `ts.isStringLiteral(node.name)` for method declarations, but computed property names like `['encryptData']()` wrap the string literal in a `ComputedPropertyName` node — `node.name` is `ComputedPropertyName`, not `StringLiteral`. Computed string methods evade detection.
+- **Base config nodeTypes**: Default AST config only has `["function", "arrow_function"]` — NOT `"method"`. Class methods with matching names evade default config detection. Must add `"method"` to nodeTypes to protect class methods.
+- **Re-export aliasing**: `export { processData as encryptData }` — the AST parser only sees the source declaration `processData`. The alias name `encryptData` in the ExportSpecifier is not checked by `getNodeInfo()`.
+- **Rule inheritance**: `checkAccess()` evaluates ALL matching rules from `getInheritanceChain()`. A child config's permissive rule (deniedOperations: []) does NOT cancel a parent's restrictive rule — any single deny is sufficient to block access. Merge order does not matter.
+- **Glob single wildcard**: `src/*/private/**` matches exactly one directory level — `src/a/b/private/file.ts` is NOT matched (two levels between `src/` and `private/`).
 ---
 
 ## 2026-02-05 - US-001
@@ -226,4 +232,58 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [INFO] Multiple occurrences of a pattern in the same content are all reported (scanner loops with `indexOf` advancing by 1 each time).
   - [INFO] Markers are detected regardless of surrounding context (markdown code blocks, JSON strings, etc.) — the scanner doesn't parse document structure.
   - [INFO] All comment styles supported by `buildMarkerPatterns()` (// # <!-- --> /* */ """ ''') work in the LLM scanner since it delegates to `findMarkerSegments()`.
+---
+
+## 2026-02-05 - US-013
+- Implemented CASE-SEG-001 through CASE-SEG-009 segment detection evasion test cases
+- 44 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/segment-evasion.test.ts (new)
+- **Learnings for future iterations:**
+  - `buildMarkerPatterns()` uses `\s*` in regex which matches newlines. Multi-line block comments `/*\n @secure-start\n*/` ARE detected by the `/* @marker */` pattern — this is secure behavior (not a limitation).
+  - Only bare markers without ANY recognized comment prefix (no //, #, /*, <!--, """, ''') evade detection. This requires completely non-standard text wrapping.
+  - `getNodeInfo()` for method declarations checks `ts.isStringLiteral(node.name)` directly, but computed property names `['encryptData']()` use `ComputedPropertyName` wrapper around the string literal. `node.name.kind === ComputedPropertyName` ≠ `StringLiteral`, so these evade detection. [KNOWN_LIMITATION]
+  - `eval('function encryptData() {}')` hides functions from the TypeScript compiler API. Function constructor `new Function()` also evades. Template literals with function definitions evade. This is inherent to static analysis. [KNOWN_LIMITATION]
+  - Function aliasing: `const enc = encryptData` — the alias `enc` is a VariableDeclaration where initializer is an Identifier (not ArrowFunction/FunctionExpression), so getNodeInfo skips it. Only the original declaration is protected.
+  - Destructuring with rename `{ encryptData: enc }` uses ObjectBindingPattern for node.name — `ts.isIdentifier(node.name)` returns false, evading detection entirely.
+  - Base config nodeTypes `["function", "arrow_function"]` does NOT include `"method"` — all class methods evade the default config. Must add `"method"` to nodeTypes for comprehensive protection.
+  - Re-export aliasing: `export { processData as encryptData }` — ExportSpecifier is not a function/arrow/class/method, so the alias name is not checked. An attacker can rename a function at the export boundary.
+  - Unsupported languages: Python (.py), Go (.go), Rust (.rs), Java (.java), C (.c) all return empty segments. Only TS/JS extensions (.ts, .tsx, .js, .jsx, .mjs, .cjs) are supported.
+- **MCP policy**: `SecurityConfig.getMcpPolicy(serverName)` checks `config.mcp.servers[serverName]`, falls back to `config.mcp.defaultPolicy`, falls back to `"trusted"` if no mcp config. Three policy levels: "blocked" (tools not registered), "enforced" (inputs/outputs scanned), "trusted" (no scanning).
+- **MCP tool registration**: In `prompt.ts`, blocked servers are skipped via `continue`. Enforced servers scan both input (`JSON.stringify(args)`) and output (`contentItem.text`) via `LLMScanner.scanForProtectedContent()`. Trusted servers skip all scanning.
+- **MCP server identity**: Derived from tool key via `key.slice(0, key.indexOf("_"))` — first underscore split. Server names with underscores cause mismatch (e.g., "my_custom_server" extracts "my").
+---
+
+## 2026-02-05 - US-014
+- Implemented CASE-MCP-001 through CASE-MCP-006 MCP security bypass test cases
+- 24 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/mcp-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - `getMcpPolicy()` returns "blocked" for blocked-server, "enforced" for enforced-server, "trusted" for trusted-server — direct config key lookup via `config.mcp.servers[serverName]`.
+  - Fallback chain: server-specific policy → defaultPolicy → "trusted" (when no mcp config exists).
+  - [INFO] Trusted servers bypass ALL scanning (both input and output). A compromised trusted MCP server can exfiltrate all protected content with no detection. The scanner itself works correctly — but it's never invoked for trusted servers.
+  - [INFO] Server name extraction uses first underscore split: `key.slice(0, key.indexOf("_"))`. If a server is registered as "my_custom_server" and its tools are keyed as "my_custom_server_tool", the extracted name is "my" — NOT "my_custom_server". This is a configuration gotcha that could cause policy mismatch.
+  - [INFO] Tool key without underscores uses the entire key as server name — safe fallback.
+  - [INFO] Empty string server name falls back to defaultPolicy — no special casing.
+  - [KNOWN_LIMITATION] Base64-encoded protected paths in MCP output bypass LLMScanner — same limitation as CASE-LLM-005.
+  - Enforced policy scans both directions: tool input via `JSON.stringify(args)` and tool output text content items. Non-text content items (images, etc.) are skipped.
+---
+
+## 2026-02-05 - US-015
+- Implemented CASE-INH-001 through CASE-INH-004 rule inheritance bypass test cases
+- 27 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/inheritance-bypass.test.ts (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/nested-config/.opencode-security.json (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/nested-config/child/.opencode-security.json (new)
+- **Learnings for future iterations:**
+  - `mergeSecurityConfigs()` unions all rules from all configs. A child config's permissive rule (deniedOperations: []) does NOT cancel a parent's restrictive rule — both rules exist in the merged config and `checkAccess()` evaluates ALL matching rules.
+  - Merge order does NOT matter for security: rules from [child, parent] produce the same `checkAccess()` result as [parent, child] because the function iterates through all matching rules, and any single deny is sufficient.
+  - `getInheritanceChain()` returns both direct matches (via minimatch glob) and inherited matches (via parent path iteration for directory rules). For `src/auth/keys.ts` with rules `src/**` and `src/auth/**`, both rules appear in the chain.
+  - Directory rule inheritance works at arbitrary depth: a rule on `a/**` correctly blocks files at 7+ and 10+ directory levels deep via the glob match `a/**` expanding to match all nested paths.
+  - Glob pattern `**/test*` with `matchBase: true` matches basenames starting with "test" but does NOT match "contest.ts" (no substring match — requires segment-start match).
+  - Single wildcard `src/*/private/**` matches exactly one directory level between `src/` and `private/` — `src/a/b/private/secret.ts` (two levels) is NOT matched.
+  - Character class `[!.]env` matches exactly one non-dot character followed by "env" — 4-char strings only. `.env` correctly not matched, `myenv` (5 chars) also not matched.
+  - Complementary glob patterns from merged configs are additive: `**/*.pem` from configA + `**/*.key` from configB both active after merge.
 ---

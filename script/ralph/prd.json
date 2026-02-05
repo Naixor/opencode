@@ -290,8 +290,8 @@
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 4 CASE-INH test cases passing (27 tests total). Covers child cannot weaken parent (mergeSecurityConfigs unions rules, parent restriction wins regardless of merge order), deep inheritance 7+ and 10+ levels, overlapping rules with most restrictive wins (src/** + src/auth/**), and glob edge cases (**/test*, src/*/private/**, [!.]env, **/*.secret, merged complementary patterns). Created nested-config fixtures (parent and child .opencode-security.json)."
     },
     {
       "id": "US-016",

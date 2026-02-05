@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "roles": [
+    { "name": "admin", "level": 100 },
+    { "name": "developer", "level": 50 },
+    { "name": "viewer", "level": 10 }
+  ],
+  "rules": [
+    {
+      "pattern": "secrets/**",
+      "type": "directory",
+      "deniedOperations": ["read", "write", "llm"],
+      "allowedRoles": ["admin"]
+    }
+  ]
+}
