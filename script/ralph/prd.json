@@ -194,8 +194,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 7 CASE-BASH test cases passing (48 tests total). Covers standard scanned commands (cat/head/tail/less/grep/sed/awk/vim/nano/find), unscanned command bypass vectors (cp/mv/tee/dd/sort/uniq/wc/xxd/od/hexdump/strings/file/stat/base64/openssl), path traversal resolution via path.resolve, subshell/command substitution bypass, process substitution bypass, here-string/heredoc bypass, and pipeline detection with split on |/;/&/&&/||."
     },
     {
       "id": "US-011",

@@ -38,6 +38,10 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **Grep tool**: Two-layer security — (1) file-level `checkAccess` excludes protected files, (2) segment-level redaction replaces match content with `REDACTED_PLACEHOLDER`. Caches access/segment results per file. Has own local `findProtectedSegments()`, `getDefaultRole()`, `isRoleAllowed()`, `getRoleLevel()`.
 - **Glob tool**: Only file-level security — `checkAccess(f.path, "read", currentRole)`. Returns paths only, no segment checks. `filteredCount` logged at debug level, not in user-facing output.
 - **Search tool `include` param**: Passed to ripgrep `--glob` for file selection. Security filtering is post-result — include cannot bypass security.
+- **BashScanner FILE_ACCESS_COMMANDS**: Only 10 commands: cat, less, head, tail, vim, nano, grep, find, sed, awk. Other commands (cp, mv, tee, dd, sort, base64, etc.) bypass the scanner entirely.
+- **BashScanner pipeline splitting**: `splitPipeline()` handles `|`, `;`, `&`, `&&`, `||`. Each segment is tokenized and checked independently.
+- **BashScanner path resolution**: `resolvePath(filePath, cwd)` uses `path.resolve(cwd, filePath)` which normalizes `../` — unlike raw `checkAccess()`.
+- **BashScanner limitations**: Does NOT parse `$()`, backtick, `<()`, `>()`, `<<<`, `<< EOF`, or any shell metacharacter-based file access. Tokenizer is space-based, not shell-grammar-aware.
 ---
 
 ## 2026-02-05 - US-001
@@ -159,4 +163,22 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [INFO] Glob output is indistinguishable between "no matches" and "all matches filtered" — prevents information disclosure about existence of protected files.
   - [INFO] `filteredCount` / `filteredFileCount` / `redactedMatchCount` are logged via `securityLog.debug()` only — not exposed in user-facing output.
   - [INFO] `**/.env*` pattern broadly matches `.env.example`, `.envrc`, etc. — over-protection is the safe default.
+---
+
+## 2026-02-05 - US-010
+- Implemented CASE-BASH-001 through CASE-BASH-007 Bash tool bypass test cases (standard and unscanned commands)
+- 48 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/bash-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - `BashScanner.scanBashCommand()` only scans 10 commands: cat, less, head, tail, vim, nano, grep, find, sed, awk. All other file-access commands bypass security.
+  - `splitPipeline()` splits on `|`, `;`, `&`, `&&`, `||` — each segment scanned independently. Background operator `&` handled correctly.
+  - `path.resolve(cwd, filePath)` in `resolvePath()` normalizes `../` — path traversal is resolved by BashScanner (unlike raw `checkAccess`).
+  - `path.basename(cmd)` extracts base command name — `/usr/bin/cat` → `cat`. Full path commands are correctly detected.
+  - [HIGH] 15 common file-access commands NOT in scanner: cp, mv, tee, dd, sort, uniq, wc, xxd, od, hexdump, strings, file, stat, base64, openssl.
+  - [HIGH] Command substitution `$(cat ...)` and backtick substitution are NOT parsed — tokenizer treats `$(cat` as single token.
+  - [HIGH] Process substitution `<(cat ...)` is NOT parsed — `<(cat` treated as single token starting with `<`.
+  - [HIGH] Here-string `<<<` and heredoc `<< EOF` bodies are NOT parsed — content appears as accidental path tokens.
+  - [INFO] bash.ts tree-sitter parsing checks cp/mv/cat for directory permissions (Instance.containsPath) but NOT for SecurityAccess.checkAccess(). These are separate permission systems.
+  - [INFO] The `FLAGS_WITH_VALUES` map only covers grep, find, sed, awk, head, tail — other commands' flags are handled by generic `isFlag()` which checks for `-` prefix.
 ---
