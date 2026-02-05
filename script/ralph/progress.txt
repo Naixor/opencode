@@ -2,6 +2,8 @@
 Started: Thu  5 Feb 2026 17:57:58 CST
 
 ## Codebase Patterns
+- **Bash 3.2 compatibility**: macOS ships with Bash 3.2 — no `declare -A`, no `+=` on strings, no `[[ ]]` with `==`. Use indexed arrays, `IFS='|' read -r` for splitting, temp files for key-value lookups, and `[ ]` with `=` for conditionals.
+- Unified test runner: `packages/opencode/test/security/access_control_cases/run-all.sh` — runs unit+integration tests, generates report/summary.json and optionally report/fix-coverage.json (--fix-check). 118 total cases.
 - Access-guard infrastructure: `packages/opencode/test/security/access_control_cases/access-guard/` — types.ts, parser.ts, privileged-monitor.ts, unprivileged-monitor.ts, reporter.ts, index.ts. Use `withAccessGuard(patterns, testFn)` convenience wrapper for integration tests.
 - Access-guard test patterns: Use absolute path patterns (`path.join(tempDir, "secrets", "**")`) for monitoring. Handle both privileged/unprivileged mode in assertions. Add 200-300ms delays for fs.watch event propagation. Use `startAccessGuard()`/`stopAccessGuard()` from helpers.ts for simple test patterns.
 - Integration test scripts: `packages/opencode/test/security/access_control_cases/integration/` — use `bun run -` with heredoc to invoke TS security modules from shell scripts. Canonicalize temp dirs with `python3 -c "import os; print(os.path.realpath('$path'))"`. TAP output format. run-all.sh auto-discovers `test-*.sh` scripts.
@@ -438,4 +440,26 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - `verifyRoleToken()` takes (tokenPath, publicKey, revokedTokens) — the first arg is a file path. The CLI `issue-token` writes tokens to files, and `verifyRoleToken` reads them back from files.
   - For CLI test integration, test the underlying modules directly (SecurityConfig, SecurityAccess, SecurityToken, BashScanner) via `bun run -` rather than invoking the `opencode` binary (which requires full Instance.provide/bootstrap context).
   - Base-security-config.json uses relative patterns (`secrets/**`, `**/.env*`). Tests that use `path.resolve()` to create absolute paths will NOT match these patterns. Use relative paths with `checkAccess()` and `getInheritanceChain()`.
+---
+
+## 2026-02-05 - US-023
+- Created unified test runner `run-all.sh` (499 lines, Bash 3.2 compatible)
+- Runs unit tests via `bun test --cwd packages/opencode -- test/security/access_control_cases/unit/`
+- Runs integration tests via `integration/run-all.sh`
+- Outputs per-category summary with [PASS], [FAIL], or [KNOWN_LIMITATION] for each CASE-* ID
+- Generates `report/summary.json` with structured results: `{ id, category, severity, status, description }`
+- Includes access-guard report (copies from `access-guard/report/` or creates placeholder JSON)
+- Supports `--fix-check` flag that generates `report/fix-coverage.json`
+- All 118 cases accounted for: 74 PASS, 44 KNOWN_LIMITATION, 0 FAIL
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/run-all.sh (new)
+- **Learnings for future iterations:**
+  - macOS ships with Bash 3.2 — does NOT support `declare -A` (associative arrays), `+=` on strings, `[[ ]]` conditionals with `==`. Use indexed arrays, temp files for key-value lookups, and `[ ]` with `=` for compatibility.
+  - `IFS='|' read -r` is the portable way to split pipe-delimited strings into variables in Bash 3.2.
+  - `bun test` exit code 1 does not necessarily mean all tests failed — it can mean some tests failed. Parse output for specific CASE-* IDs to determine which cases failed vs passed.
+  - `grep -oE 'CASE-[A-Z]+-[0-9]+'` reliably extracts case IDs from test runner output lines.
+  - Generated JSON via heredocs needs careful quoting — `printf '%s'` is safer than `echo` for escaping. Use `sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g'` for JSON string escaping in Bash.
+  - `gh pr list --search` can find PRs referencing specific case IDs. Combined with `--json number,state,title` for structured output.
+  - `git branch -a` lists all branches including remotes — useful for finding fix branches by pattern matching.
+  - Report directory is already in `.gitignore` — generated files (summary.json, fix-coverage.json, access-guard-report.json) won't be committed.
 ---
