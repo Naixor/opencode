@@ -320,3 +320,16 @@
   - New commands must be imported and registered in src/index.ts via `.command(SecurityCommand)`
 ---
 
+## 2026-02-05 - US-022
+- What was implemented: Created security CLI check command that tests path accessibility against security config
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/check.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityCheckCommand)
+- **Learnings for future iterations:**
+  - yargs positional arguments use `<path>` syntax in command string and `.positional()` in builder
+  - SecurityAccess.resolveSymlink() returns `{ realPath, isSymlink }` or null if path doesn't exist
+  - SecurityAccess.getInheritanceChain() returns InheritedRule[] with matchType ("direct" | "inherited") and inheritedFrom
+  - For symlink paths, check inheritance chain for both the symlink path AND the resolved target path
+  - New subcommands only need to be added to security/index.ts builder chain (already registered in src/index.ts)
+---
+
