@@ -420,8 +420,8 @@
         "Update access_control_cases/integration/run-all.sh to include these new scripts"
       ],
       "priority": 22,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. Created 2 shell scripts in integration/ directory: test-bash-bypass.sh (15 TAP tests — standard scanned commands, unscanned command bypass, path traversal resolution, command substitution bypass, process substitution bypass, pipeline detection, interpreter one-liners, data exfiltration commands, xargs bypass, eval/bash/sh bypass, command prefix bypass, full-path basename extraction, sudo prefix handling, background operator, chained commands), test-cli-security-commands.sh (12 TAP tests — security init template creation, overwrite protection, status active/inactive, check DENIED/ALLOWED/inheritance chain, init-keys RSA generation, issue-token JWT creation, token verification via verifyRoleToken, logs NDJSON parsing, missing log handling). All 27 new tests passing. run-all.sh auto-discovers new scripts. Total integration tests: 49 across 4 scripts."
     },
     {
       "id": "US-023",
