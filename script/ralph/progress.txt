@@ -22,6 +22,7 @@
 - Commands needing project context use `bootstrap(process.cwd(), async () => { ... })` from cli/bootstrap.ts
 - SecurityConfig.findSecurityConfigs(startPath) walks up to git root collecting all .opencode-security.json files
 - SecurityConfig.mergeSecurityConfigs(configs) merges configs: rules unioned, roles must match, MCP most-restrictive-wins
+- For synchronous safe JSON parsing (no try/catch): use `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse(str)`
 - Git root detection: walk up directories looking for .git using fs.statSync with { throwIfNoEntry: false }
 
 ---
@@ -318,5 +319,75 @@
   - SecurityConfig.findSecurityConfigs() returns `{ config, path }[]` - useful for showing which config files are active
   - Default role is determined as lowest level role from config (until US-027 implements proper token auth)
   - New commands must be imported and registered in src/index.ts via `.command(SecurityCommand)`
+---
+
+## 2026-02-05 - US-022
+- What was implemented: Created security CLI check command that tests path accessibility against security config
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/check.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityCheckCommand)
+- **Learnings for future iterations:**
+  - yargs positional arguments use `<path>` syntax in command string and `.positional()` in builder
+  - SecurityAccess.resolveSymlink() returns `{ realPath, isSymlink }` or null if path doesn't exist
+  - SecurityAccess.getInheritanceChain() returns InheritedRule[] with matchType ("direct" | "inherited") and inheritedFrom
+  - For symlink paths, check inheritance chain for both the symlink path AND the resolved target path
+  - New subcommands only need to be added to security/index.ts builder chain (already registered in src/index.ts)
+---
+
+## 2026-02-05 - US-023
+- What was implemented: Created security CLI init command that generates a template `.opencode-security.json` file
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/init.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityInitCommand)
+- **Learnings for future iterations:**
+  - The init command uses a static TEMPLATE object for the default config, serialized with JSON.stringify(template, null, 2)
+  - Use fs.existsSync() to check if file already exists before writing (fail with error, don't overwrite)
+  - Use fs.writeFileSync() for simple file creation (no need for bootstrap or Bun.file() since this is a standalone CLI operation)
+  - The template includes common sensitive path patterns: .env*, secrets/, credentials.*, *.pem
+  - process.exitCode = 1 is preferred over process.exit(1) to allow cleanup
+  - New subcommands only need to be added to security/index.ts builder chain (already registered in src/index.ts)
+---
+
+## 2026-02-05 - US-024
+- What was implemented: Created security CLI logs command that displays recent audit log entries with filtering
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/logs.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityLogsCommand)
+- **Learnings for future iterations:**
+  - Use Zod's `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse(line)` pattern for safe JSON parsing without try/catch
+  - Audit log entries are JSON lines (one JSON object per line) in the file at config.logging.path or `.opencode-security-audit.log`
+  - Use `.flatMap()` with empty array return for filtering+mapping in one step (instead of map+filter with null)
+  - The `--tail` flag with alias `-n` follows the unix tail convention for user familiarity
+  - Default log path and entry format match SecurityAudit module's AuditLogEntry interface
+---
+
+## 2026-02-05 - US-025
+- What was implemented: Added security status indicator to the TUI session header showing the current role when security config is active
+- Files changed:
+  - packages/opencode/src/cli/cmd/tui/routes/session/header.tsx (modified - added SecurityIndicator component)
+- **Learnings for future iterations:**
+  - TUI header is in packages/opencode/src/cli/cmd/tui/routes/session/header.tsx
+  - Header has two layouts: standard (Match when={true}) and subagent (Match when={session()?.parentID})
+  - Both layouts have a right-side info box with ContextInfo and version - security indicator goes before these
+  - SecurityConfig.getSecurityConfig() is synchronous and returns the cached config (loaded during bootstrap)
+  - The SecurityIndicator component checks for active rules/segments and only renders when security is configured
+  - Uses theme.textMuted for subtle styling consistent with version and context info
+  - The indicator format is `[secured: roleName]` for clear but non-intrusive display
+  - OpenTUI uses `<text>` for text elements and `<box>` for layout containers with flexbox properties
+---
+
+## 2026-02-05 - US-026
+- What was implemented: Created JWT token verification module for RS256 role token authentication
+- Files changed:
+  - packages/opencode/src/security/token.ts (created)
+- **Learnings for future iterations:**
+  - Use Zod's `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse()` pattern for safe JSON parsing in synchronous context (avoids try/catch)
+  - JWT format: 3 base64url-encoded parts separated by dots (header.payload.signature)
+  - Base64url decoding: replace `-` with `+` and `_` with `/` then use Buffer.from(str, "base64")
+  - RS256 verification: use `crypto.createVerify("RSA-SHA256")`, update with signatureInput (header.payload), verify with publicKey and signature buffer
+  - Token expiration check: compare `Math.floor(Date.now() / 1000)` against `payload.exp`
+  - Token revocation check: match `payload.jti` against the revokedTokens array from config
+  - fs.statSync with `{ throwIfNoEntry: false }` is preferred over try/catch for file existence checks
+  - The verifyRoleToken function takes a third optional `revokedTokens` parameter (not just tokenPath and publicKey)
 ---
 
