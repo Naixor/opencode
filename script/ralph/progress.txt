@@ -4,7 +4,10 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 ## Codebase Patterns
 - Access-guard infrastructure: `packages/opencode/test/security/access_control_cases/access-guard/` — types.ts, parser.ts, privileged-monitor.ts, unprivileged-monitor.ts, reporter.ts, index.ts. Use `withAccessGuard(patterns, testFn)` convenience wrapper for integration tests.
 - Access-guard test patterns: Use absolute path patterns (`path.join(tempDir, "secrets", "**")`) for monitoring. Handle both privileged/unprivileged mode in assertions. Add 200-300ms delays for fs.watch event propagation. Use `startAccessGuard()`/`stopAccessGuard()` from helpers.ts for simple test patterns.
-- Integration test scripts: `packages/opencode/test/security/access_control_cases/integration/` — use `bun run -` with heredoc to invoke TS security modules from shell scripts. Canonicalize temp dirs with `python3 -c "import os; print(os.path.realpath('$path'))"`. TAP output format.
+- Integration test scripts: `packages/opencode/test/security/access_control_cases/integration/` — use `bun run -` with heredoc to invoke TS security modules from shell scripts. Canonicalize temp dirs with `python3 -c "import os; print(os.path.realpath('$path'))"`. TAP output format. run-all.sh auto-discovers `test-*.sh` scripts.
+- Security CLI commands: `status`, `check <path>`, `init`, `logs`, `init-keys`, `issue-token` in `packages/opencode/src/cli/cmd/security/`. NO `verify-token` or `revoke-token` commands.
+- `SecurityToken.verifyRoleToken(tokenPath, publicKey, revokedTokens)` takes a FILE PATH, not a token string.
+- `checkAccess()` with relative patterns requires relative paths. Absolute paths won't match relative glob patterns.
 - `tsgo` parses JSDoc `/** */` comments and can trip on glob patterns inside them — use `//` line comments for code examples with globs
 - Security modules are in `packages/opencode/src/security/` — config.ts, access.ts, role.ts, token.ts, segments.ts, redact.ts, audit.ts, bash-scanner.ts, llm-scanner.ts
 - Security config schema in `schema.ts` uses Zod with namespace `SecuritySchema`
@@ -414,4 +417,25 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - TAP (Test Anything Protocol) format: `ok N - description` for pass, `not ok N - description` for fail. `# SKIP` suffix for skipped. `1..N` header declares test count. Tools like `tap-parser` can consume this format.
   - Integration scripts should use `trap cleanup EXIT` for reliable temp directory removal even on failure.
   - Shell heredoc with `<<SCRIPT` (no quotes) expands `$VARIABLES` — needed for injecting temp dir paths. Use `<<'SCRIPT'` (quoted) for literal content.
+  - `SecurityAccess.checkAccess()` with relative patterns (e.g., `secrets/**`) requires relative path arguments. Passing absolute paths (e.g., `/private/var/.../secrets/key.pem`) won't match relative glob patterns. The CLI `security check` command resolves to absolute paths, but security config rules are typically relative.
+  - `SecurityToken.verifyRoleToken(tokenPath, publicKey, revokedTokens)` takes a FILE PATH, not a token string. Write the JWT to a file first, then pass the file path.
+  - `verify-token` and `revoke-token` CLI commands do NOT exist. Token verification is only via `SecurityToken.verifyRoleToken()` API. Revocation is managed by adding jti to `authentication.revokedTokens` array in config.
+---
+
+## 2026-02-05 - US-022
+- Created integration test scripts for bash bypass and CLI security commands
+- 27 new integration tests across 2 scripts, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/integration/test-bash-bypass.sh (new) — 15 TAP tests
+  - packages/opencode/test/security/access_control_cases/integration/test-cli-security-commands.sh (new) — 12 TAP tests
+- **Learnings for future iterations:**
+  - run-all.sh uses `"$SCRIPT_DIR"/test-*.sh` glob to auto-discover scripts — no manual update needed when adding new test files.
+  - BashScanner integration confirms: only 10 commands scanned (cat/less/head/tail/vim/nano/grep/find/sed/awk). All 12 common unscanned commands (cp/mv/tee/dd/base64/openssl/xxd/strings/file/stat/sort/wc) bypass entirely.
+  - BashScanner path.resolve correctly normalizes `../` traversal in scanned commands — unlike raw checkAccess which doesn't normalize.
+  - BashScanner does NOT parse: $() command substitution, <() process substitution, xargs, eval, interpreter flags (-c/-e), or data exfiltration commands (curl/wget/tar/zip).
+  - Only `sudo` is handled as a command prefix (cmdIndex=1). All other prefixes (nohup/time/env/nice/timeout) cause BashScanner to check the prefix instead of the actual command.
+  - Security CLI commands available: `status`, `check <path>`, `init`, `logs`, `init-keys`, `issue-token`. NOT available: `verify-token`, `revoke-token`.
+  - `verifyRoleToken()` takes (tokenPath, publicKey, revokedTokens) — the first arg is a file path. The CLI `issue-token` writes tokens to files, and `verifyRoleToken` reads them back from files.
+  - For CLI test integration, test the underlying modules directly (SecurityConfig, SecurityAccess, SecurityToken, BashScanner) via `bun run -` rather than invoking the `opencode` binary (which requires full Instance.provide/bootstrap context).
+  - Base-security-config.json uses relative patterns (`secrets/**`, `**/.env*`). Tests that use `path.resolve()` to create absolute paths will NOT match these patterns. Use relative paths with `checkAccess()` and `getInheritanceChain()`.
 ---
