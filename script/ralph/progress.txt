@@ -25,6 +25,10 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **Symlinks**: `resolveSymlink()` uses `fs.realpathSync()` which returns absolute canonical paths (e.g., `/private/var/...` on macOS). Relative glob patterns like `secrets/**` won't match absolute resolved paths — use absolute patterns for symlink protection.
 - **macOS temp dirs**: `os.tmpdir()` returns `/var/folders/...` but `fs.realpathSync()` returns `/private/var/folders/...`. When creating absolute rule patterns for temp dirs, always use `fs.realpathSync()` on the dir first.
 - **Null bytes**: Paths with `\x00` cause `TypeError` from `fs.lstatSync` — not caught by `resolveSymlink()`. The error prevents bypass but is not a clean security denial.
+- **Write tool**: Only file-level `checkAccess()` — NO segment-level protection. Write replaces entire file, so segment checks are not applicable.
+- **Edit tool**: File-level `checkAccess()` + segment-level protection (markers + AST). Segment checks skipped when `oldString === ""` (new file creation path).
+- **Base config markers**: `deniedOperations: ["read", "llm"]` — NOT `"write"`. Marker-protected segments are NOT write-protected by default config.
+- **Self-protection gap**: `.opencode-security.json` is NOT protected by default rules — an attacker can modify the security config itself.
 - **Circular symlinks**: `resolveSymlink()` throws `ELOOP` error — not caught. Does not hang (OS kernel limit prevents infinite loop).
 - **Case sensitivity**: `minimatch` is case-sensitive by default. On macOS case-insensitive FS, `SECRETS/key.pem` bypasses `secrets/**` rule.
 - **Segment redaction**: `SecurityRedact.redactContent()` replaces protected ranges with `[REDACTED: Security Protected]` + preserved newlines. Processes segments end-to-start to preserve indices. `mergeSegments()` combines overlapping ranges.
@@ -119,4 +123,20 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [INFO] Images/PDFs skip segment redaction entirely — they return raw base64 bytes. File-level rules still block access.
   - Unicode lookalike characters (fullwidth @, etc.) do NOT trigger marker false positives — regex correctly matches only ASCII `@`
   - Stack-based marker matching uses rule matching (start/end pair identity) — different marker types can nest without cross-matching
+---
+
+## 2026-02-05 - US-008
+- Implemented CASE-WRITE-001 through CASE-WRITE-003 and CASE-EDIT-001 through CASE-EDIT-004 Write/Edit tool bypass test cases
+- 25 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/write-edit-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - Write tool (write.ts) has NO segment-level protection — only file-level `checkAccess("write")`. This is by design since Write replaces entire file content.
+  - Edit tool (edit.ts) has both file-level and segment-level protection, but segment checks are skipped when `oldString === ""` (new file creation path, lines 74-97).
+  - Base config markers have `deniedOperations: ["read", "llm"]` — does NOT include `"write"`. This means marker-protected code can be edited by default. Tests must use custom config with `"write"` in deniedOperations to test segment protection.
+  - [MEDIUM] `.opencode-security.json` is NOT protected by any default rule — config integrity can be compromised. Need explicit rule like `{ pattern: ".opencode-security.json", type: "file", deniedOperations: ["write"], allowedRoles: ["admin"] }`.
+  - [LOW] `.opencode-security-audit.log` is also NOT protected by default — audit log can be tampered with.
+  - Edit tool's `findProtectedSegments()` has its own local `isRoleAllowed()` and `getRoleLevel()` — same pattern as read.ts, not imported from security/access.ts.
+  - For segment overlap testing: `editRange.start < segment.end && editRange.end > segment.start` is the overlap condition used by `findOverlappingSegment()`.
+  - Marker segment boundaries: start is at the beginning of the start marker match, end is at the end of the end marker match (includes both markers in the range).
 ---

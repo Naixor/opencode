@@ -157,8 +157,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 7 CASE-WRITE/CASE-EDIT test cases passing (25 tests total). Covers file-level write denial, directory rule inheritance for new files, segment-level edit protection with marker and AST rules, marker deletion protection, adjacent edit allowance, marker injection behavior, and .opencode-security.json self-protection gap. Key findings: [MEDIUM] .opencode-security.json is NOT self-protected by default, [INFO] base config markers deny read/llm but NOT write, [INFO] write tool has no segment-level checks, [LOW] audit log not protected by default."
     },
     {
       "id": "US-009",
