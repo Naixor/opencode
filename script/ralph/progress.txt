@@ -12,6 +12,9 @@
 - Run typecheck with `~/.bun/bin/bun run tsc --noEmit` in packages/opencode directory
 - Use minimatch (already available) for glob pattern matching
 - Use Log.create({ service: "service-name" }) for logging within namespaces
+- LLM requests flow through session/llm.ts -> wrapLanguageModel middleware -> ProviderTransform.message() -> streamText()
+- Vercel AI SDK middleware uses `transformParams` hook - use @ts-expect-error for prompt type mismatch when treating it generically
+- LanguageModelV2Prompt is Array<LanguageModelV2Message> with roles: system (string content), user/assistant/tool (array content with typed parts)
 
 ---
 
@@ -238,5 +241,25 @@
   - matchedText is truncated to 100 chars for marker segments to avoid storing large content chunks
   - The ProtectedMatch interface includes: start, end, matchedText, ruleType ("marker" | "ast" | "pattern"), and the triggering rule
   - extractLiteralFromGlob() handles common glob patterns: strips leading **/  and uses longest literal prefix before any wildcard
+---
+
+## 2026-02-05 - US-018
+- What was implemented: Created LLM request interceptor middleware that scans outgoing LLM requests for protected content before sending to providers
+- Files changed:
+  - packages/opencode/src/session/llm.ts (modified)
+- **Learnings for future iterations:**
+  - LLM requests are constructed in session/llm.ts and sent via `streamText()` from the Vercel AI SDK
+  - The `wrapLanguageModel()` function supports a middleware array with `transformParams` hooks
+  - The existing middleware uses `@ts-expect-error` for prompt type mismatch - the same pattern works for security scanning
+  - Security middleware is placed BEFORE the provider transform middleware so it runs on the original messages
+  - LanguageModelV2Prompt (args.params.prompt) is an array of messages with different roles and content types:
+    - system: content is a string
+    - user: content is array of text/file parts
+    - assistant: content is array of text/file/reasoning/tool-call/tool-result parts
+    - tool: content is array of tool-result parts
+  - Tool results have multiple output types: text (string value), json (JSON value), error-text, error-json, content (array)
+  - Block vs redact decision: rules with no allowedRoles = block (absolute deny), rules with allowedRoles = redact (role-dependent, redact since role can't be verified at middleware level)
+  - The SecurityRedact.redactContent() can be applied to individual text parts in-place by mutating the prompt array
+  - All interceptions (both block and redact) are logged to SecurityAudit for audit trail
 ---
 

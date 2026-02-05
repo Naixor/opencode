@@ -22,6 +22,10 @@ import { SystemPrompt } from "./system"
 import { Flag } from "@/flag/flag"
 import { PermissionNext } from "@/permission/next"
 import { Auth } from "@/auth"
+import { SecurityConfig } from "@/security/config"
+import { LLMScanner } from "@/security/llm-scanner"
+import { SecurityRedact } from "@/security/redact"
+import { SecurityAudit } from "@/security/audit"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
@@ -244,6 +248,7 @@ export namespace LLM {
       model: wrapLanguageModel({
         model: language,
         middleware: [
+          securityScanMiddleware(),
           {
             async transformParams(args) {
               if (args.type === "stream") {
@@ -285,5 +290,199 @@ export namespace LLM {
       }
     }
     return false
+  }
+
+  const securityLog = Log.create({ service: "security-llm" })
+
+  function extractTextFromPrompt(prompt: unknown[]): Array<{ text: string; messageIndex: number; partIndex: number }> {
+    const results: Array<{ text: string; messageIndex: number; partIndex: number }> = []
+    for (let i = 0; i < prompt.length; i++) {
+      const msg = prompt[i] as Record<string, unknown>
+      if (!msg || !msg.role) continue
+
+      // System messages have string content
+      if (msg.role === "system" && typeof msg.content === "string") {
+        results.push({ text: msg.content, messageIndex: i, partIndex: -1 })
+        continue
+      }
+
+      // User, assistant, and tool messages have array content
+      if (!Array.isArray(msg.content)) continue
+      for (let j = 0; j < msg.content.length; j++) {
+        const part = msg.content[j] as Record<string, unknown>
+        if (!part) continue
+
+        if (part.type === "text" && typeof part.text === "string") {
+          results.push({ text: part.text, messageIndex: i, partIndex: j })
+          continue
+        }
+        if (part.type === "reasoning" && typeof part.text === "string") {
+          results.push({ text: part.text, messageIndex: i, partIndex: j })
+          continue
+        }
+        // Tool results can contain text or JSON
+        if (part.type === "tool-result" && part.output) {
+          const output = part.output as Record<string, unknown>
+          if (output.type === "text" && typeof output.value === "string") {
+            results.push({ text: output.value, messageIndex: i, partIndex: j })
+            continue
+          }
+          if (output.type === "json" && output.value !== undefined) {
+            results.push({ text: JSON.stringify(output.value), messageIndex: i, partIndex: j })
+            continue
+          }
+          if (output.type === "content" && Array.isArray(output.value)) {
+            for (const item of output.value) {
+              const v = item as Record<string, unknown>
+              if (v.type === "text" && typeof v.text === "string") {
+                results.push({ text: v.text, messageIndex: i, partIndex: j })
+              }
+            }
+          }
+        }
+      }
+    }
+    return results
+  }
+
+  function redactTextInPrompt(
+    prompt: unknown[],
+    messageIndex: number,
+    partIndex: number,
+    matches: LLMScanner.ProtectedMatch[],
+  ): void {
+    const msg = prompt[messageIndex] as Record<string, unknown>
+    if (!msg) return
+
+    // System message: content is a string
+    if (partIndex === -1 && typeof msg.content === "string") {
+      const segments = matches.map((m) => ({ start: m.start, end: m.end }))
+      msg.content = SecurityRedact.redactContent(msg.content, segments)
+      return
+    }
+
+    if (!Array.isArray(msg.content)) return
+    const part = msg.content[partIndex] as Record<string, unknown>
+    if (!part) return
+
+    if ((part.type === "text" || part.type === "reasoning") && typeof part.text === "string") {
+      const segments = matches.map((m) => ({ start: m.start, end: m.end }))
+      part.text = SecurityRedact.redactContent(part.text, segments)
+      return
+    }
+
+    if (part.type === "tool-result" && part.output) {
+      const output = part.output as Record<string, unknown>
+      if (output.type === "text" && typeof output.value === "string") {
+        const segments = matches.map((m) => ({ start: m.start, end: m.end }))
+        output.value = SecurityRedact.redactContent(output.value, segments)
+        return
+      }
+      if (output.type === "json" && output.value !== undefined) {
+        const original = JSON.stringify(output.value)
+        const segments = matches.map((m) => ({ start: m.start, end: m.end }))
+        const redacted = SecurityRedact.redactContent(original, segments)
+        output.value = redacted
+        output.type = "text"
+        return
+      }
+    }
+  }
+
+  function securityScanMiddleware() {
+    return {
+      // @ts-expect-error - prompt is typed as LanguageModelV2Prompt but we need to inspect it generically
+      async transformParams(args) {
+        const config = SecurityConfig.getSecurityConfig()
+        const hasRules =
+          (config.rules ?? []).some((r) => r.deniedOperations.includes("llm")) ||
+          (config.segments?.markers ?? []).some((m) => m.deniedOperations.includes("llm"))
+
+        if (!hasRules) {
+          return args.params
+        }
+
+        const prompt = args.params.prompt as unknown[]
+        if (!Array.isArray(prompt)) {
+          return args.params
+        }
+
+        const textParts = extractTextFromPrompt(prompt)
+        const blockViolations: Array<{ text: string; match: LLMScanner.ProtectedMatch }> = []
+        const redactTargets: Array<{
+          messageIndex: number
+          partIndex: number
+          matches: LLMScanner.ProtectedMatch[]
+        }> = []
+
+        for (const part of textParts) {
+          const matches = LLMScanner.scanForProtectedContent(part.text, config)
+          if (matches.length === 0) continue
+
+          // Determine action based on rule configuration
+          // Rules with "llm" in deniedOperations that don't have allowedRoles = "block"
+          // If any roles are specified in allowedRoles, treat as "redact" (since we can't verify role at this level)
+          const blockMatches = matches.filter((m) => m.rule.allowedRoles.length === 0)
+          const redactMatches = matches.filter((m) => m.rule.allowedRoles.length > 0)
+
+          for (const match of blockMatches) {
+            blockViolations.push({ text: part.text.slice(match.start, match.end).slice(0, 50), match })
+          }
+
+          // If no block violations from this part, collect redact targets
+          if (redactMatches.length > 0) {
+            redactTargets.push({ messageIndex: part.messageIndex, partIndex: part.partIndex, matches: redactMatches })
+          }
+        }
+
+        // Log all interceptions
+        for (const violation of blockViolations) {
+          SecurityAudit.logSecurityEvent({
+            role: "unknown",
+            operation: "llm",
+            path: "outgoing-request",
+            allowed: false,
+            reason: `Protected content detected in LLM request (${violation.match.ruleType} rule)`,
+            rulePattern: "rulePattern" in violation.match.rule ? (violation.match.rule as { rulePattern: string }).rulePattern : undefined,
+            content: violation.text,
+          })
+        }
+
+        for (const target of redactTargets) {
+          for (const match of target.matches) {
+            SecurityAudit.logSecurityEvent({
+              role: "unknown",
+              operation: "llm",
+              path: "outgoing-request",
+              allowed: true,
+              reason: `Protected content redacted from LLM request (${match.ruleType} rule)`,
+              content: match.matchedText.slice(0, 50),
+            })
+          }
+        }
+
+        // If there are block violations, throw error
+        if (blockViolations.length > 0) {
+          const details = blockViolations
+            .map((v) => `${v.match.ruleType}: "${v.text}..."`)
+            .join(", ")
+          securityLog.info("blocked LLM request due to protected content", { count: blockViolations.length })
+          throw new Error(
+            `Security: LLM request blocked - protected content detected (${blockViolations.length} violation(s): ${details})`,
+          )
+        }
+
+        // Apply redaction to remaining matches
+        for (const target of redactTargets) {
+          redactTextInPrompt(prompt, target.messageIndex, target.partIndex, target.matches)
+          securityLog.debug("redacted protected content from LLM request", {
+            messageIndex: target.messageIndex,
+            matchCount: target.matches.length,
+          })
+        }
+
+        return args.params
+      },
+    }
   }
 }
