@@ -181,4 +181,29 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [HIGH] Here-string `<<<` and heredoc `<< EOF` bodies are NOT parsed — content appears as accidental path tokens.
   - [INFO] bash.ts tree-sitter parsing checks cp/mv/cat for directory permissions (Instance.containsPath) but NOT for SecurityAccess.checkAccess(). These are separate permission systems.
   - [INFO] The `FLAGS_WITH_VALUES` map only covers grep, find, sed, awk, head, tail — other commands' flags are handled by generic `isFlag()` which checks for `-` prefix.
+- **Command prefix bypass**: Scanner only strips `sudo` prefix (cmdIndex logic). Commands like `nohup`, `time`, `env`, `nice`, `timeout` cause the scanner to check the prefix instead of the actual command.
+- **xargs bypass**: `xargs cat` is not detected because xargs is not in FILE_ACCESS_COMMANDS, and the scanner cannot understand that xargs invokes its argument as a command.
+- **eval bypass**: `eval 'cat secrets/key.pem'` is a universal bypass — eval is not scanned and its quoted argument is opaque.
+- **Interpreter bypass**: python3, node, ruby, perl, bash, sh, zsh — none in FILE_ACCESS_COMMANDS. Arbitrary code execution via `-c` flag reads any file.
+- **Data exfiltration**: curl (-F, --data-binary, -T), wget (--post-file), tar, zip — none scanned. Can archive and upload protected content.
+- **Git history**: git show/log/diff can access protected file content from history — documented as out of scope per PRD.
+---
+
+## 2026-02-05 - US-011
+- Implemented CASE-BASH-008 through CASE-BASH-015 advanced bash evasion test cases
+- 84 tests total in bash-bypass.test.ts (36 new tests), all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/bash-bypass.test.ts (appended)
+- **Learnings for future iterations:**
+  - [HIGH] xargs bypass: `echo secrets/key.pem | xargs cat` — neither echo nor xargs in FILE_ACCESS_COMMANDS. Scanner can't understand that xargs invokes its argument as a command. `find . -name key.pem | xargs cat` is a two-stage bypass.
+  - [HIGH] Interpreter one-liners: python3/node/ruby/perl/php/lua/bash/sh/zsh — none scanned. `python3 -c 'open("secrets/key.pem").read()'` is completely invisible to the scanner. This is a fundamental limitation of static command scanning.
+  - [HIGH] Data exfiltration commands: curl (-F file=@path, --data-binary @path, -T path), wget (--post-file=path) — not scanned. Direct file upload to remote servers.
+  - [HIGH] Archive commands: tar, zip — not scanned. Can archive entire protected directories: `tar czf - secrets/ | base64` encodes and streams to stdout.
+  - [INFO] Git history: git show HEAD:path, git log -p -- path, git diff -- path, git stash show -p — all unscanned. Documented as out of scope per PRD.
+  - [HIGH] Environment variable exfiltration: `export SECRET=$(cat secrets/key.pem)` — double bypass (export not scanned + $() not parsed). Same root cause as CASE-BASH-004.
+  - [HIGH] eval bypass: `eval 'cat secrets/key.pem'` is universal — eval is not scanned, quoted argument is opaque. Any static scanner is fundamentally vulnerable to eval.
+  - [MEDIUM] Command prefix bypass: Only `sudo` is recognized as a prefix (cmdIndex = 1 when tokens[0] === "sudo"). Other common prefixes are NOT stripped: nohup, time, env, nice, strace, ltrace, timeout, ionice, taskset. `nohup cat secrets/key.pem` → scanner checks "nohup" not "cat".
+  - [HIGH] `/usr/bin/env cat secrets/key.pem` — env is commonly used as command prefix in shebangs. baseName = "env", not in FILE_ACCESS_COMMANDS. Realistic evasion vector.
+  - [INFO] Full-path basename extraction via `path.basename()` works correctly for all 10 FILE_ACCESS_COMMANDS. `/usr/bin/cat` → "cat". Limitation is in the command allowlist, not basename logic.
+  - [INFO] Background operator `&` is correctly handled by splitPipeline — `cat secrets/key.pem &` still detects the file.
 ---

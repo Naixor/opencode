@@ -214,8 +214,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 8 CASE-BASH test cases (008-015) passing (84 tests total in file). Covers xargs piped to cat, interpreter one-liners (python3/node/ruby/perl), curl/wget file exfiltration, tar/zip archive attacks, git history access (out of scope), environment variable exfiltration via command substitution, eval bypass, background/nohup/time/env command prefix bypass, and full-path command basename extraction."
     },
     {
       "id": "US-012",
