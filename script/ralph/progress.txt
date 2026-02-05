@@ -247,4 +247,23 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - Base config nodeTypes `["function", "arrow_function"]` does NOT include `"method"` — all class methods evade the default config. Must add `"method"` to nodeTypes for comprehensive protection.
   - Re-export aliasing: `export { processData as encryptData }` — ExportSpecifier is not a function/arrow/class/method, so the alias name is not checked. An attacker can rename a function at the export boundary.
   - Unsupported languages: Python (.py), Go (.go), Rust (.rs), Java (.java), C (.c) all return empty segments. Only TS/JS extensions (.ts, .tsx, .js, .jsx, .mjs, .cjs) are supported.
+- **MCP policy**: `SecurityConfig.getMcpPolicy(serverName)` checks `config.mcp.servers[serverName]`, falls back to `config.mcp.defaultPolicy`, falls back to `"trusted"` if no mcp config. Three policy levels: "blocked" (tools not registered), "enforced" (inputs/outputs scanned), "trusted" (no scanning).
+- **MCP tool registration**: In `prompt.ts`, blocked servers are skipped via `continue`. Enforced servers scan both input (`JSON.stringify(args)`) and output (`contentItem.text`) via `LLMScanner.scanForProtectedContent()`. Trusted servers skip all scanning.
+- **MCP server identity**: Derived from tool key via `key.slice(0, key.indexOf("_"))` — first underscore split. Server names with underscores cause mismatch (e.g., "my_custom_server" extracts "my").
+---
+
+## 2026-02-05 - US-014
+- Implemented CASE-MCP-001 through CASE-MCP-006 MCP security bypass test cases
+- 24 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/mcp-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - `getMcpPolicy()` returns "blocked" for blocked-server, "enforced" for enforced-server, "trusted" for trusted-server — direct config key lookup via `config.mcp.servers[serverName]`.
+  - Fallback chain: server-specific policy → defaultPolicy → "trusted" (when no mcp config exists).
+  - [INFO] Trusted servers bypass ALL scanning (both input and output). A compromised trusted MCP server can exfiltrate all protected content with no detection. The scanner itself works correctly — but it's never invoked for trusted servers.
+  - [INFO] Server name extraction uses first underscore split: `key.slice(0, key.indexOf("_"))`. If a server is registered as "my_custom_server" and its tools are keyed as "my_custom_server_tool", the extracted name is "my" — NOT "my_custom_server". This is a configuration gotcha that could cause policy mismatch.
+  - [INFO] Tool key without underscores uses the entire key as server name — safe fallback.
+  - [INFO] Empty string server name falls back to defaultPolicy — no special casing.
+  - [KNOWN_LIMITATION] Base64-encoded protected paths in MCP output bypass LLMScanner — same limitation as CASE-LLM-005.
+  - Enforced policy scans both directions: tool input via `JSON.stringify(args)` and tool output text content items. Non-text content items (images, etc.) are skipped.
 ---
