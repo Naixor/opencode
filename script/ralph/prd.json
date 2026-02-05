@@ -331,8 +331,8 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 7 CASE-AGENT test cases passing (25 tests total). Covers permission layering documentation (PermissionNext.disabled vs evaluate for plan agent), security protection of plan file paths even when PermissionNext allows, SecurityAccess.checkAccess blocking reads/writes on protected files for lowest role (viewer), BashScanner.scanBashCommand path extraction for plan mode bash blocking, SecurityAccess independence from agent permission system, session permission override independence from SecurityAccess, and write blocking regardless of active agent. Key findings: [INFO] PermissionNext and SecurityAccess are independent layers — PermissionNext controls tool availability, SecurityAccess controls file access inside tools. [INFO] Plan agent does not fully disable edit tools via disabled() — uses evaluate() with pattern-based rules instead. [INFO] Both layers must allow for an operation to succeed."
     },
     {
       "id": "US-018",

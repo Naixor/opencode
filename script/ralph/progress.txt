@@ -47,6 +47,11 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **AST method detection**: `getNodeInfo()` checks `ts.isStringLiteral(node.name)` for method declarations, but computed property names like `['encryptData']()` wrap the string literal in a `ComputedPropertyName` node — `node.name` is `ComputedPropertyName`, not `StringLiteral`. Computed string methods evade detection.
 - **Base config nodeTypes**: Default AST config only has `["function", "arrow_function"]` — NOT `"method"`. Class methods with matching names evade default config detection. Must add `"method"` to nodeTypes to protect class methods.
 - **Re-export aliasing**: `export { processData as encryptData }` — the AST parser only sees the source declaration `processData`. The alias name `encryptData` in the ExportSpecifier is not checked by `getNodeInfo()`.
+- **Rule inheritance**: `checkAccess()` evaluates ALL matching rules from `getInheritanceChain()`. A child config's permissive rule (deniedOperations: []) does NOT cancel a parent's restrictive rule — any single deny is sufficient to block access. Merge order does not matter.
+- **Glob single wildcard**: `src/*/private/**` matches exactly one directory level — `src/a/b/private/file.ts` is NOT matched (two levels between `src/` and `private/`).
+- **PermissionNext vs SecurityAccess**: Two independent security layers. PermissionNext controls tool availability (agent-level), SecurityAccess controls file access (inside tools). Both must allow for operation to succeed. PermissionNext deny prevents tool invocation entirely. SecurityAccess deny throws error from within the tool.
+- **PermissionNext.disabled()**: Only disables tools where the LAST matching rule has `pattern: "*"` and `action: "deny"`. Pattern-specific deny rules (like plan agent's `edit: { "*": "deny", ".opencode/plans/*.md": "allow" }`) do NOT fully disable tools — the last rule's pattern is not `"*"`.
+- **PermissionNext.evaluate()**: Uses `findLast()` to find the last matching rule by permission+pattern wildcard matching. Later rules override earlier rules. Default is `ask`.
 ---
 
 ## 2026-02-05 - US-001
@@ -266,4 +271,61 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [INFO] Empty string server name falls back to defaultPolicy — no special casing.
   - [KNOWN_LIMITATION] Base64-encoded protected paths in MCP output bypass LLMScanner — same limitation as CASE-LLM-005.
   - Enforced policy scans both directions: tool input via `JSON.stringify(args)` and tool output text content items. Non-text content items (images, etc.) are skipped.
+---
+
+## 2026-02-05 - US-015
+- Implemented CASE-INH-001 through CASE-INH-004 rule inheritance bypass test cases
+- 27 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/inheritance-bypass.test.ts (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/nested-config/.opencode-security.json (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/nested-config/child/.opencode-security.json (new)
+- **Learnings for future iterations:**
+  - `mergeSecurityConfigs()` unions all rules from all configs. A child config's permissive rule (deniedOperations: []) does NOT cancel a parent's restrictive rule — both rules exist in the merged config and `checkAccess()` evaluates ALL matching rules.
+  - Merge order does NOT matter for security: rules from [child, parent] produce the same `checkAccess()` result as [parent, child] because the function iterates through all matching rules, and any single deny is sufficient.
+  - `getInheritanceChain()` returns both direct matches (via minimatch glob) and inherited matches (via parent path iteration for directory rules). For `src/auth/keys.ts` with rules `src/**` and `src/auth/**`, both rules appear in the chain.
+  - Directory rule inheritance works at arbitrary depth: a rule on `a/**` correctly blocks files at 7+ and 10+ directory levels deep via the glob match `a/**` expanding to match all nested paths.
+  - Glob pattern `**/test*` with `matchBase: true` matches basenames starting with "test" but does NOT match "contest.ts" (no substring match — requires segment-start match).
+  - Single wildcard `src/*/private/**` matches exactly one directory level between `src/` and `private/` — `src/a/b/private/secret.ts` (two levels) is NOT matched.
+  - Character class `[!.]env` matches exactly one non-dot character followed by "env" — 4-char strings only. `.env` correctly not matched, `myenv` (5 chars) also not matched.
+  - Complementary glob patterns from merged configs are additive: `**/*.pem` from configA + `**/*.key` from configB both active after merge.
+- **Audit logging**: `SecurityAudit.logSecurityEvent()` uses async `fs.appendFile` — non-blocking, errors logged as warnings but never crash security enforcement.
+- **Audit log path**: `getLogPath()` reads from `config.logging.path`, defaults to `.opencode-security-audit.log`. No validation for symlinks, writability, or existence before write.
+- **Content hashing**: `hashContent()` uses `crypto.createHash("sha256")` truncated to 16 hex chars. `createContentSummary()` includes a hash + truncated preview (up to 50 chars of raw content).
+- **Log format**: NDJSON (one JSON object per line via `JSON.stringify(entry) + "\n"`). `JSON.stringify` escapes newlines and control characters in string values, preventing log injection via malicious paths or reasons.
+- **Audit log self-protection**: Neither `.opencode-security-audit.log` nor `.opencode-security.json` are protected by default security rules. Both read and write are allowed for any role.
+---
+
+## 2026-02-05 - US-016
+- Implemented CASE-RACE-001 through CASE-RACE-003 race condition test cases and CASE-LOG-001 through CASE-LOG-006 audit evasion test cases
+- 32 tests total across 2 files (7 race-condition + 25 audit-evasion), all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/race-condition.test.ts (new)
+  - packages/opencode/test/security/access_control_cases/unit/audit-evasion.test.ts (new)
+- **Learnings for future iterations:**
+  - [INFO] TOCTOU timing window: Config is loaded once via `loadSecurityConfig()` and cached in `currentConfig`. File changes after load have NO effect on security checks. The window exists only at load time — an attacker who modifies the config file before load could inject permissive rules.
+  - [INFO] Config cache: `getSecurityConfig()` returns the in-memory `currentConfig`. Even deleting the config file after load doesn't remove protection. Only an explicit `loadSecurityConfig()` call refreshes the cache.
+  - [INFO] Symlink swap timing: `fs.realpathSync()` resolves the symlink once per security check call. No persistent symlink resolution cache, but also no re-verification between check and actual file I/O.
+  - [INFO] Audit resilience: `/dev/null`, non-writable paths, and empty string log paths all handle gracefully — `fs.appendFile` error callback logs a warning but never throws or blocks security enforcement.
+  - [LOW] `createContentSummary()` includes up to 50 chars of raw content in the preview portion alongside the hash. Short secrets (< 50 chars) appear in full in audit log summaries.
+  - [INFO] `JSON.stringify` properly escapes newlines/tabs/null bytes in string values. Malicious paths or reason fields with control characters do not corrupt the NDJSON log format.
+  - [HIGH] `rm`, `rm -f`, `rm -rf`, `unlink`, `shred` are all NOT in BashScanner.FILE_ACCESS_COMMANDS. Audit log deletion is completely invisible to the bash scanner.
+  - [HIGH] `>`, `truncate`, `: >`, `cp /dev/null`, `tee`, `echo >` — all log truncation methods undetected. Shell redirection operators are not parsed by BashScanner.
+  - [MEDIUM] Audit log symlink redirect: `fs.appendFile` follows symlinks by default. An attacker can replace the audit log with a symlink to `/dev/null` (silent discard), another file (corruption), or an attacker-controlled location (data exfiltration of access patterns).
+  - [MEDIUM] Audit log is not self-protected: `checkAccess(".opencode-security-audit.log", "read"|"write", "viewer")` returns `allowed: true`. No default rule protects the audit log.
+---
+
+## 2026-02-05 - US-017
+- Implemented CASE-AGENT-001 through CASE-AGENT-007 plan agent and security interaction test cases
+- 25 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/agent-interaction.test.ts (new)
+- **Learnings for future iterations:**
+  - [INFO] PermissionNext and SecurityAccess are independent security layers operating at different levels: PermissionNext controls tool availability (agent-level gate), SecurityAccess controls file access (tool-internal gate). Both must allow for an operation to succeed.
+  - [INFO] Plan agent does NOT fully disable edit tools via `PermissionNext.disabled()`. The plan agent uses `edit: { "*": "deny", ".opencode/plans/*.md": "allow" }` — since the LAST rule for "edit" permission has a specific pattern (not `"*"`), `disabled()` returns false. Instead, `evaluate()` blocks at runtime when the file pattern doesn't match `.opencode/plans/*.md`.
+  - [INFO] `PermissionNext.disabled()` only removes tools from the LLM tool list when the last matching rule has `pattern: "*"` and `action: "deny"`. Example: `edit: "deny"` (simple deny) fully disables edit tools. `edit: { "*": "deny", "plans/*.md": "allow" }` does NOT.
+  - [INFO] SecurityAccess.checkAccess has NO agent parameter — it is completely agent-agnostic. The function signature is `checkAccess(filePath, operation, role)`. All tools use `getDefaultRole(config)` to get the lowest role, regardless of which agent invoked them.
+  - [INFO] A PermissionNext "allow" on a tool does NOT bypass SecurityAccess.checkAccess inside the tool. Session overrides that allow edits do NOT bypass file-level security.
+  - [INFO] The permission layering order is: PermissionNext (gate 1) → SecurityAccess (gate 2). If gate 1 denies, the tool is never called and gate 2 is never reached. If gate 1 allows but gate 2 denies, the tool throws an access denied error.
+  - BashScanner.scanBashCommand resolves `secrets/` (trailing slash) to `secrets` (no trailing slash) via `path.resolve()`. Tests should match without trailing slash.
 ---
