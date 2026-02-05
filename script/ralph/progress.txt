@@ -35,6 +35,9 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **Marker detection**: `SecuritySegments.findMarkerSegments()` uses regex patterns for `//`, `#`, `<!-- -->`, `/* */`, `"""`, `'''` comment styles. Stack-based matching for nested markers. Matches by rule (start/end pair).
 - **Read tool pipeline**: (1) file-level `checkAccess()`, (2) images/PDFs return raw base64 without segment redaction, (3) `findProtectedSegments()` for marker+AST, (4) `redactContent()`, (5) split lines, (6) offset/limit slicing.
 - **Read tool roles**: `findProtectedSegments()` in read.ts has its own local `isRoleAllowed()` and `getRoleLevel()` functions — not imported from security modules.
+- **Grep tool**: Two-layer security — (1) file-level `checkAccess` excludes protected files, (2) segment-level redaction replaces match content with `REDACTED_PLACEHOLDER`. Caches access/segment results per file. Has own local `findProtectedSegments()`, `getDefaultRole()`, `isRoleAllowed()`, `getRoleLevel()`.
+- **Glob tool**: Only file-level security — `checkAccess(f.path, "read", currentRole)`. Returns paths only, no segment checks. `filteredCount` logged at debug level, not in user-facing output.
+- **Search tool `include` param**: Passed to ripgrep `--glob` for file selection. Security filtering is post-result — include cannot bypass security.
 ---
 
 ## 2026-02-05 - US-001
@@ -139,4 +142,21 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - Edit tool's `findProtectedSegments()` has its own local `isRoleAllowed()` and `getRoleLevel()` — same pattern as read.ts, not imported from security/access.ts.
   - For segment overlap testing: `editRange.start < segment.end && editRange.end > segment.start` is the overlap condition used by `findOverlappingSegment()`.
   - Marker segment boundaries: start is at the beginning of the start marker match, end is at the end of the end marker match (includes both markers in the range).
+---
+
+## 2026-02-05 - US-009
+- Implemented CASE-GREP-001 through CASE-GREP-003 and CASE-GLOB-001 through CASE-GLOB-003 grep/glob bypass test cases
+- 29 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/grep-glob-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - Grep tool (grep.ts) has two-layer security: (1) file-level `checkAccess(filePath, "read", currentRole)` to exclude fully protected files, (2) segment-level redaction replacing match content with `REDACTED_PLACEHOLDER` for lines overlapping protected marker/AST segments.
+  - Grep tool caches file access results and segments per file (`fileAccessCache`, `fileSegmentCache`) — efficient for multi-match files.
+  - Grep tool has its own local `findProtectedSegments()`, `getRoleLevel()`, `isRoleAllowed()`, `getDefaultRole()` functions — same pattern as read.ts and edit.ts, not imported from security modules.
+  - Grep `include` param is passed directly to ripgrep `--glob` — security filtering happens AFTER ripgrep returns results, not before. Include cannot bypass security.
+  - Glob tool (glob.ts) has only file-level security: `checkAccess(f.path, "read", currentRole)`. No segment-level checks (returns paths only, no content).
+  - [INFO] Grep redaction reveals file path + line number for redacted matches — metadata leakage at low severity. Content is properly hidden.
+  - [INFO] Glob output is indistinguishable between "no matches" and "all matches filtered" — prevents information disclosure about existence of protected files.
+  - [INFO] `filteredCount` / `filteredFileCount` / `redactedMatchCount` are logged via `securityLog.debug()` only — not exposed in user-facing output.
+  - [INFO] `**/.env*` pattern broadly matches `.env.example`, `.envrc`, etc. — over-protection is the safe default.
 ---

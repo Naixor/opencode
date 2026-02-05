@@ -175,8 +175,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 6 CASE-GREP/CASE-GLOB test cases passing (29 tests total). Covers file-level exclusion from grep results, segment-level redaction of marker and AST regions, include glob filtering, directory rule inheritance for glob, .env* pattern matching, and information disclosure prevention (filtered count not leaked in output)."
     },
     {
       "id": "US-010",
