@@ -2,6 +2,8 @@
 Started: Thu  5 Feb 2026 17:57:58 CST
 
 ## Codebase Patterns
+- Access-guard infrastructure: `packages/opencode/test/security/access_control_cases/access-guard/` — types.ts, parser.ts, privileged-monitor.ts, unprivileged-monitor.ts, reporter.ts, index.ts. Use `withAccessGuard(patterns, testFn)` convenience wrapper for integration tests.
+- `tsgo` parses JSDoc `/** */` comments and can trip on glob patterns inside them — use `//` line comments for code examples with globs
 - Security modules are in `packages/opencode/src/security/` — config.ts, access.ts, role.ts, token.ts, segments.ts, redact.ts, audit.ts, bash-scanner.ts, llm-scanner.ts
 - Security config schema in `schema.ts` uses Zod with namespace `SecuritySchema`
 - Tool implementations with security checks: `packages/opencode/src/tool/{read,write,edit,grep,glob,bash}.ts`
@@ -352,4 +354,27 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [INFO] Filesystem.findUp() uses Bun.file().stat() for existence check and doesn't resolve symlinks explicitly — but file reads follow symlinks via the OS.
   - [INFO] Filesystem.globUp() uses Bun.Glob.scan({followSymlinks:true}) — explicitly follows symlinks in glob scanning.
   - Testing approach: Cannot call Skill.state() or InstructionPrompt.system() directly in unit tests (require Instance.provide() context). Instead, test the underlying filesystem operations (Bun.Glob.scan, Filesystem.findUp, Bun.file().text()) and show that SecurityAccess.checkAccess denies what these operations allow.
+---
+
+## 2026-02-05 - US-019
+- Built access-guard OS-level filesystem monitor infrastructure
+- Created 6 TypeScript modules + 2 shell scripts in access-guard/ directory
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/access-guard/types.ts (new) — AccessEvent, MonitorConfig, MonitorReport, ComplianceViolation, AuditLogEntry, MonitorHandle interfaces
+  - packages/opencode/test/security/access_control_cases/access-guard/parser.ts (new) — parseFsUsageLine() parses fs_usage output, classifySyscall() maps syscalls to operations, isProtectedPath() checks against minimatch patterns
+  - packages/opencode/test/security/access_control_cases/access-guard/privileged-monitor.ts (new) — startPrivilegedMonitor() spawns `sudo fs_usage -f filesystem -w -p <pid>`, isPrivilegedAvailable() checks `sudo -n true`
+  - packages/opencode/test/security/access_control_cases/access-guard/unprivileged-monitor.ts (new) — startUnprivilegedMonitor() uses fs.watch({recursive:true}), warns about READ detection unavailability
+  - packages/opencode/test/security/access_control_cases/access-guard/reporter.ts (new) — generateReport() aggregates events, cross-references audit log for ComplianceViolations, writeReport() outputs JSON
+  - packages/opencode/test/security/access_control_cases/access-guard/index.ts (new) — AccessGuard class with start/stop/report, withAccessGuard() convenience wrapper, re-exports all modules
+  - packages/opencode/test/security/access_control_cases/access-guard/scripts/fs_usage_monitor.sh (new) — shell wrapper with PID file, trap cleanup, SIGTERM handling
+  - packages/opencode/test/security/access_control_cases/access-guard/scripts/dtrace_monitor.d (new) — DTrace script probing open/read/write/stat/unlink/rename/mkdir/symlink/readlink by $target pid
+- **Learnings for future iterations:**
+  - `tsgo` (the typecheck tool) parses JSDoc comments and trips on glob patterns like `**/secrets/**` — use `//` line comments instead of `/** */` for code examples with glob patterns.
+  - `satisfies` keyword combined with `.filter()` type predicate can cause type narrowing issues when the satisfying type has a literal `false` vs generic `boolean` field. Use explicit for-loops with `.push()` instead.
+  - fs_usage output format is column-based but not strictly delimited — regex parsing is required. The format varies slightly across macOS versions.
+  - `sudo -n true` (non-interactive) is the correct way to check for passwordless sudo availability. Returns exit code 0 if sudo is available without a password prompt.
+  - DTrace on macOS 10.15+ (Catalina) is restricted by SIP. fs_usage is the preferred tool for modern macOS filesystem monitoring.
+  - fs.watch with `{ recursive: true }` only captures write/create/delete events — NOT reads. This is a fundamental OS limitation, not a bug.
+  - The `minimatch` library is used both in the security access control system and in the access-guard parser for pattern matching — consistent behavior.
+  - `MonitorHandle` interface with `stop(): Promise<AccessEvent[]>` pattern works well for both privileged (child process) and unprivileged (fs.watch) monitors.
 ---
