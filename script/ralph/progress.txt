@@ -4,6 +4,7 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 ## Codebase Patterns
 - Access-guard infrastructure: `packages/opencode/test/security/access_control_cases/access-guard/` — types.ts, parser.ts, privileged-monitor.ts, unprivileged-monitor.ts, reporter.ts, index.ts. Use `withAccessGuard(patterns, testFn)` convenience wrapper for integration tests.
 - Access-guard test patterns: Use absolute path patterns (`path.join(tempDir, "secrets", "**")`) for monitoring. Handle both privileged/unprivileged mode in assertions. Add 200-300ms delays for fs.watch event propagation. Use `startAccessGuard()`/`stopAccessGuard()` from helpers.ts for simple test patterns.
+- Integration test scripts: `packages/opencode/test/security/access_control_cases/integration/` — use `bun run -` with heredoc to invoke TS security modules from shell scripts. Canonicalize temp dirs with `python3 -c "import os; print(os.path.realpath('$path'))"`. TAP output format.
 - `tsgo` parses JSDoc `/** */` comments and can trip on glob patterns inside them — use `//` line comments for code examples with globs
 - Security modules are in `packages/opencode/src/security/` — config.ts, access.ts, role.ts, token.ts, segments.ts, redact.ts, audit.ts, bash-scanner.ts, llm-scanner.ts
 - Security config schema in `schema.ts` uses Zod with namespace `SecuritySchema`
@@ -395,4 +396,22 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - When security blocks BEFORE file I/O (Read tool, BashScanner), no OS-level read() syscalls appear for the protected file. This is the correct behavior — the guard verifies that pre-execution blocking works.
   - `startAccessGuard()` and `stopAccessGuard()` in helpers.ts maintain an `activeGuard` module-level variable for simple beforeEach/afterEach patterns.
   - `isProtectedPath()` from the parser module is useful for unit-testing pattern matching independently of the full monitor.
+---
+
+## 2026-02-05 - US-021
+- Created integration test scripts for config manipulation and symlink attacks
+- 22 integration tests total across 2 scripts, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/integration/test-config-manipulation.sh (new) — 10 TAP tests
+  - packages/opencode/test/security/access_control_cases/integration/test-symlink-attacks.sh (new) — 12 TAP tests
+  - packages/opencode/test/security/access_control_cases/integration/run-all.sh (new) — aggregation runner
+- **Learnings for future iterations:**
+  - `bun eval` does NOT exist in Bun 1.3.x. Use `bun run -` with stdin pipe (heredoc) instead: `bun run - <<SCRIPT ... SCRIPT`
+  - `@/` import aliases work from any CWD as long as the packages/opencode tsconfig.json is in scope — `cd "$OPENCODE_DIR" && bun run -` is the correct pattern.
+  - macOS `mktemp -d` returns `/var/folders/...` but canonical paths use `/private/var/folders/...`. Use `python3 -c "import os; print(os.path.realpath('$path'))"` to canonicalize in shell scripts for consistent pattern matching.
+  - Directory symlinks are a KNOWN_LIMITATION: `resolveSymlink()` only checks if the FINAL path is a symlink via `lstatSync()`. Intermediate path components (e.g., `safe/secrets-link/key.pem` where `secrets-link` is a symlink) are NOT resolved. The file at the end is a regular file, so lstat returns regular — no symlink detection.
+  - Hard links bypass symlink-based security entirely — `lstatSync` shows a regular file for hard links, and the hard link path is outside the protected directory pattern. No known mitigation without inode-level tracking.
+  - TAP (Test Anything Protocol) format: `ok N - description` for pass, `not ok N - description` for fail. `# SKIP` suffix for skipped. `1..N` header declares test count. Tools like `tap-parser` can consume this format.
+  - Integration scripts should use `trap cleanup EXIT` for reliable temp directory removal even on failure.
+  - Shell heredoc with `<<SCRIPT` (no quotes) expands `$VARIABLES` — needed for injecting temp dir paths. Use `<<'SCRIPT'` (quoted) for literal content.
 ---
