@@ -83,4 +83,23 @@ export namespace SecurityConfig {
     currentConfig = emptyConfig
     configLoaded = false
   }
+
+  /**
+   * Get the MCP security policy for a given server name.
+   * Returns the server-specific policy if configured, otherwise the default policy.
+   * If no MCP config exists, returns "trusted" (no restrictions).
+   */
+  export function getMcpPolicy(serverName: string): "enforced" | "trusted" | "blocked" {
+    const config = getSecurityConfig()
+    if (!config.mcp) {
+      return "trusted"
+    }
+
+    const serverPolicy = config.mcp.servers?.[serverName]
+    if (serverPolicy) {
+      return serverPolicy
+    }
+
+    return config.mcp.defaultPolicy ?? "trusted"
+  }
 }

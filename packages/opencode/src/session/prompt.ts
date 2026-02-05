@@ -46,6 +46,11 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+import { SecurityConfig } from "@/security/config"
+import { SecurityAccess } from "@/security/access"
+import { SecurityAudit } from "@/security/audit"
+import { LLMScanner } from "@/security/llm-scanner"
+import { SecurityRedact } from "@/security/redact"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -734,13 +739,35 @@ export namespace SessionPrompt {
       })
     }
 
+    const securityLog = Log.create({ service: "security-mcp" })
+
     for (const [key, item] of Object.entries(await MCP.tools())) {
       const execute = item.execute
       if (!execute) continue
 
+      // Extract server name from tool key (format: sanitizedServerName_sanitizedToolName)
+      const underscoreIndex = key.indexOf("_")
+      const serverName = underscoreIndex > 0 ? key.slice(0, underscoreIndex) : key
+
+      // Check MCP security policy for this server
+      const policy = SecurityConfig.getMcpPolicy(serverName)
+
+      // If server is blocked, skip registering its tools entirely
+      if (policy === "blocked") {
+        securityLog.info("mcp server blocked by security policy", { server: serverName, tool: key })
+        SecurityAudit.logSecurityEvent({
+          role: "system",
+          operation: "read",
+          path: `mcp://${serverName}/${key}`,
+          allowed: false,
+          reason: `MCP server '${serverName}' is blocked by security policy`,
+        })
+        continue
+      }
+
       const transformed = ProviderTransform.schema(input.model, asSchema(item.inputSchema).jsonSchema)
       item.inputSchema = jsonSchema(transformed)
-      // Wrap execute to add plugin hooks and format output
+      // Wrap execute to add plugin hooks, security checks, and format output
       item.execute = async (args, opts) => {
         const ctx = context(args, opts)
 
@@ -763,7 +790,63 @@ export namespace SessionPrompt {
           always: ["*"],
         })
 
+        // For 'enforced' policy, scan tool arguments for protected content before execution
+        if (policy === "enforced") {
+          const config = SecurityConfig.getSecurityConfig()
+          const argsString = JSON.stringify(args)
+          const inputMatches = LLMScanner.scanForProtectedContent(argsString, config)
+
+          if (inputMatches.length > 0) {
+            securityLog.info("mcp tool input contains protected content", {
+              server: serverName,
+              tool: key,
+              matchCount: inputMatches.length,
+            })
+            SecurityAudit.logSecurityEvent({
+              role: "system",
+              operation: "llm",
+              path: `mcp://${serverName}/${key}`,
+              allowed: false,
+              reason: `MCP tool input contains ${inputMatches.length} protected content match(es)`,
+              content: argsString,
+            })
+            throw new Error(
+              `Security: MCP tool '${key}' blocked. Tool arguments contain protected content (${inputMatches.length} match(es) detected). Server '${serverName}' is under enforced security policy.`,
+            )
+          }
+        }
+
+        securityLog.debug("mcp tool execution allowed", { server: serverName, tool: key, policy })
+
         const result = await execute(args, opts)
+
+        // For 'enforced' policy, scan tool outputs for protected content
+        if (policy === "enforced") {
+          const config = SecurityConfig.getSecurityConfig()
+          for (const contentItem of result.content) {
+            if (contentItem.type !== "text") {
+              continue
+            }
+            const outputMatches = LLMScanner.scanForProtectedContent(contentItem.text, config)
+            if (outputMatches.length > 0) {
+              securityLog.info("mcp tool output contains protected content, redacting", {
+                server: serverName,
+                tool: key,
+                matchCount: outputMatches.length,
+              })
+              SecurityAudit.logSecurityEvent({
+                role: "system",
+                operation: "llm",
+                path: `mcp://${serverName}/${key}`,
+                allowed: true,
+                reason: `MCP tool output redacted: ${outputMatches.length} protected content match(es)`,
+                content: contentItem.text,
+              })
+              const segments = outputMatches.map((m) => ({ start: m.start, end: m.end }))
+              contentItem.text = SecurityRedact.redactContent(contentItem.text, segments)
+            }
+          }
+        }
 
         await Plugin.trigger(
           "tool.execute.after",

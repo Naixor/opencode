@@ -15,6 +15,9 @@
 - LLM requests flow through session/llm.ts -> wrapLanguageModel middleware -> ProviderTransform.message() -> streamText()
 - Vercel AI SDK middleware uses `transformParams` hook - use @ts-expect-error for prompt type mismatch when treating it generically
 - LanguageModelV2Prompt is Array<LanguageModelV2Message> with roles: system (string content), user/assistant/tool (array content with typed parts)
+- MCP tool keys use format `sanitizedServerName_sanitizedToolName` - extract server name by splitting on first underscore
+- MCP tools are integrated in session/prompt.ts via MCP.tools() loop, where each tool's execute is wrapped with plugin hooks and formatting
+- SecurityConfig.getMcpPolicy(serverName) returns "enforced" | "trusted" | "blocked" for MCP server policy decisions
 
 ---
 
@@ -261,5 +264,22 @@
   - Block vs redact decision: rules with no allowedRoles = block (absolute deny), rules with allowedRoles = redact (role-dependent, redact since role can't be verified at middleware level)
   - The SecurityRedact.redactContent() can be applied to individual text parts in-place by mutating the prompt array
   - All interceptions (both block and redact) are logged to SecurityAudit for audit trail
+---
+
+## 2026-02-05 - US-019
+- What was implemented: Added MCP server security policy support with per-server policy enforcement (blocked/enforced/trusted)
+- Files changed:
+  - packages/opencode/src/security/config.ts (modified - added getMcpPolicy function)
+  - packages/opencode/src/session/prompt.ts (modified - added security policy checks in MCP tool execution wrapper)
+- **Learnings for future iterations:**
+  - MCP tools are wrapped in session/prompt.ts (not mcp/index.ts) - this is where plugin hooks, permissions, and output formatting happen
+  - Tool keys follow the format `sanitizedServerName_sanitizedToolName` (joined by underscore) - server name is extracted via first underscore index
+  - Three policy levels: "blocked" (tools not registered at all), "enforced" (inputs scanned before execution, outputs redacted after), "trusted" (no security checks)
+  - For blocked servers, tools are skipped during the MCP.tools() iteration so they never appear to the LLM
+  - For enforced servers, tool arguments are serialized to JSON and scanned with LLMScanner.scanForProtectedContent() before execution
+  - For enforced output scanning, text content items are redacted in-place using SecurityRedact.redactContent()
+  - The security config schema already had mcp.defaultPolicy and mcp.servers defined - no schema changes needed
+  - SecurityAudit uses `mcp://serverName/toolKey` as path format for MCP-related events
+  - The SecurityAccess import was added but is available for future MCP file-path-level checks if needed
 ---
 
