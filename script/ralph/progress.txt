@@ -25,6 +25,7 @@
 - For synchronous safe JSON parsing (no try/catch): use `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse(str)`
 - Git root detection: walk up directories looking for .git using fs.statSync with { throwIfNoEntry: false }
 - SecurityRole.getCurrentRole(projectRoot, config) replaces all getDefaultRole() placeholders in tool files for centralized role detection
+- Use Bun.spawnSync() for shell commands that may fail - returns result object with exitCode instead of throwing (avoids try/catch)
 
 ---
 
@@ -420,5 +421,20 @@
   - The RSAKeyPairOptions<"pem", "pem"> type correctly types the return value as { publicKey: string, privateKey: string }
   - Check for existing key file before overwriting to prevent accidental key loss
   - Warn user to add private key file to .gitignore for security
+---
+
+## 2026-02-05 - US-029
+- What was implemented: Created CLI command to issue signed JWT role tokens for team member authentication
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/issue-token.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityIssueTokenCommand)
+- **Learnings for future iterations:**
+  - JWT creation: base64url encode header and payload, sign with crypto.createSign("RSA-SHA256"), base64url encode signature
+  - base64UrlEncode: replace + with -, / with _, strip trailing = from standard base64
+  - For encrypted private keys, pass { key: privateKey, passphrase } to sign.sign()
+  - Use Bun.spawnSync() instead of execSync for git commands to avoid try/catch on failure (check exitCode !== 0)
+  - crypto.randomUUID() generates unique token IDs (jti claim) without external dependencies
+  - Token metadata (role, expiry, jti, project) output to stderr so token on stdout can be piped cleanly
+  - The --output flag allows saving token directly to a file path
 ---
 
