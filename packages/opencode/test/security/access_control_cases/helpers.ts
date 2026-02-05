@@ -4,6 +4,8 @@ import os from "os"
 import path from "path"
 import { SecurityConfig } from "@/security/config"
 import { SecuritySchema } from "@/security/schema"
+import { AccessGuard } from "./access-guard"
+import type { MonitorReport } from "./access-guard"
 
 const FIXTURES_DIR = path.join(path.dirname(new URL(import.meta.url).pathname), "fixtures")
 const KEYS_DIR = path.join(FIXTURES_DIR, "keys")
@@ -178,4 +180,37 @@ export function writeTokenFile(token: string, dir?: string): string {
   const tokenPath = path.join(tokenDir, ".opencode-role.token")
   fs.writeFileSync(tokenPath, token)
   return tokenPath
+}
+
+// ============================================================================
+// Access Guard Helpers
+// ============================================================================
+
+let activeGuard: AccessGuard | undefined
+
+/**
+ * Start an AccessGuard monitor for protected file patterns.
+ * Auto-detects privileged vs unprivileged mode.
+ */
+export async function startAccessGuard(
+  patterns: string[],
+  options?: { cwd?: string; logPath?: string },
+): Promise<AccessGuard> {
+  const guard = new AccessGuard(patterns, options)
+  await guard.start()
+  activeGuard = guard
+  return guard
+}
+
+/**
+ * Stop the active AccessGuard and return its report.
+ * Optionally cross-reference with the application audit log.
+ */
+export async function stopAccessGuard(appLogPath?: string): Promise<MonitorReport> {
+  if (!activeGuard) {
+    throw new Error("No active AccessGuard — call startAccessGuard() first")
+  }
+  const report = await activeGuard.report(appLogPath)
+  activeGuard = undefined
+  return report
 }
