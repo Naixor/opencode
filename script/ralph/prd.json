@@ -96,8 +96,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 9 CASE-AUTH test cases passing (21 tests total). Covers getDefaultRole vs getCurrentRole audit, token forgery, expiration, revocation, unknown roles, missing exp claim, MAX_SAFE_INTEGER overflow, empty role name, and case-sensitive matching."
     },
     {
       "id": "US-006",

@@ -15,6 +15,12 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - `getSecurityConfig()` uses in-memory cache (`currentConfig`); deleting config file after load does NOT remove protection
 - `mergeSecurityConfigs()` unions rules (additive), throws on conflicting role levels, deduplicates roles by name
 - `setupSecurityConfig()` helper creates `.git` dir for `findGitRoot()` to work — required for all test setups
+- `SecurityToken.verifyRoleToken()`: checks algo=RS256, signature, expiration, revocation (jti), and role claim presence
+- Token without `exp` claim is accepted (non-expiring) — [KNOWN_LIMITATION] MEDIUM
+- Empty string role (`""`) is falsy in JS → `!parsed.payload.role` returns true → token invalid
+- Role matching is case-sensitive: `"Admin" !== "admin"` — `isKnownRole()` uses exact string match
+- `SecurityRole.resetCache()` must be called in afterEach when testing getCurrentRole
+- `isRoleAllowed()` uses `roleLevel > allowedRoleLevel` (strict greater-than) for hierarchy — so a role at the same level as an allowed role is NOT permitted via hierarchy, only via direct name match
 ---
 
 ## 2026-02-05 - US-001
@@ -51,4 +57,20 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - Need `.git` directory in temp dirs for `setupSecurityConfig()` to work (findGitRoot dependency)
   - `checkAccess` returns `{ allowed: true }` when rules array is empty or undefined — consistent fail-open
   - Performance: 1000 rules with minimatch pattern checking completes well under 5s threshold
+---
+
+## 2026-02-05 - US-005
+- Implemented CASE-AUTH-001 through CASE-AUTH-009 role authentication bypass test cases
+- 21 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/role-authentication.test.ts (new)
+- **Learnings for future iterations:**
+  - [CRITICAL] All 6 tool files (read, write, edit, grep, glob, bash) use local `getDefaultRole()` which always returns the lowest role — `SecurityRole.getCurrentRole()` which checks JWT tokens is never called by tools. This means role escalation via tokens has NO effect on tool-level checks.
+  - `verifyRoleToken()` does NOT reject tokens without `exp` claim — they're treated as non-expiring. [KNOWN_LIMITATION] MEDIUM severity.
+  - Empty string role `""` in JWT is treated as falsy by `!parsed.payload.role` check → token rejected as missing role claim.
+  - Role name matching is strictly case-sensitive in both `isKnownRole()` and `isRoleAllowed()`.
+  - `isRoleAllowed()` uses strict greater-than (`roleLevel > allowedRoleLevel`) — role at same level as allowed role only gets in via direct name match, not hierarchy.
+  - `Number.MAX_SAFE_INTEGER` works correctly with JS comparison operators — no overflow issues.
+  - Need `SecurityRole.resetCache()` in `afterEach` when testing `getCurrentRole` — cache persists across tests otherwise.
+  - Local `signJWT` helper needed in test file since helpers.ts doesn't export it — needed for custom payloads (no exp, custom jti, etc.).
 ---
