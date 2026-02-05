@@ -438,3 +438,16 @@
   - The --output flag allows saving token directly to a file path
 ---
 
+## 2026-02-05 - US-030
+- What was implemented: Verified all security CLI commands are registered and working together
+- Files changed:
+  - No new file changes needed - all registration was completed incrementally in US-021 through US-029
+  - packages/opencode/src/cli/cmd/security/index.ts (verified - registers all 6 subcommands: status, check, init, logs, init-keys, issue-token)
+  - packages/opencode/src/index.ts (verified - SecurityCommand registered in main CLI)
+- **Learnings for future iterations:**
+  - When a story is purely about "wiring together" previously created components, the work may already be done incrementally
+  - The security CLI command group follows the standard yargs subcommand group pattern: parent uses builder with .command() chain and .demandCommand()
+  - All subcommands have proper `describe` fields for help text generation
+  - Typecheck passes with all security modules integrated
+---
+
