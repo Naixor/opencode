@@ -273,8 +273,8 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 6 CASE-MCP test cases passing (24 tests total). Covers getMcpPolicy returning 'blocked' for blocked-server (tools not registered), 'enforced' for enforced-server (inputs/outputs scanned by LLMScanner), 'trusted' for trusted-server (no scanning applied). Verifies unlisted server fallback to defaultMcpPolicy, no-mcp-config fallback to 'trusted', and server identity trust model (config key-based, not self-reported). Key findings: [INFO] trusted servers bypass ALL scanning — compromised trusted server can exfiltrate protected content, [INFO] server name extraction uses first underscore split — server names with underscores cause identity mismatch, [KNOWN_LIMITATION] base64-encoded paths in MCP tool output bypass scanner."
     },
     {
       "id": "US-015",

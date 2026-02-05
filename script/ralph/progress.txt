@@ -1,45 +1,269 @@
 # Ralph Progress Log
-# Feature: Security Access Control Bypass Test Cases
-# Branch: ralph/security-bypass-cases
-# Started:
-# ============================================
+Started: Thu  5 Feb 2026 17:57:58 CST
 
 ## Codebase Patterns
-- Use namespace pattern for modules (e.g., `export namespace SecuritySchema { ... }`)
-- Use Zod for schema validation with `z` import from "zod"
-- Follow code style: no try/catch (use .catch()), no any types, no else statements, prefer const
-- Run typecheck with `~/.bun/bin/bun run tsc --noEmit` in packages/opencode directory
-- Use minimatch (already available) for glob pattern matching
-- Use Log.create({ service: "service-name" }) for logging within namespaces
-- SecurityConfig.loadSecurityConfig(projectRoot) loads .opencode-security.json and caches it
-- SecurityConfig.getSecurityConfig() returns cached config (synchronous)
-- SecurityConfig.resetConfig() resets to empty config (useful for test teardown)
-- SecurityAccess.checkAccess(path, operation, role) returns { allowed: boolean, reason?: string }
-- SecurityAccess.getInheritanceChain(path) returns applicable rules with match type info
-- SecurityAccess.resolveSymlink(path) returns { realPath, isSymlink } or null
-- SecuritySegments.findMarkerSegments(content, markers) finds comment-based protected segments
-- SecuritySegments.findASTSegments(filePath, content, astRules) finds AST-based protected segments (TS/JS only)
-- SecurityToken.verifyRoleToken(tokenPath, publicKey, revokedTokens?) verifies JWT tokens
-- SecurityRole.getCurrentRole(projectRoot, config) detects role from token files
-- SecurityRedact.redactContent(content, segments) replaces protected ranges with [REDACTED: Security Protected]
-- BashScanner.scanBashCommand(command, cwd) returns array of file paths the command may access
-- LLMScanner.scanForProtectedContent(content, config) scans for protected patterns in text
-- SecurityConfig.mergeSecurityConfigs(configs) merges nested configs (rules unioned, roles must match)
-- SecurityConfig.getMcpPolicy(serverName) returns "enforced" | "trusted" | "blocked"
-- SecurityAudit.logSecurityEvent(event) writes to audit log with hashed content
-- All security modules are in packages/opencode/src/security/
-- Tool files are in packages/opencode/src/tool/ (read.ts, write.ts, edit.ts, grep.ts, glob.ts, bash.ts)
-- Tools currently use getDefaultRole() placeholder instead of SecurityRole.getCurrentRole() — this is a CRITICAL finding
-- SKILL.md files are loaded via ConfigMarkdown.parse() -> Bun.file().text() WITHOUT SecurityAccess.checkAccess() — HIGH severity bypass (skill/skill.ts, config/markdown.ts)
-- Instruction files (CLAUDE.md, AGENTS.md, CONTEXT.md) are loaded via Bun.file().text() in session/instruction.ts WITHOUT security checks — HIGH severity bypass
-- Subagents spawned via Task tool DO inherit security-wrapped tools (task.ts creates proper session with tool resolution)
-- The LLM scanner middleware in session/llm.ts is the second line of defense — it may catch protected content loaded from instruction/skill files
-- macOS fs_usage (requires sudo) captures ALL filesystem syscalls including reads: `sudo fs_usage -f filesystem -w -p <pid>`
-- macOS opensnoop and dtrace also available at /usr/bin/opensnoop and /usr/sbin/dtrace (both require root)
-- fs.watch() on macOS uses kqueue — only detects write/create/delete/rename, NOT reads
-- FSEvents (watchdog) also cannot detect reads — only modify/create/delete events
-- access-guard dual mode: privileged (fs_usage, captures reads) and unprivileged (kqueue, write-only fallback)
-- Auto-detect sudo availability: spawn `sudo -n true` and check exit code 0
-
+- Security modules are in `packages/opencode/src/security/` — config.ts, access.ts, role.ts, token.ts, segments.ts, redact.ts, audit.ts, bash-scanner.ts, llm-scanner.ts
+- Security config schema in `schema.ts` uses Zod with namespace `SecuritySchema`
+- Tool implementations with security checks: `packages/opencode/src/tool/{read,write,edit,grep,glob,bash}.ts`
+- Root `.gitignore` includes `.env` — test fixture `.env` files must be `git add -f` to track
+- All tools use `getDefaultRole(config)` which returns the lowest role — `SecurityRole.getCurrentRole()` exists but is not integrated into tools
+- Typecheck: `bun turbo typecheck`; Tests: `bun test --cwd packages/opencode`
+- Test files go in `packages/opencode/test/security/access_control_cases/`
+- Config validation: `SecuritySchema.securityConfigSchema.parse()`
+- Path matching uses `minimatch` library; symlinks resolved via `fs.realpathSync()`
+- `loadSecurityConfig()` fail-open: invalid JSON/truncated/malformed schema → returns `emptyConfig` (no rules = all access allowed)
+- `getSecurityConfig()` uses in-memory cache (`currentConfig`); deleting config file after load does NOT remove protection
+- `mergeSecurityConfigs()` unions rules (additive), throws on conflicting role levels, deduplicates roles by name
+- `setupSecurityConfig()` helper creates `.git` dir for `findGitRoot()` to work — required for all test setups
+- `SecurityToken.verifyRoleToken()`: checks algo=RS256, signature, expiration, revocation (jti), and role claim presence
+- Token without `exp` claim is accepted (non-expiring) — [KNOWN_LIMITATION] MEDIUM
+- Empty string role (`""`) is falsy in JS → `!parsed.payload.role` returns true → token invalid
+- Role matching is case-sensitive: `"Admin" !== "admin"` — `isKnownRole()` uses exact string match
+- `SecurityRole.resetCache()` must be called in afterEach when testing getCurrentRole
+- `isRoleAllowed()` uses `roleLevel > allowedRoleLevel` (strict greater-than) for hierarchy — so a role at the same level as an allowed role is NOT permitted via hierarchy, only via direct name match
+- **Path checking**: `checkAccess()` does NOT normalize `../` in paths — minimatch treats them literally. Tools must call `path.normalize()` before `checkAccess()`.
+- **Symlinks**: `resolveSymlink()` uses `fs.realpathSync()` which returns absolute canonical paths (e.g., `/private/var/...` on macOS). Relative glob patterns like `secrets/**` won't match absolute resolved paths — use absolute patterns for symlink protection.
+- **macOS temp dirs**: `os.tmpdir()` returns `/var/folders/...` but `fs.realpathSync()` returns `/private/var/folders/...`. When creating absolute rule patterns for temp dirs, always use `fs.realpathSync()` on the dir first.
+- **Null bytes**: Paths with `\x00` cause `TypeError` from `fs.lstatSync` — not caught by `resolveSymlink()`. The error prevents bypass but is not a clean security denial.
+- **Write tool**: Only file-level `checkAccess()` — NO segment-level protection. Write replaces entire file, so segment checks are not applicable.
+- **Edit tool**: File-level `checkAccess()` + segment-level protection (markers + AST). Segment checks skipped when `oldString === ""` (new file creation path).
+- **Base config markers**: `deniedOperations: ["read", "llm"]` — NOT `"write"`. Marker-protected segments are NOT write-protected by default config.
+- **Self-protection gap**: `.opencode-security.json` is NOT protected by default rules — an attacker can modify the security config itself.
+- **Circular symlinks**: `resolveSymlink()` throws `ELOOP` error — not caught. Does not hang (OS kernel limit prevents infinite loop).
+- **Case sensitivity**: `minimatch` is case-sensitive by default. On macOS case-insensitive FS, `SECRETS/key.pem` bypasses `secrets/**` rule.
+- **Segment redaction**: `SecurityRedact.redactContent()` replaces protected ranges with `[REDACTED: Security Protected]` + preserved newlines. Processes segments end-to-start to preserve indices. `mergeSegments()` combines overlapping ranges.
+- **Marker detection**: `SecuritySegments.findMarkerSegments()` uses regex patterns for `//`, `#`, `<!-- -->`, `/* */`, `"""`, `'''` comment styles. Stack-based matching for nested markers. Matches by rule (start/end pair).
+- **Read tool pipeline**: (1) file-level `checkAccess()`, (2) images/PDFs return raw base64 without segment redaction, (3) `findProtectedSegments()` for marker+AST, (4) `redactContent()`, (5) split lines, (6) offset/limit slicing.
+- **Read tool roles**: `findProtectedSegments()` in read.ts has its own local `isRoleAllowed()` and `getRoleLevel()` functions — not imported from security modules.
+- **Grep tool**: Two-layer security — (1) file-level `checkAccess` excludes protected files, (2) segment-level redaction replaces match content with `REDACTED_PLACEHOLDER`. Caches access/segment results per file. Has own local `findProtectedSegments()`, `getDefaultRole()`, `isRoleAllowed()`, `getRoleLevel()`.
+- **Glob tool**: Only file-level security — `checkAccess(f.path, "read", currentRole)`. Returns paths only, no segment checks. `filteredCount` logged at debug level, not in user-facing output.
+- **Search tool `include` param**: Passed to ripgrep `--glob` for file selection. Security filtering is post-result — include cannot bypass security.
+- **BashScanner FILE_ACCESS_COMMANDS**: Only 10 commands: cat, less, head, tail, vim, nano, grep, find, sed, awk. Other commands (cp, mv, tee, dd, sort, base64, etc.) bypass the scanner entirely.
+- **BashScanner pipeline splitting**: `splitPipeline()` handles `|`, `;`, `&`, `&&`, `||`. Each segment is tokenized and checked independently.
+- **BashScanner path resolution**: `resolvePath(filePath, cwd)` uses `path.resolve(cwd, filePath)` which normalizes `../` — unlike raw `checkAccess()`.
+- **BashScanner limitations**: Does NOT parse `$()`, backtick, `<()`, `>()`, `<<<`, `<< EOF`, or any shell metacharacter-based file access. Tokenizer is space-based, not shell-grammar-aware.
+- **LLMScanner**: Two layers — (1) marker scanning via `findMarkerSegments()` for markers with `deniedOperations` including "llm", (2) path pattern scanning via `extractLiteralFromGlob()` for rules with "llm" in deniedOperations. Operates on raw text only — no base64/hex/URL decoding. Pattern matching uses literal substring search (over-matches = safe default).
+- **Marker regex `\s*`**: `buildMarkerPatterns()` uses `\s*` which matches newlines. Multi-line block comments like `/*\n @secure-start\n*/` ARE detected by the `/* @marker */` pattern. This is good security behavior.
+- **AST method detection**: `getNodeInfo()` checks `ts.isStringLiteral(node.name)` for method declarations, but computed property names like `['encryptData']()` wrap the string literal in a `ComputedPropertyName` node — `node.name` is `ComputedPropertyName`, not `StringLiteral`. Computed string methods evade detection.
+- **Base config nodeTypes**: Default AST config only has `["function", "arrow_function"]` — NOT `"method"`. Class methods with matching names evade default config detection. Must add `"method"` to nodeTypes to protect class methods.
+- **Re-export aliasing**: `export { processData as encryptData }` — the AST parser only sees the source declaration `processData`. The alias name `encryptData` in the ExportSpecifier is not checked by `getNodeInfo()`.
 ---
 
+## 2026-02-05 - US-001
+- Created directory structure: access_control_cases/{fixtures,unit,integration,report}
+- Created base-security-config.json with roles, rules, segments, logging, auth, MCP policies
+- Created protected-files fixtures: secrets/key.pem, .env, .env.production, marked-code.ts, ast-code.ts, mixed-code.ts
+- Added report/ to .gitignore
+- Typecheck passes
+- Files changed:
+  - .gitignore (added report/ ignore)
+  - packages/opencode/test/security/access_control_cases/fixtures/base-security-config.json (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/secrets/key.pem (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/.env (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/.env.production (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/marked-code.ts (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/ast-code.ts (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/protected-files/mixed-code.ts (new)
+- **Learnings for future iterations:**
+  - Root .gitignore has `.env` which catches ALL .env files — must `git add -f` for test fixture .env files
+  - SecuritySchema.Authentication requires `revokedTokens` as required array (not optional) — include `[]` in fixtures
+  - ast-code.ts functions: encryptData, decryptPayload, signToken, verifySignature (matching pattern `encrypt|decrypt|sign|verify`)
+  - mixed-code.ts has both marker regions and AST-matching functions for overlapping protection tests
+---
+
+## 2026-02-05 - US-004
+- Implemented CASE-CFG-001 through CASE-CFG-007 config manipulation attack test cases
+- 11 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/config-manipulation.test.ts (new)
+- **Learnings for future iterations:**
+  - `loadSecurityConfig` returns empty config for ALL error cases (invalid JSON, truncated, malformed schema) — fail-open by design
+  - In-memory config cache means file deletion after load doesn't break protection (TOCTOU is partial: load-time only)
+  - `mergeSecurityConfigs` unions rules but throws on role conflicts — important for inheritance tests
+  - Need `.git` directory in temp dirs for `setupSecurityConfig()` to work (findGitRoot dependency)
+  - `checkAccess` returns `{ allowed: true }` when rules array is empty or undefined — consistent fail-open
+  - Performance: 1000 rules with minimatch pattern checking completes well under 5s threshold
+---
+
+## 2026-02-05 - US-005
+- Implemented CASE-AUTH-001 through CASE-AUTH-009 role authentication bypass test cases
+- 21 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/role-authentication.test.ts (new)
+- **Learnings for future iterations:**
+  - [CRITICAL] All 6 tool files (read, write, edit, grep, glob, bash) use local `getDefaultRole()` which always returns the lowest role — `SecurityRole.getCurrentRole()` which checks JWT tokens is never called by tools. This means role escalation via tokens has NO effect on tool-level checks.
+  - `verifyRoleToken()` does NOT reject tokens without `exp` claim — they're treated as non-expiring. [KNOWN_LIMITATION] MEDIUM severity.
+  - Empty string role `""` in JWT is treated as falsy by `!parsed.payload.role` check → token rejected as missing role claim.
+  - Role name matching is strictly case-sensitive in both `isKnownRole()` and `isRoleAllowed()`.
+  - `isRoleAllowed()` uses strict greater-than (`roleLevel > allowedRoleLevel`) — role at same level as allowed role only gets in via direct name match, not hierarchy.
+  - `Number.MAX_SAFE_INTEGER` works correctly with JS comparison operators — no overflow issues.
+  - Need `SecurityRole.resetCache()` in `afterEach` when testing `getCurrentRole` — cache persists across tests otherwise.
+  - Local `signJWT` helper needed in test file since helpers.ts doesn't export it — needed for custom payloads (no exp, custom jti, etc.).
+---
+
+## 2026-02-05 - US-006
+- Implemented CASE-PATH-001 through CASE-PATH-010 path traversal and symlink attack test cases
+- 19 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/path-traversal.test.ts (new)
+- **Learnings for future iterations:**
+  - [HIGH] `checkAccess()` does NOT normalize `../` segments — `public/../secrets/key.pem` bypasses `secrets/**` rule because minimatch treats `..` literally. Tools must normalize paths before calling checkAccess.
+  - [HIGH] Symlink resolution via `realpathSync` returns absolute paths (e.g., `/private/var/.../secrets/key.pem`) which won't match relative rules like `secrets/**`. Symlink attacks bypass relative pattern rules.
+  - [MEDIUM] Null bytes in paths cause unhandled `TypeError` from `fs.lstatSync` — prevents bypass but crashes instead of clean denial.
+  - [MEDIUM] Directory symlinks: accessing `symlink-to-secrets/data.txt` may not be caught if `realpathSync` result doesn't match the protection pattern.
+  - [INFO] Case sensitivity: `minimatch` is case-sensitive. `SECRETS/key.pem` is NOT matched by `secrets/**`. On macOS case-insensitive FS, this is a bypass vector.
+  - [LOW] Unicode NFC vs NFD: NFC pattern does not match NFD path (macOS uses NFD for filesystem). Minor bypass vector for non-ASCII rule patterns.
+  - [INFO] Absolute paths like `/project/secrets/key.pem` don't match relative rules like `secrets/**`. Tools should always pass relative paths.
+  - macOS `os.tmpdir()` returns `/var/...` but `realpathSync` returns `/private/var/...` — always canonicalize temp dir paths with `fs.realpathSync()` when using them in absolute rule patterns.
+  - URL-encoded paths (`%2F`, `%2e%2e`) are treated as literal strings — correct behavior since filesystem doesn't decode URLs. The risk is if tools decode URLs before calling checkAccess.
+  - Circular symlinks throw `ELOOP` from `realpathSync` — error is not caught by `resolveSymlink()` but prevents hanging (OS kernel imposes limit).
+---
+
+## 2026-02-05 - US-007
+- Implemented CASE-READ-001 through CASE-READ-008 Read tool bypass test cases
+- 21 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/read-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - Read tool pipeline: file-level checkAccess → image/PDF early return (no segment redaction) → findProtectedSegments → redactContent → line splitting → offset/limit
+  - `findProtectedSegments()` in read.ts has its own local `isRoleAllowed()` and `getRoleLevel()` — not imported from security/access.ts. Tests should use the same logic.
+  - Redaction preserves line count by appending newlines matching the original: `REDACTED_PLACEHOLDER + "\n".repeat(newlineCount)`
+  - Offset/limit is applied AFTER redaction — so partial reads cannot bypass redaction
+  - [MEDIUM] Premature `@secure-end` injection truncates protection: stack-based parser matches first end to the start, exposing content between injected and real end markers
+  - [MEDIUM] Unmatched `@secure-start` (no corresponding end) = NO protection at all — developer forgets end marker → secrets exposed
+  - [INFO] Marker regex is not AST-aware — `// @secure-start` inside a string literal is detected (false positive, but safe default: over-protects)
+  - [INFO] Images/PDFs skip segment redaction entirely — they return raw base64 bytes. File-level rules still block access.
+  - Unicode lookalike characters (fullwidth @, etc.) do NOT trigger marker false positives — regex correctly matches only ASCII `@`
+  - Stack-based marker matching uses rule matching (start/end pair identity) — different marker types can nest without cross-matching
+---
+
+## 2026-02-05 - US-008
+- Implemented CASE-WRITE-001 through CASE-WRITE-003 and CASE-EDIT-001 through CASE-EDIT-004 Write/Edit tool bypass test cases
+- 25 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/write-edit-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - Write tool (write.ts) has NO segment-level protection — only file-level `checkAccess("write")`. This is by design since Write replaces entire file content.
+  - Edit tool (edit.ts) has both file-level and segment-level protection, but segment checks are skipped when `oldString === ""` (new file creation path, lines 74-97).
+  - Base config markers have `deniedOperations: ["read", "llm"]` — does NOT include `"write"`. This means marker-protected code can be edited by default. Tests must use custom config with `"write"` in deniedOperations to test segment protection.
+  - [MEDIUM] `.opencode-security.json` is NOT protected by any default rule — config integrity can be compromised. Need explicit rule like `{ pattern: ".opencode-security.json", type: "file", deniedOperations: ["write"], allowedRoles: ["admin"] }`.
+  - [LOW] `.opencode-security-audit.log` is also NOT protected by default — audit log can be tampered with.
+  - Edit tool's `findProtectedSegments()` has its own local `isRoleAllowed()` and `getRoleLevel()` — same pattern as read.ts, not imported from security/access.ts.
+  - For segment overlap testing: `editRange.start < segment.end && editRange.end > segment.start` is the overlap condition used by `findOverlappingSegment()`.
+  - Marker segment boundaries: start is at the beginning of the start marker match, end is at the end of the end marker match (includes both markers in the range).
+---
+
+## 2026-02-05 - US-009
+- Implemented CASE-GREP-001 through CASE-GREP-003 and CASE-GLOB-001 through CASE-GLOB-003 grep/glob bypass test cases
+- 29 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/grep-glob-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - Grep tool (grep.ts) has two-layer security: (1) file-level `checkAccess(filePath, "read", currentRole)` to exclude fully protected files, (2) segment-level redaction replacing match content with `REDACTED_PLACEHOLDER` for lines overlapping protected marker/AST segments.
+  - Grep tool caches file access results and segments per file (`fileAccessCache`, `fileSegmentCache`) — efficient for multi-match files.
+  - Grep tool has its own local `findProtectedSegments()`, `getRoleLevel()`, `isRoleAllowed()`, `getDefaultRole()` functions — same pattern as read.ts and edit.ts, not imported from security modules.
+  - Grep `include` param is passed directly to ripgrep `--glob` — security filtering happens AFTER ripgrep returns results, not before. Include cannot bypass security.
+  - Glob tool (glob.ts) has only file-level security: `checkAccess(f.path, "read", currentRole)`. No segment-level checks (returns paths only, no content).
+  - [INFO] Grep redaction reveals file path + line number for redacted matches — metadata leakage at low severity. Content is properly hidden.
+  - [INFO] Glob output is indistinguishable between "no matches" and "all matches filtered" — prevents information disclosure about existence of protected files.
+  - [INFO] `filteredCount` / `filteredFileCount` / `redactedMatchCount` are logged via `securityLog.debug()` only — not exposed in user-facing output.
+  - [INFO] `**/.env*` pattern broadly matches `.env.example`, `.envrc`, etc. — over-protection is the safe default.
+---
+
+## 2026-02-05 - US-010
+- Implemented CASE-BASH-001 through CASE-BASH-007 Bash tool bypass test cases (standard and unscanned commands)
+- 48 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/bash-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - `BashScanner.scanBashCommand()` only scans 10 commands: cat, less, head, tail, vim, nano, grep, find, sed, awk. All other file-access commands bypass security.
+  - `splitPipeline()` splits on `|`, `;`, `&`, `&&`, `||` — each segment scanned independently. Background operator `&` handled correctly.
+  - `path.resolve(cwd, filePath)` in `resolvePath()` normalizes `../` — path traversal is resolved by BashScanner (unlike raw `checkAccess`).
+  - `path.basename(cmd)` extracts base command name — `/usr/bin/cat` → `cat`. Full path commands are correctly detected.
+  - [HIGH] 15 common file-access commands NOT in scanner: cp, mv, tee, dd, sort, uniq, wc, xxd, od, hexdump, strings, file, stat, base64, openssl.
+  - [HIGH] Command substitution `$(cat ...)` and backtick substitution are NOT parsed — tokenizer treats `$(cat` as single token.
+  - [HIGH] Process substitution `<(cat ...)` is NOT parsed — `<(cat` treated as single token starting with `<`.
+  - [HIGH] Here-string `<<<` and heredoc `<< EOF` bodies are NOT parsed — content appears as accidental path tokens.
+  - [INFO] bash.ts tree-sitter parsing checks cp/mv/cat for directory permissions (Instance.containsPath) but NOT for SecurityAccess.checkAccess(). These are separate permission systems.
+  - [INFO] The `FLAGS_WITH_VALUES` map only covers grep, find, sed, awk, head, tail — other commands' flags are handled by generic `isFlag()` which checks for `-` prefix.
+- **Command prefix bypass**: Scanner only strips `sudo` prefix (cmdIndex logic). Commands like `nohup`, `time`, `env`, `nice`, `timeout` cause the scanner to check the prefix instead of the actual command.
+- **xargs bypass**: `xargs cat` is not detected because xargs is not in FILE_ACCESS_COMMANDS, and the scanner cannot understand that xargs invokes its argument as a command.
+- **eval bypass**: `eval 'cat secrets/key.pem'` is a universal bypass — eval is not scanned and its quoted argument is opaque.
+- **Interpreter bypass**: python3, node, ruby, perl, bash, sh, zsh — none in FILE_ACCESS_COMMANDS. Arbitrary code execution via `-c` flag reads any file.
+- **Data exfiltration**: curl (-F, --data-binary, -T), wget (--post-file), tar, zip — none scanned. Can archive and upload protected content.
+- **Git history**: git show/log/diff can access protected file content from history — documented as out of scope per PRD.
+---
+
+## 2026-02-05 - US-011
+- Implemented CASE-BASH-008 through CASE-BASH-015 advanced bash evasion test cases
+- 84 tests total in bash-bypass.test.ts (36 new tests), all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/bash-bypass.test.ts (appended)
+- **Learnings for future iterations:**
+  - [HIGH] xargs bypass: `echo secrets/key.pem | xargs cat` — neither echo nor xargs in FILE_ACCESS_COMMANDS. Scanner can't understand that xargs invokes its argument as a command. `find . -name key.pem | xargs cat` is a two-stage bypass.
+  - [HIGH] Interpreter one-liners: python3/node/ruby/perl/php/lua/bash/sh/zsh — none scanned. `python3 -c 'open("secrets/key.pem").read()'` is completely invisible to the scanner. This is a fundamental limitation of static command scanning.
+  - [HIGH] Data exfiltration commands: curl (-F file=@path, --data-binary @path, -T path), wget (--post-file=path) — not scanned. Direct file upload to remote servers.
+  - [HIGH] Archive commands: tar, zip — not scanned. Can archive entire protected directories: `tar czf - secrets/ | base64` encodes and streams to stdout.
+  - [INFO] Git history: git show HEAD:path, git log -p -- path, git diff -- path, git stash show -p — all unscanned. Documented as out of scope per PRD.
+  - [HIGH] Environment variable exfiltration: `export SECRET=$(cat secrets/key.pem)` — double bypass (export not scanned + $() not parsed). Same root cause as CASE-BASH-004.
+  - [HIGH] eval bypass: `eval 'cat secrets/key.pem'` is universal — eval is not scanned, quoted argument is opaque. Any static scanner is fundamentally vulnerable to eval.
+  - [MEDIUM] Command prefix bypass: Only `sudo` is recognized as a prefix (cmdIndex = 1 when tokens[0] === "sudo"). Other common prefixes are NOT stripped: nohup, time, env, nice, strace, ltrace, timeout, ionice, taskset. `nohup cat secrets/key.pem` → scanner checks "nohup" not "cat".
+  - [HIGH] `/usr/bin/env cat secrets/key.pem` — env is commonly used as command prefix in shebangs. baseName = "env", not in FILE_ACCESS_COMMANDS. Realistic evasion vector.
+  - [INFO] Full-path basename extraction via `path.basename()` works correctly for all 10 FILE_ACCESS_COMMANDS. `/usr/bin/cat` → "cat". Limitation is in the command allowlist, not basename logic.
+  - [INFO] Background operator `&` is correctly handled by splitPipeline — `cat secrets/key.pem &` still detects the file.
+---
+
+## 2026-02-05 - US-012
+- Implemented CASE-LLM-001 through CASE-LLM-008 LLM request leakage test cases
+- 31 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/llm-leakage.test.ts (new)
+- **Learnings for future iterations:**
+  - `LLMScanner.scanForProtectedContent()` has two scanning layers: (1) marker scanning via `findMarkerSegments()` for markers with `deniedOperations` including "llm", (2) path pattern scanning via `extractLiteralFromGlob()` for rules with `deniedOperations` including "llm".
+  - `scanMarkers()` filters markers by `deniedOperations.includes("llm")` — markers with only `["read"]` are NOT scanned. Base config markers have `["read", "llm"]` so they ARE scanned.
+  - `scanPathPatterns()` filters rules by `deniedOperations.includes("llm")` — same filtering logic.
+  - `extractLiteralFromGlob()` strips leading `**/` and `*/`, then returns the longest literal prefix before any wildcard character. Pure wildcards (`**`, `*`) return `undefined` (no search).
+  - [KNOWN_LIMITATION] MEDIUM: Content split across separate scanner invocations cannot be correlated. Unmatched `@secure-start` in one call + unmatched `@secure-end` in another = no detection.
+  - [KNOWN_LIMITATION] LOW: Character substitution (Unicode homoglyphs, case changes) bypasses marker matching — markers use exact text matching.
+  - [KNOWN_LIMITATION] MEDIUM: Base64, hex, and URL-encoded content all bypass the scanner. The scanner operates on raw text only.
+  - [INFO] Pattern matching uses literal substring search — `.env` extracted from `**/.env*` matches `.envrc`, `.env.example`, etc. (over-matching = safe default).
+  - [INFO] Multiple occurrences of a pattern in the same content are all reported (scanner loops with `indexOf` advancing by 1 each time).
+  - [INFO] Markers are detected regardless of surrounding context (markdown code blocks, JSON strings, etc.) — the scanner doesn't parse document structure.
+  - [INFO] All comment styles supported by `buildMarkerPatterns()` (// # <!-- --> /* */ """ ''') work in the LLM scanner since it delegates to `findMarkerSegments()`.
+---
+
+## 2026-02-05 - US-013
+- Implemented CASE-SEG-001 through CASE-SEG-009 segment detection evasion test cases
+- 44 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/segment-evasion.test.ts (new)
+- **Learnings for future iterations:**
+  - `buildMarkerPatterns()` uses `\s*` in regex which matches newlines. Multi-line block comments `/*\n @secure-start\n*/` ARE detected by the `/* @marker */` pattern — this is secure behavior (not a limitation).
+  - Only bare markers without ANY recognized comment prefix (no //, #, /*, <!--, """, ''') evade detection. This requires completely non-standard text wrapping.
+  - `getNodeInfo()` for method declarations checks `ts.isStringLiteral(node.name)` directly, but computed property names `['encryptData']()` use `ComputedPropertyName` wrapper around the string literal. `node.name.kind === ComputedPropertyName` ≠ `StringLiteral`, so these evade detection. [KNOWN_LIMITATION]
+  - `eval('function encryptData() {}')` hides functions from the TypeScript compiler API. Function constructor `new Function()` also evades. Template literals with function definitions evade. This is inherent to static analysis. [KNOWN_LIMITATION]
+  - Function aliasing: `const enc = encryptData` — the alias `enc` is a VariableDeclaration where initializer is an Identifier (not ArrowFunction/FunctionExpression), so getNodeInfo skips it. Only the original declaration is protected.
+  - Destructuring with rename `{ encryptData: enc }` uses ObjectBindingPattern for node.name — `ts.isIdentifier(node.name)` returns false, evading detection entirely.
+  - Base config nodeTypes `["function", "arrow_function"]` does NOT include `"method"` — all class methods evade the default config. Must add `"method"` to nodeTypes for comprehensive protection.
+  - Re-export aliasing: `export { processData as encryptData }` — ExportSpecifier is not a function/arrow/class/method, so the alias name is not checked. An attacker can rename a function at the export boundary.
+  - Unsupported languages: Python (.py), Go (.go), Rust (.rs), Java (.java), C (.c) all return empty segments. Only TS/JS extensions (.ts, .tsx, .js, .jsx, .mjs, .cjs) are supported.
+- **MCP policy**: `SecurityConfig.getMcpPolicy(serverName)` checks `config.mcp.servers[serverName]`, falls back to `config.mcp.defaultPolicy`, falls back to `"trusted"` if no mcp config. Three policy levels: "blocked" (tools not registered), "enforced" (inputs/outputs scanned), "trusted" (no scanning).
+- **MCP tool registration**: In `prompt.ts`, blocked servers are skipped via `continue`. Enforced servers scan both input (`JSON.stringify(args)`) and output (`contentItem.text`) via `LLMScanner.scanForProtectedContent()`. Trusted servers skip all scanning.
+- **MCP server identity**: Derived from tool key via `key.slice(0, key.indexOf("_"))` — first underscore split. Server names with underscores cause mismatch (e.g., "my_custom_server" extracts "my").
+---
+
+## 2026-02-05 - US-014
+- Implemented CASE-MCP-001 through CASE-MCP-006 MCP security bypass test cases
+- 24 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/mcp-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - `getMcpPolicy()` returns "blocked" for blocked-server, "enforced" for enforced-server, "trusted" for trusted-server — direct config key lookup via `config.mcp.servers[serverName]`.
+  - Fallback chain: server-specific policy → defaultPolicy → "trusted" (when no mcp config exists).
+  - [INFO] Trusted servers bypass ALL scanning (both input and output). A compromised trusted MCP server can exfiltrate all protected content with no detection. The scanner itself works correctly — but it's never invoked for trusted servers.
+  - [INFO] Server name extraction uses first underscore split: `key.slice(0, key.indexOf("_"))`. If a server is registered as "my_custom_server" and its tools are keyed as "my_custom_server_tool", the extracted name is "my" — NOT "my_custom_server". This is a configuration gotcha that could cause policy mismatch.
+  - [INFO] Tool key without underscores uses the entire key as server name — safe fallback.
+  - [INFO] Empty string server name falls back to defaultPolicy — no special casing.
+  - [KNOWN_LIMITATION] Base64-encoded protected paths in MCP output bypass LLMScanner — same limitation as CASE-LLM-005.
+  - Enforced policy scans both directions: tool input via `JSON.stringify(args)` and tool output text content items. Non-text content items (images, etc.) are skipped.
+---
