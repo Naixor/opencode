@@ -1,0 +1,453 @@
+# Ralph Progress Log
+# Feature: Security Access Control
+# Branch: ralph/security-access-control
+# Started:
+# ============================================
+
+## Codebase Patterns
+- Use namespace pattern for modules (e.g., `export namespace SecuritySchema { ... }`)
+- Use Zod for schema validation with `z` import from "zod"
+- Export both the Zod schema and inferred type (e.g., `export const Foo = z.object({...})` and `export type Foo = z.infer<typeof Foo>`)
+- Follow code style: no try/catch (use .catch()), no any types, no else statements, prefer const
+- Run typecheck with `~/.bun/bin/bun run tsc --noEmit` in packages/opencode directory
+- Use minimatch (already available) for glob pattern matching
+- Use Log.create({ service: "service-name" }) for logging within namespaces
+- LLM requests flow through session/llm.ts -> wrapLanguageModel middleware -> ProviderTransform.message() -> streamText()
+- Vercel AI SDK middleware uses `transformParams` hook - use @ts-expect-error for prompt type mismatch when treating it generically
+- LanguageModelV2Prompt is Array<LanguageModelV2Message> with roles: system (string content), user/assistant/tool (array content with typed parts)
+- MCP tool keys use format `sanitizedServerName_sanitizedToolName` - extract server name by splitting on first underscore
+- MCP tools are integrated in session/prompt.ts via MCP.tools() loop, where each tool's execute is wrapped with plugin hooks and formatting
+- SecurityConfig.getMcpPolicy(serverName) returns "enforced" | "trusted" | "blocked" for MCP server policy decisions
+- CLI subcommand groups: parent uses `builder: (yargs) => yargs.command(SubCmd).demandCommand()` with empty handler, registered in src/index.ts
+- Commands needing project context use `bootstrap(process.cwd(), async () => { ... })` from cli/bootstrap.ts
+- SecurityConfig.findSecurityConfigs(startPath) walks up to git root collecting all .opencode-security.json files
+- SecurityConfig.mergeSecurityConfigs(configs) merges configs: rules unioned, roles must match, MCP most-restrictive-wins
+- For synchronous safe JSON parsing (no try/catch): use `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse(str)`
+- Git root detection: walk up directories looking for .git using fs.statSync with { throwIfNoEntry: false }
+- SecurityRole.getCurrentRole(projectRoot, config) replaces all getDefaultRole() placeholders in tool files for centralized role detection
+- Use Bun.spawnSync() for shell commands that may fail - returns result object with exitCode instead of throwing (avoids try/catch)
+
+---
+
+## 2026-02-04 - US-001
+- What was implemented: Created security configuration Zod schema for `.opencode-security.json`
+- Files changed:
+  - packages/opencode/src/security/schema.ts (created)
+- **Learnings for future iterations:**
+  - The codebase uses namespace pattern extensively (see config/config.ts for examples)
+  - Zod schemas should export both the validator and the inferred type
+  - bun is required but may not be in PATH - use `~/.bun/bin/bun` directly
+  - turbo typecheck may fail due to binary path issues; use `bun run tsc --noEmit` directly in package directory
+  - Use minimatch (already in package.json) for glob pattern matching
+---
+
+## 2026-02-04 - US-002
+- What was implemented: Created configuration loader for `.opencode-security.json`
+- Files changed:
+  - packages/opencode/src/security/config.ts (created)
+- **Learnings for future iterations:**
+  - Use Bun.file() API for file operations
+  - Follow fail-open pattern for security config loading (log warning, return empty config)
+  - Use Log.create({ service: "service-name" }) for logging
+---
+
+## 2026-02-04 - US-003
+- What was implemented: Created path-based access checker with glob pattern matching and role hierarchy
+- Files changed:
+  - packages/opencode/src/security/access.ts (created)
+- **Learnings for future iterations:**
+  - minimatch from package.json provides glob pattern matching
+  - Role hierarchy: higher level numbers = more access (admin > developer > viewer)
+  - Access checker returns `{ allowed: boolean, reason?: string }` for clear error messages
+  - For directory rules, need to handle both the directory itself and files within it
+---
+
+## 2026-02-04 - US-004
+- What was implemented: Added rule inheritance for subdirectories to security access checker
+- Files changed:
+  - packages/opencode/src/security/access.ts (modified)
+- **Learnings for future iterations:**
+  - Rule inheritance works by walking up parent directories and checking for matching directory rules
+  - getInheritanceChain() returns both direct matches and inherited rules with metadata
+  - The inheritance model is additive: parent restrictions cannot be removed by child rules
+  - The InheritedRule interface tracks matchType ("direct" | "inherited") and inheritedFrom path
+  - Path operations should normalize slashes with .replace(/\\/g, "/") for cross-platform support
+---
+
+## 2026-02-04 - US-005
+- What was implemented: Added symbolic link resolution to access checker
+- Files changed:
+  - packages/opencode/src/security/access.ts (modified)
+- **Learnings for future iterations:**
+  - Use fs.lstatSync with { throwIfNoEntry: false } to check if a file exists without throwing
+  - fs.realpathSync resolves the entire symlink chain automatically
+  - When checking symlinks, check both the symlink path and its target path for security
+  - Add "(symlink target is protected)" to denial messages for clarity
+  - Export resolveSymlink() function for potential reuse in other security modules
+---
+
+## 2026-02-04 - US-006
+- What was implemented: Created marker-based segment detector for protected code segments
+- Files changed:
+  - packages/opencode/src/security/segments.ts (created)
+- **Learnings for future iterations:**
+  - The findMarkerSegments function uses a stack-based approach to handle nested markers correctly
+  - Common comment styles supported: // (JS/TS/C/C++/Java), # (Python/Ruby/Shell), <!-- --> (HTML/XML), /* */ (C/JS), """ and ''' (Python docstrings)
+  - Regex special characters in marker text are properly escaped with escapeRegExp()
+  - Segments are sorted by start position for consistent output
+  - The MarkerSegment interface has { start: number, end: number, rule: MarkerConfig }
+---
+
+## 2026-02-04 - US-007
+- What was implemented: Added AST-based segment detector for TypeScript/JavaScript using TypeScript compiler API
+- Files changed:
+  - packages/opencode/src/security/segments.ts (modified)
+- **Learnings for future iterations:**
+  - TypeScript is available as a devDependency in the project
+  - Use `import ts from "typescript"` to access the TypeScript compiler API
+  - ts.createSourceFile() parses source code into an AST; it doesn't throw on syntax errors
+  - The findASTSegments function detects: function declarations, arrow functions (variable declarations), class declarations, and class methods (including arrow function properties)
+  - Node types mapped to rule nodeTypes: "function", "arrow_function", "class", "method"
+  - Use ts.forEachChild for AST traversal and node.getStart(sourceFile)/node.getEnd() for positions
+  - Language detection uses file extension; supports ts, tsx, js, jsx, mjs, cjs
+  - The ASTSegment interface has { start: number, end: number, rule: ASTConfig, nodeType: string }
+---
+
+## 2026-02-04 - US-008
+- What was implemented: Created content redaction utility for replacing protected segments with placeholder text
+- Files changed:
+  - packages/opencode/src/security/redact.ts (created)
+- **Learnings for future iterations:**
+  - The redactContent function accepts any segment type with start/end properties (MarkerSegment, ASTSegment, or generic Segment)
+  - Overlapping segments must be merged before redacting to avoid double-processing
+  - Line numbers are preserved by counting newlines in the original text and adding the same number after the placeholder
+  - Processing segments from end to start preserves character indices during replacement
+  - The REDACTED_PLACEHOLDER constant is "[REDACTED: Security Protected]"
+  - The SecurityRedact namespace exports: Segment interface, REDACTED_PLACEHOLDER constant, mergeSegments(), and redactContent()
+---
+
+## 2026-02-04 - US-009
+- What was implemented: Integrated security access control with the Read tool
+- Files changed:
+  - packages/opencode/src/tool/read.ts (modified)
+- **Learnings for future iterations:**
+  - Tool files are in packages/opencode/src/tool/ directory, each tool has its own file (read.ts, write.ts, edit.ts, etc.)
+  - Tools use Tool.define() pattern with description, parameters (Zod schema), and execute function
+  - Security check should happen after file existence check and before reading content
+  - For segment-level protection, read the file first, then find protected segments and apply redaction
+  - Role detection is a placeholder (getDefaultRole) until US-027 implements proper token-based role detection
+  - Helper functions getRoleLevel() and isRoleAllowed() are duplicated from access.ts - consider moving to a shared utility in future
+  - Use Log.create({ service: "security-read" }) for tool-specific security logging
+---
+
+## 2026-02-04 - US-010
+- What was implemented: Integrated security access control with the Write tool
+- Files changed:
+  - packages/opencode/src/tool/write.ts (modified)
+- **Learnings for future iterations:**
+  - Write tool follows the same pattern as Read tool for security integration
+  - Security check should happen early in execute(), after path resolution and before file operations
+  - The getDefaultRole() helper function is duplicated from read.ts - this pattern is repeated across tools until US-027 implements centralized role detection
+  - Write tool only needs file-level protection (no segment-level check needed for write operations)
+  - Import SecurityAccess, SecurityConfig, SecuritySchema, and Log from their respective modules
+  - Use securityLog.debug() to log security check results for debugging
+---
+
+## 2026-02-04 - US-011
+- What was implemented: Integrated security access control with the Edit tool, including both file-level and segment-level protection
+- Files changed:
+  - packages/opencode/src/tool/edit.ts (modified)
+- **Learnings for future iterations:**
+  - Edit tool requires both file-level and segment-level protection checks (unlike Write which only needs file-level)
+  - Segment-level check must happen AFTER reading file content but BEFORE calling replace()
+  - Use findEditRange() to locate where the edit will occur using the same replacer logic as replace()
+  - Check for overlap between edit range and protected segments using simple interval overlap logic
+  - The edit tool uses multiple "replacer" functions to find matches (SimpleReplacer, LineTrimmedReplacer, etc.)
+  - Protected segments check for "write" operation (not "read") in deniedOperations
+  - Error messages should include the protected segment positions to help users understand what's protected
+  - Security log uses "security-edit" service name for tool-specific logging
+---
+
+## 2026-02-04 - US-012
+- What was implemented: Integrated security access control with the Glob tool to filter out protected files from results
+- Files changed:
+  - packages/opencode/src/tool/glob.ts (modified)
+- **Learnings for future iterations:**
+  - Glob tool filters files AFTER collecting results but BEFORE returning them
+  - Use `SecurityAccess.checkAccess(path, "read", currentRole).allowed` to filter files
+  - Log only the count of filtered files, not the paths (for security)
+  - The same getDefaultRole() pattern is used as in other tools (read.ts, write.ts, edit.ts)
+  - Security log service name follows pattern: "security-glob"
+  - The metadata.count should reflect the filtered count (allowedFiles.length), not the original count
+---
+
+## 2026-02-04 - US-013
+- What was implemented: Integrated security access control with the Grep tool to filter protected files and redact protected segments
+- Files changed:
+  - packages/opencode/src/tool/grep.ts (modified)
+- **Learnings for future iterations:**
+  - Grep tool requires both file-level filtering AND segment-level redaction (like Read, but with different output format)
+  - Use caching (fileAccessCache, fileSegmentCache, fileContentCache) to avoid re-checking the same file multiple times
+  - Line position calculation: getLineStartPosition() counts newlines to find where a given line number starts in file content
+  - Overlap detection for segment protection: `lineStartPos < seg.end && lineEndPos > seg.start`
+  - When segment is protected, replace lineText with SecurityRedact.REDACTED_PLACEHOLDER but still show file:lineNum
+  - Security log uses "security-grep" service name
+  - Log both filteredFileCount and redactedMatchCount separately for better debugging
+  - The match still appears in output but with redacted content, allowing user to know a match exists without seeing the sensitive content
+---
+
+## 2026-02-04 - US-014
+- What was implemented: Created audit logging system for security events
+- Files changed:
+  - packages/opencode/src/security/audit.ts (created)
+- **Learnings for future iterations:**
+  - The SecurityAudit namespace provides logSecurityEvent() function for logging security events
+  - Log format is JSON with: timestamp, role, operation, path, result (allowed/denied), reason, ruleTriggered, contentHash
+  - Log level is configurable via config.logging.level: "verbose" logs all access, "normal" logs denials only
+  - Content is hashed (sha256, first 16 chars) and truncated (50 chars max) to avoid storing sensitive data
+  - Log path comes from config.logging.path, defaults to ".opencode-security-audit.log"
+  - The createContentSummary() helper creates a safe summary string for logs: [hash:xxxxx] truncated content...
+  - Use fs.appendFile for async non-blocking log writes
+  - Both structured JSON logging (to file) and regular Log.create() logging (to app log) are used
+---
+
+## 2026-02-05 - US-015
+- What was implemented: Created Bash command security scanner that parses shell commands to detect file access patterns
+- Files changed:
+  - packages/opencode/src/security/bash-scanner.ts (created)
+- **Learnings for future iterations:**
+  - The BashScanner namespace exports scanBashCommand(command, cwd) which returns an array of resolved file paths
+  - Supports pipeline splitting (|, ;, &&, ||) and handles quoted strings and escaped characters
+  - Detects file access in: cat, less, head, tail, vim, nano, grep, find, sed, awk
+  - Command-specific logic: awk patterns and sed expressions are filtered out to avoid false positives
+  - Flags with value arguments (e.g., grep -e, head -n) are handled to avoid treating the flag value as a file path
+  - Handles sudo prefix by skipping to the actual command name
+  - Handles full paths to commands (e.g., /usr/bin/cat) by extracting basename
+  - The Bash tool (src/tool/bash.ts) already uses tree-sitter for command parsing and path extraction for a different purpose (directory permission checks)
+---
+
+## 2026-02-05 - US-016
+- What was implemented: Integrated security access control with the Bash tool to block commands that would access protected files
+- Files changed:
+  - packages/opencode/src/tool/bash.ts (modified)
+- **Learnings for future iterations:**
+  - The Bash tool uses BashScanner.scanBashCommand() to detect file paths before executing the command
+  - Security check happens BEFORE tree-sitter parsing and permission checks for early rejection
+  - Both read and write access are checked for each scanned path (read first, then write if read passes)
+  - When access is denied, each denied path is logged via SecurityAudit.logSecurityEvent() individually
+  - Error message includes all denied paths and their reasons for clear user feedback
+  - The cwd parameter from workdir or Instance.directory is passed to BashScanner for relative path resolution
+  - Security log uses "security-bash" service name following the tool-specific naming pattern
+---
+
+## 2026-02-05 - US-017
+- What was implemented: Created LLM request content scanner that checks outgoing content for protected patterns
+- Files changed:
+  - packages/opencode/src/security/llm-scanner.ts (created)
+- **Learnings for future iterations:**
+  - The LLMScanner namespace exports scanForProtectedContent(content, config) returning ProtectedMatch[]
+  - Scans for two types of protection: marker-based segments (using SecuritySegments.findMarkerSegments) and path patterns from rules
+  - Only considers rules/markers that have "llm" in their deniedOperations array
+  - For path pattern scanning, extracts literal strings from glob patterns (stripping **/ prefix and wildcards)
+  - matchedText is truncated to 100 chars for marker segments to avoid storing large content chunks
+  - The ProtectedMatch interface includes: start, end, matchedText, ruleType ("marker" | "ast" | "pattern"), and the triggering rule
+  - extractLiteralFromGlob() handles common glob patterns: strips leading **/  and uses longest literal prefix before any wildcard
+---
+
+## 2026-02-05 - US-018
+- What was implemented: Created LLM request interceptor middleware that scans outgoing LLM requests for protected content before sending to providers
+- Files changed:
+  - packages/opencode/src/session/llm.ts (modified)
+- **Learnings for future iterations:**
+  - LLM requests are constructed in session/llm.ts and sent via `streamText()` from the Vercel AI SDK
+  - The `wrapLanguageModel()` function supports a middleware array with `transformParams` hooks
+  - The existing middleware uses `@ts-expect-error` for prompt type mismatch - the same pattern works for security scanning
+  - Security middleware is placed BEFORE the provider transform middleware so it runs on the original messages
+  - LanguageModelV2Prompt (args.params.prompt) is an array of messages with different roles and content types:
+    - system: content is a string
+    - user: content is array of text/file parts
+    - assistant: content is array of text/file/reasoning/tool-call/tool-result parts
+    - tool: content is array of tool-result parts
+  - Tool results have multiple output types: text (string value), json (JSON value), error-text, error-json, content (array)
+  - Block vs redact decision: rules with no allowedRoles = block (absolute deny), rules with allowedRoles = redact (role-dependent, redact since role can't be verified at middleware level)
+  - The SecurityRedact.redactContent() can be applied to individual text parts in-place by mutating the prompt array
+  - All interceptions (both block and redact) are logged to SecurityAudit for audit trail
+---
+
+## 2026-02-05 - US-019
+- What was implemented: Added MCP server security policy support with per-server policy enforcement (blocked/enforced/trusted)
+- Files changed:
+  - packages/opencode/src/security/config.ts (modified - added getMcpPolicy function)
+  - packages/opencode/src/session/prompt.ts (modified - added security policy checks in MCP tool execution wrapper)
+- **Learnings for future iterations:**
+  - MCP tools are wrapped in session/prompt.ts (not mcp/index.ts) - this is where plugin hooks, permissions, and output formatting happen
+  - Tool keys follow the format `sanitizedServerName_sanitizedToolName` (joined by underscore) - server name is extracted via first underscore index
+  - Three policy levels: "blocked" (tools not registered at all), "enforced" (inputs scanned before execution, outputs redacted after), "trusted" (no security checks)
+  - For blocked servers, tools are skipped during the MCP.tools() iteration so they never appear to the LLM
+  - For enforced servers, tool arguments are serialized to JSON and scanned with LLMScanner.scanForProtectedContent() before execution
+  - For enforced output scanning, text content items are redacted in-place using SecurityRedact.redactContent()
+  - The security config schema already had mcp.defaultPolicy and mcp.servers defined - no schema changes needed
+  - SecurityAudit uses `mcp://serverName/toolKey` as path format for MCP-related events
+  - The SecurityAccess import was added but is available for future MCP file-path-level checks if needed
+---
+
+## 2026-02-05 - US-020
+- What was implemented: Added nested config detection and merging to SecurityConfig namespace
+- Files changed:
+  - packages/opencode/src/security/config.ts (modified)
+- **Learnings for future iterations:**
+  - findSecurityConfigs() walks from startPath up to git root, collecting all .opencode-security.json files found
+  - Git root is detected by looking for .git directory walking up from startPath using fs.statSync with throwIfNoEntry: false
+  - Configs are returned ordered most-specific-first (startPath -> git root)
+  - mergeSecurityConfigs() unions rules, segments (markers + AST), and roles (with conflict detection)
+  - Role conflicts (same name, different level) throw an Error - this enforces identical role definitions across configs
+  - MCP policies merge by most-restrictive-wins: blocked > enforced > trusted (priority 3 > 2 > 1)
+  - For logging and authentication, first defined config wins (most specific)
+  - A private loadConfigFile() helper was extracted from loadSecurityConfig() to avoid duplication
+  - The `fs` import was added for findGitRoot() - uses fs.statSync for .git detection
+---
+
+## 2026-02-05 - US-021
+- What was implemented: Created security CLI status command showing current security configuration status
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/status.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (created)
+  - packages/opencode/src/index.ts (modified - registered SecurityCommand)
+- **Learnings for future iterations:**
+  - CLI commands use yargs CommandModule pattern via the `cmd()` helper from `../cmd`
+  - Subcommand groups: parent uses `builder: (yargs) => yargs.command(SubCmd).demandCommand()` with empty handler
+  - Commands that need project context use `bootstrap(process.cwd(), async () => { ... })` from `../../bootstrap`
+  - Debug command group (debug/index.ts) is the best reference for a grouped command pattern
+  - SecurityConfig.findSecurityConfigs() returns `{ config, path }[]` - useful for showing which config files are active
+  - Default role is determined as lowest level role from config (until US-027 implements proper token auth)
+  - New commands must be imported and registered in src/index.ts via `.command(SecurityCommand)`
+---
+
+## 2026-02-05 - US-022
+- What was implemented: Created security CLI check command that tests path accessibility against security config
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/check.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityCheckCommand)
+- **Learnings for future iterations:**
+  - yargs positional arguments use `<path>` syntax in command string and `.positional()` in builder
+  - SecurityAccess.resolveSymlink() returns `{ realPath, isSymlink }` or null if path doesn't exist
+  - SecurityAccess.getInheritanceChain() returns InheritedRule[] with matchType ("direct" | "inherited") and inheritedFrom
+  - For symlink paths, check inheritance chain for both the symlink path AND the resolved target path
+  - New subcommands only need to be added to security/index.ts builder chain (already registered in src/index.ts)
+---
+
+## 2026-02-05 - US-023
+- What was implemented: Created security CLI init command that generates a template `.opencode-security.json` file
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/init.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityInitCommand)
+- **Learnings for future iterations:**
+  - The init command uses a static TEMPLATE object for the default config, serialized with JSON.stringify(template, null, 2)
+  - Use fs.existsSync() to check if file already exists before writing (fail with error, don't overwrite)
+  - Use fs.writeFileSync() for simple file creation (no need for bootstrap or Bun.file() since this is a standalone CLI operation)
+  - The template includes common sensitive path patterns: .env*, secrets/, credentials.*, *.pem
+  - process.exitCode = 1 is preferred over process.exit(1) to allow cleanup
+  - New subcommands only need to be added to security/index.ts builder chain (already registered in src/index.ts)
+---
+
+## 2026-02-05 - US-024
+- What was implemented: Created security CLI logs command that displays recent audit log entries with filtering
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/logs.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityLogsCommand)
+- **Learnings for future iterations:**
+  - Use Zod's `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse(line)` pattern for safe JSON parsing without try/catch
+  - Audit log entries are JSON lines (one JSON object per line) in the file at config.logging.path or `.opencode-security-audit.log`
+  - Use `.flatMap()` with empty array return for filtering+mapping in one step (instead of map+filter with null)
+  - The `--tail` flag with alias `-n` follows the unix tail convention for user familiarity
+  - Default log path and entry format match SecurityAudit module's AuditLogEntry interface
+---
+
+## 2026-02-05 - US-025
+- What was implemented: Added security status indicator to the TUI session header showing the current role when security config is active
+- Files changed:
+  - packages/opencode/src/cli/cmd/tui/routes/session/header.tsx (modified - added SecurityIndicator component)
+- **Learnings for future iterations:**
+  - TUI header is in packages/opencode/src/cli/cmd/tui/routes/session/header.tsx
+  - Header has two layouts: standard (Match when={true}) and subagent (Match when={session()?.parentID})
+  - Both layouts have a right-side info box with ContextInfo and version - security indicator goes before these
+  - SecurityConfig.getSecurityConfig() is synchronous and returns the cached config (loaded during bootstrap)
+  - The SecurityIndicator component checks for active rules/segments and only renders when security is configured
+  - Uses theme.textMuted for subtle styling consistent with version and context info
+  - The indicator format is `[secured: roleName]` for clear but non-intrusive display
+  - OpenTUI uses `<text>` for text elements and `<box>` for layout containers with flexbox properties
+---
+
+## 2026-02-05 - US-026
+- What was implemented: Created JWT token verification module for RS256 role token authentication
+- Files changed:
+  - packages/opencode/src/security/token.ts (created)
+- **Learnings for future iterations:**
+  - Use Zod's `z.string().transform((s) => JSON.parse(s)).pipe(Schema).safeParse()` pattern for safe JSON parsing in synchronous context (avoids try/catch)
+  - JWT format: 3 base64url-encoded parts separated by dots (header.payload.signature)
+  - Base64url decoding: replace `-` with `+` and `_` with `/` then use Buffer.from(str, "base64")
+  - RS256 verification: use `crypto.createVerify("RSA-SHA256")`, update with signatureInput (header.payload), verify with publicKey and signature buffer
+  - Token expiration check: compare `Math.floor(Date.now() / 1000)` against `payload.exp`
+  - Token revocation check: match `payload.jti` against the revokedTokens array from config
+  - fs.statSync with `{ throwIfNoEntry: false }` is preferred over try/catch for file existence checks
+  - The verifyRoleToken function takes a third optional `revokedTokens` parameter (not just tokenPath and publicKey)
+---
+
+## 2026-02-05 - US-027
+- What was implemented: Created current role detection module that auto-detects user role from JWT token files
+- Files changed:
+  - packages/opencode/src/security/role.ts (created)
+- **Learnings for future iterations:**
+  - SecurityRole.getCurrentRole(projectRoot, config) is the centralized role detection function that replaces all getDefaultRole() placeholders in tool files
+  - Token lookup order: project-local `.opencode-role.token` first, then global `~/.config/opencode/role.token`
+  - If no authentication.publicKey is configured, skips token verification entirely and returns lowest role
+  - Result is cached per session via cacheInitialized flag - use SecurityRole.resetCache() for testing
+  - Token roles are validated against config's roles list - unknown roles in tokens fall back to lowest role
+  - The getLowestRole() helper uses the same logic as the getDefaultRole() placeholder functions in tool files
+  - os.homedir() is used for the global token path, consistent with other opencode config patterns
+---
+
+## 2026-02-05 - US-028
+- What was implemented: Created CLI command to generate RSA key pair for signing role tokens
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/init-keys.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityInitKeysCommand)
+- **Learnings for future iterations:**
+  - crypto.generateKeyPairSync("rsa", options) generates RSA key pairs synchronously with configurable encoding
+  - Use modulusLength: 2048 for RSA key pairs (standard security level)
+  - For encrypted private keys, use PKCS8 format with aes-256-cbc cipher and a passphrase
+  - For unencrypted private keys, use PKCS8 format without cipher/passphrase
+  - Public key uses SPKI format (standard for PEM public keys)
+  - The RSAKeyPairOptions<"pem", "pem"> type correctly types the return value as { publicKey: string, privateKey: string }
+  - Check for existing key file before overwriting to prevent accidental key loss
+  - Warn user to add private key file to .gitignore for security
+---
+
+## 2026-02-05 - US-029
+- What was implemented: Created CLI command to issue signed JWT role tokens for team member authentication
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/issue-token.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityIssueTokenCommand)
+- **Learnings for future iterations:**
+  - JWT creation: base64url encode header and payload, sign with crypto.createSign("RSA-SHA256"), base64url encode signature
+  - base64UrlEncode: replace + with -, / with _, strip trailing = from standard base64
+  - For encrypted private keys, pass { key: privateKey, passphrase } to sign.sign()
+  - Use Bun.spawnSync() instead of execSync for git commands to avoid try/catch on failure (check exitCode !== 0)
+  - crypto.randomUUID() generates unique token IDs (jti claim) without external dependencies
+  - Token metadata (role, expiry, jti, project) output to stderr so token on stdout can be piped cleanly
+  - The --output flag allows saving token directly to a file path
+---
+
+## 2026-02-05 - US-030
+- What was implemented: Verified all security CLI commands are registered and working together
+- Files changed:
+  - No new file changes needed - all registration was completed incrementally in US-021 through US-029
+  - packages/opencode/src/cli/cmd/security/index.ts (verified - registers all 6 subcommands: status, check, init, logs, init-keys, issue-token)
+  - packages/opencode/src/index.ts (verified - SecurityCommand registered in main CLI)
+- **Learnings for future iterations:**
+  - When a story is purely about "wiring together" previously created components, the work may already be done incrementally
+  - The security CLI command group follows the standard yargs subcommand group pattern: parent uses builder with .command() chain and .demandCommand()
+  - All subcommands have proper `describe` fields for help text generation
+  - Typecheck passes with all security modules integrated
+---
+
