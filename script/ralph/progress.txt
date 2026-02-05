@@ -47,6 +47,8 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **AST method detection**: `getNodeInfo()` checks `ts.isStringLiteral(node.name)` for method declarations, but computed property names like `['encryptData']()` wrap the string literal in a `ComputedPropertyName` node — `node.name` is `ComputedPropertyName`, not `StringLiteral`. Computed string methods evade detection.
 - **Base config nodeTypes**: Default AST config only has `["function", "arrow_function"]` — NOT `"method"`. Class methods with matching names evade default config detection. Must add `"method"` to nodeTypes to protect class methods.
 - **Re-export aliasing**: `export { processData as encryptData }` — the AST parser only sees the source declaration `processData`. The alias name `encryptData` in the ExportSpecifier is not checked by `getNodeInfo()`.
+- **Rule inheritance**: `checkAccess()` evaluates ALL matching rules from `getInheritanceChain()`. A child config's permissive rule (deniedOperations: []) does NOT cancel a parent's restrictive rule — any single deny is sufficient to block access. Merge order does not matter.
+- **Glob single wildcard**: `src/*/private/**` matches exactly one directory level — `src/a/b/private/file.ts` is NOT matched (two levels between `src/` and `private/`).
 ---
 
 ## 2026-02-05 - US-001
@@ -266,4 +268,22 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [INFO] Empty string server name falls back to defaultPolicy — no special casing.
   - [KNOWN_LIMITATION] Base64-encoded protected paths in MCP output bypass LLMScanner — same limitation as CASE-LLM-005.
   - Enforced policy scans both directions: tool input via `JSON.stringify(args)` and tool output text content items. Non-text content items (images, etc.) are skipped.
+---
+
+## 2026-02-05 - US-015
+- Implemented CASE-INH-001 through CASE-INH-004 rule inheritance bypass test cases
+- 27 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/inheritance-bypass.test.ts (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/nested-config/.opencode-security.json (new)
+  - packages/opencode/test/security/access_control_cases/fixtures/nested-config/child/.opencode-security.json (new)
+- **Learnings for future iterations:**
+  - `mergeSecurityConfigs()` unions all rules from all configs. A child config's permissive rule (deniedOperations: []) does NOT cancel a parent's restrictive rule — both rules exist in the merged config and `checkAccess()` evaluates ALL matching rules.
+  - Merge order does NOT matter for security: rules from [child, parent] produce the same `checkAccess()` result as [parent, child] because the function iterates through all matching rules, and any single deny is sufficient.
+  - `getInheritanceChain()` returns both direct matches (via minimatch glob) and inherited matches (via parent path iteration for directory rules). For `src/auth/keys.ts` with rules `src/**` and `src/auth/**`, both rules appear in the chain.
+  - Directory rule inheritance works at arbitrary depth: a rule on `a/**` correctly blocks files at 7+ and 10+ directory levels deep via the glob match `a/**` expanding to match all nested paths.
+  - Glob pattern `**/test*` with `matchBase: true` matches basenames starting with "test" but does NOT match "contest.ts" (no substring match — requires segment-start match).
+  - Single wildcard `src/*/private/**` matches exactly one directory level between `src/` and `private/` — `src/a/b/private/secret.ts` (two levels) is NOT matched.
+  - Character class `[!.]env` matches exactly one non-dot character followed by "env" — 4-char strings only. `.env` correctly not matched, `myenv` (5 chars) also not matched.
+  - Complementary glob patterns from merged configs are additive: `**/*.pem` from configA + `**/*.key` from configB both active after merge.
 ---
