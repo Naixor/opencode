@@ -406,3 +406,19 @@
   - os.homedir() is used for the global token path, consistent with other opencode config patterns
 ---
 
+## 2026-02-05 - US-028
+- What was implemented: Created CLI command to generate RSA key pair for signing role tokens
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/init-keys.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (modified - registered SecurityInitKeysCommand)
+- **Learnings for future iterations:**
+  - crypto.generateKeyPairSync("rsa", options) generates RSA key pairs synchronously with configurable encoding
+  - Use modulusLength: 2048 for RSA key pairs (standard security level)
+  - For encrypted private keys, use PKCS8 format with aes-256-cbc cipher and a passphrase
+  - For unencrypted private keys, use PKCS8 format without cipher/passphrase
+  - Public key uses SPKI format (standard for PEM public keys)
+  - The RSAKeyPairOptions<"pem", "pem"> type correctly types the return value as { publicKey: string, privateKey: string }
+  - Check for existing key file before overwriting to prevent accidental key loss
+  - Warn user to add private key file to .gitignore for security
+---
+

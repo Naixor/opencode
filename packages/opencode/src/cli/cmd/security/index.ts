@@ -3,6 +3,7 @@ import { SecurityStatusCommand } from "./status"
 import { SecurityCheckCommand } from "./check"
 import { SecurityInitCommand } from "./init"
 import { SecurityLogsCommand } from "./logs"
+import { SecurityInitKeysCommand } from "./init-keys"
 
 export const SecurityCommand = cmd({
   command: "security",
@@ -13,6 +14,7 @@ export const SecurityCommand = cmd({
       .command(SecurityCheckCommand)
       .command(SecurityInitCommand)
       .command(SecurityLogsCommand)
+      .command(SecurityInitKeysCommand)
       .demandCommand(),
   async handler() {},
 })
