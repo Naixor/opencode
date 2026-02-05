@@ -255,8 +255,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 9 CASE-SEG test cases passing (44 tests total). Covers extra whitespace in markers (//  @secure-start), bare markers without comment prefix, block comment styles (/* */, <!-- -->, \"\"\", '''), multi-line block comments (\\s* matches newlines), eval wrapping evasion (KNOWN_LIMITATION), function alias evasion, computed method names (KNOWN_LIMITATION for ComputedPropertyName), re-export aliasing behavior, and unsupported languages (Python/Go/Rust/Java/C return empty). Key findings: [KNOWN_LIMITATION] eval/Function constructor evades AST detection, [KNOWN_LIMITATION] computed property names not unwrapped, [INFO] base config missing 'method' nodeType, [INFO] re-export alias name not checked."
     },
     {
       "id": "US-014",

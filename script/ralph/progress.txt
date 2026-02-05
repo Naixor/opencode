@@ -43,6 +43,10 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **BashScanner path resolution**: `resolvePath(filePath, cwd)` uses `path.resolve(cwd, filePath)` which normalizes `../` — unlike raw `checkAccess()`.
 - **BashScanner limitations**: Does NOT parse `$()`, backtick, `<()`, `>()`, `<<<`, `<< EOF`, or any shell metacharacter-based file access. Tokenizer is space-based, not shell-grammar-aware.
 - **LLMScanner**: Two layers — (1) marker scanning via `findMarkerSegments()` for markers with `deniedOperations` including "llm", (2) path pattern scanning via `extractLiteralFromGlob()` for rules with "llm" in deniedOperations. Operates on raw text only — no base64/hex/URL decoding. Pattern matching uses literal substring search (over-matches = safe default).
+- **Marker regex `\s*`**: `buildMarkerPatterns()` uses `\s*` which matches newlines. Multi-line block comments like `/*\n @secure-start\n*/` ARE detected by the `/* @marker */` pattern. This is good security behavior.
+- **AST method detection**: `getNodeInfo()` checks `ts.isStringLiteral(node.name)` for method declarations, but computed property names like `['encryptData']()` wrap the string literal in a `ComputedPropertyName` node — `node.name` is `ComputedPropertyName`, not `StringLiteral`. Computed string methods evade detection.
+- **Base config nodeTypes**: Default AST config only has `["function", "arrow_function"]` — NOT `"method"`. Class methods with matching names evade default config detection. Must add `"method"` to nodeTypes to protect class methods.
+- **Re-export aliasing**: `export { processData as encryptData }` — the AST parser only sees the source declaration `processData`. The alias name `encryptData` in the ExportSpecifier is not checked by `getNodeInfo()`.
 ---
 
 ## 2026-02-05 - US-001
@@ -226,4 +230,21 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [INFO] Multiple occurrences of a pattern in the same content are all reported (scanner loops with `indexOf` advancing by 1 each time).
   - [INFO] Markers are detected regardless of surrounding context (markdown code blocks, JSON strings, etc.) — the scanner doesn't parse document structure.
   - [INFO] All comment styles supported by `buildMarkerPatterns()` (// # <!-- --> /* */ """ ''') work in the LLM scanner since it delegates to `findMarkerSegments()`.
+---
+
+## 2026-02-05 - US-013
+- Implemented CASE-SEG-001 through CASE-SEG-009 segment detection evasion test cases
+- 44 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/segment-evasion.test.ts (new)
+- **Learnings for future iterations:**
+  - `buildMarkerPatterns()` uses `\s*` in regex which matches newlines. Multi-line block comments `/*\n @secure-start\n*/` ARE detected by the `/* @marker */` pattern — this is secure behavior (not a limitation).
+  - Only bare markers without ANY recognized comment prefix (no //, #, /*, <!--, """, ''') evade detection. This requires completely non-standard text wrapping.
+  - `getNodeInfo()` for method declarations checks `ts.isStringLiteral(node.name)` directly, but computed property names `['encryptData']()` use `ComputedPropertyName` wrapper around the string literal. `node.name.kind === ComputedPropertyName` ≠ `StringLiteral`, so these evade detection. [KNOWN_LIMITATION]
+  - `eval('function encryptData() {}')` hides functions from the TypeScript compiler API. Function constructor `new Function()` also evades. Template literals with function definitions evade. This is inherent to static analysis. [KNOWN_LIMITATION]
+  - Function aliasing: `const enc = encryptData` — the alias `enc` is a VariableDeclaration where initializer is an Identifier (not ArrowFunction/FunctionExpression), so getNodeInfo skips it. Only the original declaration is protected.
+  - Destructuring with rename `{ encryptData: enc }` uses ObjectBindingPattern for node.name — `ts.isIdentifier(node.name)` returns false, evading detection entirely.
+  - Base config nodeTypes `["function", "arrow_function"]` does NOT include `"method"` — all class methods evade the default config. Must add `"method"` to nodeTypes for comprehensive protection.
+  - Re-export aliasing: `export { processData as encryptData }` — ExportSpecifier is not a function/arrow/class/method, so the alias name is not checked. An attacker can rename a function at the export boundary.
+  - Unsupported languages: Python (.py), Go (.go), Rust (.rs), Java (.java), C (.c) all return empty segments. Only TS/JS extensions (.ts, .tsx, .js, .jsx, .mjs, .cjs) are supported.
 ---
