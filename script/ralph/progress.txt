@@ -18,6 +18,8 @@
 - MCP tool keys use format `sanitizedServerName_sanitizedToolName` - extract server name by splitting on first underscore
 - MCP tools are integrated in session/prompt.ts via MCP.tools() loop, where each tool's execute is wrapped with plugin hooks and formatting
 - SecurityConfig.getMcpPolicy(serverName) returns "enforced" | "trusted" | "blocked" for MCP server policy decisions
+- CLI subcommand groups: parent uses `builder: (yargs) => yargs.command(SubCmd).demandCommand()` with empty handler, registered in src/index.ts
+- Commands needing project context use `bootstrap(process.cwd(), async () => { ... })` from cli/bootstrap.ts
 - SecurityConfig.findSecurityConfigs(startPath) walks up to git root collecting all .opencode-security.json files
 - SecurityConfig.mergeSecurityConfigs(configs) merges configs: rules unioned, roles must match, MCP most-restrictive-wins
 - Git root detection: walk up directories looking for .git using fs.statSync with { throwIfNoEntry: false }
@@ -300,5 +302,21 @@
   - For logging and authentication, first defined config wins (most specific)
   - A private loadConfigFile() helper was extracted from loadSecurityConfig() to avoid duplication
   - The `fs` import was added for findGitRoot() - uses fs.statSync for .git detection
+---
+
+## 2026-02-05 - US-021
+- What was implemented: Created security CLI status command showing current security configuration status
+- Files changed:
+  - packages/opencode/src/cli/cmd/security/status.ts (created)
+  - packages/opencode/src/cli/cmd/security/index.ts (created)
+  - packages/opencode/src/index.ts (modified - registered SecurityCommand)
+- **Learnings for future iterations:**
+  - CLI commands use yargs CommandModule pattern via the `cmd()` helper from `../cmd`
+  - Subcommand groups: parent uses `builder: (yargs) => yargs.command(SubCmd).demandCommand()` with empty handler
+  - Commands that need project context use `bootstrap(process.cwd(), async () => { ... })` from `../../bootstrap`
+  - Debug command group (debug/index.ts) is the best reference for a grouped command pattern
+  - SecurityConfig.findSecurityConfigs() returns `{ config, path }[]` - useful for showing which config files are active
+  - Default role is determined as lowest level role from config (until US-027 implements proper token auth)
+  - New commands must be imported and registered in src/index.ts via `.command(SecurityCommand)`
 ---
 
