@@ -328,4 +328,28 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [INFO] A PermissionNext "allow" on a tool does NOT bypass SecurityAccess.checkAccess inside the tool. Session overrides that allow edits do NOT bypass file-level security.
   - [INFO] The permission layering order is: PermissionNext (gate 1) → SecurityAccess (gate 2). If gate 1 denies, the tool is never called and gate 2 is never reached. If gate 1 allows but gate 2 denies, the tool throws an access denied error.
   - BashScanner.scanBashCommand resolves `secrets/` (trailing slash) to `secrets` (no trailing slash) via `path.resolve()`. Tests should match without trailing slash.
+- **Skill loading**: `Skill.state()` uses `Bun.Glob` with `followSymlinks: true` to scan for SKILL.md files. NO SecurityAccess.checkAccess() calls anywhere in the pipeline. Requires `Instance.provide()` context (can't call in unit tests directly). For testing, simulate the same glob patterns and ConfigMarkdown.parse pipeline.
+- **InstructionPrompt loading**: `InstructionPrompt.system()` uses `Filesystem.findUp()`/`globUp()` and `Bun.file().text()`. NO SecurityAccess.checkAccess() calls. Also requires `Instance.provide()` context. For testing, call `Filesystem.findUp()`/`globUp()` directly (these are context-free).
+- **Instruction config paths**: `config.instructions` array entries are resolved via `Filesystem.globUp()` (relative) or `Bun.Glob.scan()` (absolute). No security gate.
+- **Tool execution vs instruction loading**: Two separate pathways — tool execution goes through SecurityAccess.checkAccess() inside each tool, but instruction/skill loading bypasses security entirely. This is a design asymmetry.
+- **ConfigMarkdown.parse()**: Reads files via `Bun.file(filePath).text()`, follows symlinks transparently. No security checks.
+- **Instance.provide()**: Required context for Skill.state(), Config.get(), InstructionPrompt.system(). Cannot be used in simple unit tests — too heavy (needs Project.fromDirectory, git detection). Test the underlying filesystem operations directly instead.
+---
+
+## 2026-02-05 - US-018
+- Implemented CASE-SKILL-001 through CASE-SKILL-003 and CASE-SUB-001 through CASE-SUB-005 skill and subagent read bypass test cases
+- 28 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/skill-subagent-bypass.test.ts (new)
+- **Learnings for future iterations:**
+  - [HIGH] Skill.state() has NO SecurityAccess.checkAccess() calls. The scanning pipeline: Bun.Glob.scan({followSymlinks:true}) → ConfigMarkdown.parse() → store in skills record. A symlink from .claude/skills/test/SKILL.md → secrets/key.pem would load protected content into the LLM context.
+  - [HIGH] InstructionPrompt.system() has NO SecurityAccess.checkAccess() calls. The loading pipeline: Filesystem.findUp()/globUp() → Bun.file().text() → prepend "Instructions from: " header → return as system prompt strings. CLAUDE.md in a protected directory (e.g., secrets/CLAUDE.md) would be loaded.
+  - [HIGH] InstructionPrompt.resolve() walks UP directories from a target file. If the walk-up enters a protected directory (e.g., resolving from secrets/subdir/ discovers secrets/CLAUDE.md), the content is loaded without security checks.
+  - [HIGH] config.instructions paths (e.g., `['secrets/evil.md']`) are resolved via globUp/Glob.scan and loaded via Bun.file().text(). This is the most direct bypass — explicitly pointing to protected content in the config.
+  - [MEDIUM] LLMScanner as second defense: detects @secure-start/@secure-end markers and protected path patterns (.env, secrets/, src/auth/keys.ts) in loaded content. But CANNOT detect: arbitrary secrets, base64-encoded content, or content without markers/path references.
+  - [INFO] Tool execution asymmetry: Read/Write/Edit/Grep/Glob/Bash tools all call SecurityAccess.checkAccess() internally. But Skill loading and InstructionPrompt loading use raw Bun.file().text() and Bun.Glob.scan() without any security gate. The security check is only enforced in the tool layer, not the prompt construction layer.
+  - [INFO] ConfigMarkdown.parse() follows symlinks transparently — it uses Bun.file(filePath).text() which resolves symlinks at the OS level. The gray-matter library parses frontmatter and returns data/content.
+  - [INFO] Filesystem.findUp() uses Bun.file().stat() for existence check and doesn't resolve symlinks explicitly — but file reads follow symlinks via the OS.
+  - [INFO] Filesystem.globUp() uses Bun.Glob.scan({followSymlinks:true}) — explicitly follows symlinks in glob scanning.
+  - Testing approach: Cannot call Skill.state() or InstructionPrompt.system() directly in unit tests (require Instance.provide() context). Instead, test the underlying filesystem operations (Bun.Glob.scan, Filesystem.findUp, Bun.file().text()) and show that SecurityAccess.checkAccess denies what these operations allow.
 ---

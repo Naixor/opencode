@@ -351,8 +351,8 @@
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 8 CASE-SKILL/CASE-SUB test cases passing (28 tests total). Covers skill scanner symlink bypass (SKILL.md -> secrets/key.pem via followSymlinks:true), skill discovery inside protected directories via config skills.paths, ConfigMarkdown.parse content extraction through symlinks, canary string preservation in skill pipeline, InstructionPrompt findUp/globUp loading CLAUDE.md from protected directories, LLMScanner as second defense line (detects markers/paths but not arbitrary secrets or base64), resolve walk-up entering protected directories, tool execution vs instruction loading asymmetry, and config.instructions path loading from protected directories. Key findings: [HIGH] Skill.state() has NO SecurityAccess checks — followSymlinks:true + ConfigMarkdown.parse reads any symlink target, [HIGH] InstructionPrompt.system()/resolve() have NO SecurityAccess checks — findUp/globUp/Bun.file().text() read without security gate, [HIGH] config.instructions pointing to protected paths bypasses security entirely, [MEDIUM] LLMScanner only detects configured markers and path patterns — arbitrary secrets pass undetected."
     },
     {
       "id": "US-019",
