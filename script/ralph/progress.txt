@@ -49,6 +49,9 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - **Re-export aliasing**: `export { processData as encryptData }` — the AST parser only sees the source declaration `processData`. The alias name `encryptData` in the ExportSpecifier is not checked by `getNodeInfo()`.
 - **Rule inheritance**: `checkAccess()` evaluates ALL matching rules from `getInheritanceChain()`. A child config's permissive rule (deniedOperations: []) does NOT cancel a parent's restrictive rule — any single deny is sufficient to block access. Merge order does not matter.
 - **Glob single wildcard**: `src/*/private/**` matches exactly one directory level — `src/a/b/private/file.ts` is NOT matched (two levels between `src/` and `private/`).
+- **PermissionNext vs SecurityAccess**: Two independent security layers. PermissionNext controls tool availability (agent-level), SecurityAccess controls file access (inside tools). Both must allow for operation to succeed. PermissionNext deny prevents tool invocation entirely. SecurityAccess deny throws error from within the tool.
+- **PermissionNext.disabled()**: Only disables tools where the LAST matching rule has `pattern: "*"` and `action: "deny"`. Pattern-specific deny rules (like plan agent's `edit: { "*": "deny", ".opencode/plans/*.md": "allow" }`) do NOT fully disable tools — the last rule's pattern is not `"*"`.
+- **PermissionNext.evaluate()**: Uses `findLast()` to find the last matching rule by permission+pattern wildcard matching. Later rules override earlier rules. Default is `ask`.
 ---
 
 ## 2026-02-05 - US-001
@@ -310,4 +313,19 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - [HIGH] `>`, `truncate`, `: >`, `cp /dev/null`, `tee`, `echo >` — all log truncation methods undetected. Shell redirection operators are not parsed by BashScanner.
   - [MEDIUM] Audit log symlink redirect: `fs.appendFile` follows symlinks by default. An attacker can replace the audit log with a symlink to `/dev/null` (silent discard), another file (corruption), or an attacker-controlled location (data exfiltration of access patterns).
   - [MEDIUM] Audit log is not self-protected: `checkAccess(".opencode-security-audit.log", "read"|"write", "viewer")` returns `allowed: true`. No default rule protects the audit log.
+---
+
+## 2026-02-05 - US-017
+- Implemented CASE-AGENT-001 through CASE-AGENT-007 plan agent and security interaction test cases
+- 25 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/agent-interaction.test.ts (new)
+- **Learnings for future iterations:**
+  - [INFO] PermissionNext and SecurityAccess are independent security layers operating at different levels: PermissionNext controls tool availability (agent-level gate), SecurityAccess controls file access (tool-internal gate). Both must allow for an operation to succeed.
+  - [INFO] Plan agent does NOT fully disable edit tools via `PermissionNext.disabled()`. The plan agent uses `edit: { "*": "deny", ".opencode/plans/*.md": "allow" }` — since the LAST rule for "edit" permission has a specific pattern (not `"*"`), `disabled()` returns false. Instead, `evaluate()` blocks at runtime when the file pattern doesn't match `.opencode/plans/*.md`.
+  - [INFO] `PermissionNext.disabled()` only removes tools from the LLM tool list when the last matching rule has `pattern: "*"` and `action: "deny"`. Example: `edit: "deny"` (simple deny) fully disables edit tools. `edit: { "*": "deny", "plans/*.md": "allow" }` does NOT.
+  - [INFO] SecurityAccess.checkAccess has NO agent parameter — it is completely agent-agnostic. The function signature is `checkAccess(filePath, operation, role)`. All tools use `getDefaultRole(config)` to get the lowest role, regardless of which agent invoked them.
+  - [INFO] A PermissionNext "allow" on a tool does NOT bypass SecurityAccess.checkAccess inside the tool. Session overrides that allow edits do NOT bypass file-level security.
+  - [INFO] The permission layering order is: PermissionNext (gate 1) → SecurityAccess (gate 2). If gate 1 denies, the tool is never called and gate 2 is never reached. If gate 1 allows but gate 2 denies, the tool throws an access denied error.
+  - BashScanner.scanBashCommand resolves `secrets/` (trailing slash) to `secrets` (no trailing slash) via `path.resolve()`. Tests should match without trailing slash.
 ---
