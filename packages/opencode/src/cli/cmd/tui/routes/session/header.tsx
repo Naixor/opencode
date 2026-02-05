@@ -9,6 +9,7 @@ import { useCommandDialog } from "@tui/component/dialog-command"
 import { useKeybind } from "../../context/keybind"
 import { Installation } from "@/installation"
 import { useTerminalDimensions } from "@opentui/solid"
+import { SecurityConfig } from "@/security/config"
 
 const Title = (props: { session: Accessor<Session> }) => {
   const { theme } = useTheme()
@@ -27,6 +28,23 @@ const ContextInfo = (props: { context: Accessor<string | undefined>; cost: Acces
         {props.context()} ({props.cost()})
       </text>
     </Show>
+  )
+}
+
+const SecurityIndicator = () => {
+  const { theme } = useTheme()
+  const config = SecurityConfig.getSecurityConfig()
+  const hasRules = (config.rules ?? []).length > 0 || config.segments?.markers?.length || config.segments?.ast?.length
+  if (!hasRules) return null
+
+  const roles = config.roles ?? []
+  const roleName =
+    roles.length === 0 ? "viewer" : roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0]).name
+
+  return (
+    <text fg={theme.textMuted} wrapMode="none" flexShrink={0}>
+      [secured: {roleName}]
+    </text>
   )
 }
 
@@ -88,6 +106,7 @@ export function Header() {
                   <b>Subagent session</b>
                 </text>
                 <box flexDirection="row" gap={1} flexShrink={0}>
+                  <SecurityIndicator />
                   <ContextInfo context={context} cost={cost} />
                   <text fg={theme.textMuted}>v{Installation.VERSION}</text>
                 </box>
@@ -130,6 +149,7 @@ export function Header() {
             <box flexDirection={narrow() ? "column" : "row"} justifyContent="space-between" gap={1}>
               <Title session={session} />
               <box flexDirection="row" gap={1} flexShrink={0}>
+                <SecurityIndicator />
                 <ContextInfo context={context} cost={cost} />
                 <text fg={theme.textMuted}>v{Installation.VERSION}</text>
               </box>
