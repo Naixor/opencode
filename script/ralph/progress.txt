@@ -11,6 +11,10 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 - Test files go in `packages/opencode/test/security/access_control_cases/`
 - Config validation: `SecuritySchema.securityConfigSchema.parse()`
 - Path matching uses `minimatch` library; symlinks resolved via `fs.realpathSync()`
+- `loadSecurityConfig()` fail-open: invalid JSON/truncated/malformed schema → returns `emptyConfig` (no rules = all access allowed)
+- `getSecurityConfig()` uses in-memory cache (`currentConfig`); deleting config file after load does NOT remove protection
+- `mergeSecurityConfigs()` unions rules (additive), throws on conflicting role levels, deduplicates roles by name
+- `setupSecurityConfig()` helper creates `.git` dir for `findGitRoot()` to work — required for all test setups
 ---
 
 ## 2026-02-05 - US-001
@@ -33,4 +37,18 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - SecuritySchema.Authentication requires `revokedTokens` as required array (not optional) — include `[]` in fixtures
   - ast-code.ts functions: encryptData, decryptPayload, signToken, verifySignature (matching pattern `encrypt|decrypt|sign|verify`)
   - mixed-code.ts has both marker regions and AST-matching functions for overlapping protection tests
+---
+
+## 2026-02-05 - US-004
+- Implemented CASE-CFG-001 through CASE-CFG-007 config manipulation attack test cases
+- 11 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/config-manipulation.test.ts (new)
+- **Learnings for future iterations:**
+  - `loadSecurityConfig` returns empty config for ALL error cases (invalid JSON, truncated, malformed schema) — fail-open by design
+  - In-memory config cache means file deletion after load doesn't break protection (TOCTOU is partial: load-time only)
+  - `mergeSecurityConfigs` unions rules but throws on role conflicts — important for inheritance tests
+  - Need `.git` directory in temp dirs for `setupSecurityConfig()` to work (findGitRoot dependency)
+  - `checkAccess` returns `{ allowed: true }` when rules array is empty or undefined — consistent fail-open
+  - Performance: 1000 rules with minimatch pattern checking completes well under 5s threshold
 ---

@@ -35,8 +35,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. Keys generated and committed. Public key in base-security-config.json matches test-public.pem."
     },
     {
       "id": "US-003",
@@ -55,8 +55,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All helper functions implemented: setupSecurityConfig, teardownSecurityConfig, createTempSymlink, generateExpiredToken, generateForgedToken, generateValidToken, assertBlocked, assertAllowed."
     },
     {
       "id": "US-004",
@@ -75,8 +75,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 7 CASE-CFG test cases passing (11 tests total). Covers malformed JSON, truncated config, config deletion after load, child cannot remove parent restrictions, role conflicts, empty rules, and 1000+ rules performance."
     },
     {
       "id": "US-005",
