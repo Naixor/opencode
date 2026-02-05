@@ -388,8 +388,8 @@
         "Typecheck passes"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 5 CASE-GUARD test cases passing (18 tests total). Covers withAccessGuard around skill symlink bypass (detects OS-level read of symlinked protected file, flags compliance violation when no audit log denial), withAccessGuard around InstructionPrompt loading CLAUDE.md from protected directory (OS-level evidence of bypass), withAccessGuard around blocked Read tool (verifies security blocks BEFORE file I/O — no OS read events), withAccessGuard around blocked bash cat (BashScanner blocks before execution — zero OS events), and unprivileged mode fallback (captures write/create/delete, documents READ unavailability). Updated helpers.ts with startAccessGuard/stopAccessGuard wrappers. Key findings: [INFO] Unprivileged mode cannot detect reads — only write/create/delete via fs.watch, [INFO] Privileged mode (sudo fs_usage) captures all syscalls including reads, [INFO] When security blocks before I/O, no OS-level read events appear (correct behavior), [HIGH] Skill/instruction loading bypass confirmed at OS level — reads occur without any audit log denial entry."
     },
     {
       "id": "US-021",

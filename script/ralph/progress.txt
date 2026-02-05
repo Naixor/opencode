@@ -3,6 +3,7 @@ Started: Thu  5 Feb 2026 17:57:58 CST
 
 ## Codebase Patterns
 - Access-guard infrastructure: `packages/opencode/test/security/access_control_cases/access-guard/` — types.ts, parser.ts, privileged-monitor.ts, unprivileged-monitor.ts, reporter.ts, index.ts. Use `withAccessGuard(patterns, testFn)` convenience wrapper for integration tests.
+- Access-guard test patterns: Use absolute path patterns (`path.join(tempDir, "secrets", "**")`) for monitoring. Handle both privileged/unprivileged mode in assertions. Add 200-300ms delays for fs.watch event propagation. Use `startAccessGuard()`/`stopAccessGuard()` from helpers.ts for simple test patterns.
 - `tsgo` parses JSDoc `/** */` comments and can trip on glob patterns inside them — use `//` line comments for code examples with globs
 - Security modules are in `packages/opencode/src/security/` — config.ts, access.ts, role.ts, token.ts, segments.ts, redact.ts, audit.ts, bash-scanner.ts, llm-scanner.ts
 - Security config schema in `schema.ts` uses Zod with namespace `SecuritySchema`
@@ -377,4 +378,21 @@ Started: Thu  5 Feb 2026 17:57:58 CST
   - fs.watch with `{ recursive: true }` only captures write/create/delete events — NOT reads. This is a fundamental OS limitation, not a bug.
   - The `minimatch` library is used both in the security access control system and in the access-guard parser for pattern matching — consistent behavior.
   - `MonitorHandle` interface with `stop(): Promise<AccessEvent[]>` pattern works well for both privileged (child process) and unprivileged (fs.watch) monitors.
+---
+
+## 2026-02-05 - US-020
+- Integrated access-guard with key bypass test cases (CASE-GUARD-001 to CASE-GUARD-005)
+- 18 tests total, all passing
+- Files changed:
+  - packages/opencode/test/security/access_control_cases/unit/access-guard-integration.test.ts (new)
+  - packages/opencode/test/security/access_control_cases/helpers.ts (updated — added startAccessGuard/stopAccessGuard wrappers)
+- **Learnings for future iterations:**
+  - AccessGuard runs in unprivileged mode in CI/test environments without sudo. Tests must handle both modes via `if (report.mode === "privileged")` / `if (report.mode === "unprivileged")` branches.
+  - In unprivileged mode, `fs.watch` event timing is OS-dependent and may miss rapid writes. Use `setTimeout(resolve, 200-300)` delays for reliable event capture.
+  - `withAccessGuard(patterns, testFn, options)` convenience wrapper handles start/stop automatically, including cleanup on error.
+  - Pattern matching for absolute paths: use `path.join(tempDir, "secrets", "**")` for absolute patterns to match fs_usage/fs.watch output paths.
+  - Compliance violation detection: when OS records a file access but the audit log has no "denied" entry for that path, a ComplianceViolation is flagged. This directly proves that skill/instruction loading bypasses SecurityAccess.
+  - When security blocks BEFORE file I/O (Read tool, BashScanner), no OS-level read() syscalls appear for the protected file. This is the correct behavior — the guard verifies that pre-execution blocking works.
+  - `startAccessGuard()` and `stopAccessGuard()` in helpers.ts maintain an `activeGuard` module-level variable for simple beforeEach/afterEach patterns.
+  - `isProtectedPath()` from the parser module is useful for unit-testing pattern matching independently of the full monitor.
 ---
