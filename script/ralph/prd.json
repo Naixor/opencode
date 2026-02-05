@@ -234,8 +234,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed. All 8 CASE-LLM test cases passing (31 tests total). Covers marker detection in plain text, tool result text, and system prompt text. Verifies obfuscation limitations (split boundaries, character substitution, base64/hex/URL encoding). Tests marker boundary detection across comment styles (// # <!-- --> /* */). Validates path pattern matching for .env, secrets/, src/auth/keys.ts with multiple occurrence detection. Tests extractLiteralFromGlob handling of wildcards, prefixes, and over-matching behavior."
     },
     {
       "id": "US-013",
