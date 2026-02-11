@@ -30,3 +30,6 @@ logs/
 
 # Security test reports
 packages/opencode/test/security/access_control_cases/report/
+
+# Security test project
+test-security-project
