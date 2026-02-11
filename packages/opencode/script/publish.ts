@@ -23,9 +23,9 @@ await Bun.file(`./dist/${pkg.name}/LICENSE`).write(await Bun.file("../../LICENSE
 await Bun.file(`./dist/${pkg.name}/package.json`).write(
   JSON.stringify(
     {
-      name: pkg.name + "-ai",
+      name: pkg.name,
       bin: {
-        [pkg.name]: `./bin/${pkg.name}`,
+        "lark-opencode": `./bin/lark-opencode`,
       },
       scripts: {
         postinstall: "bun ./postinstall.mjs || node ./postinstall.mjs",
@@ -48,6 +48,7 @@ const tasks = Object.entries(binaries).map(async ([name]) => {
 })
 await Promise.all(tasks)
 await $`cd ./dist/${pkg.name} && bun pm pack && npm publish *.tgz --access public --tag ${Script.channel}`
+<<<<<<< HEAD
 
 const image = "ghcr.io/anomalyco/opencode"
 const platforms = "linux/amd64,linux/arm64"
