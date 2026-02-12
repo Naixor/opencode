@@ -17,9 +17,11 @@ OpenCode needs a security access control system to protect confidential director
 ## User Stories
 
 ### US-001: Create security configuration schema
+
 **Description:** As a developer, I need a well-defined configuration schema so that security rules can be consistently parsed and validated.
 
 **Acceptance Criteria:**
+
 - [ ] Define Zod schema for `.opencode-security.json` configuration
 - [ ] Schema supports `roles` array with role definitions (name, level for hierarchy)
 - [ ] Schema supports `rules` array for directory/file protection rules
@@ -32,9 +34,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-002: Implement configuration loader
+
 **Description:** As a developer, I need to load and validate security configuration so that protection rules are available at runtime.
 
 **Acceptance Criteria:**
+
 - [ ] Load `.opencode-security.json` from project root on startup
 - [ ] Validate configuration against schema
 - [ ] **Fail-open behavior:** If config is malformed, log clear warning and allow all access (do not block operations)
@@ -44,9 +48,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-003: Implement role authentication
+
 **Description:** As a security admin, I want roles to be cryptographically verified so that users cannot falsely claim higher privileges.
 
 **Acceptance Criteria:**
+
 - [ ] Support role verification via signed token file (`.opencode-role.token`)
 - [ ] Token contains: role name, expiration date, project scope, signature
 - [ ] Verify token signature against public key in security config
@@ -56,9 +62,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-004: Implement path-based access checker
+
 **Description:** As a developer, I need a centralized access checking function so that all tools can verify permissions consistently.
 
 **Acceptance Criteria:**
+
 - [ ] Function `checkAccess(path, operation, role)` returns `{ allowed: boolean, reason?: string }`
 - [ ] Supports operations: `read`, `write`, `llm`
 - [ ] Matches paths against directory and file patterns using glob matching
@@ -67,9 +75,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-005: Implement marker-based segment detector
+
 **Description:** As a developer, I need to detect protected code segments via comment markers so that teams can easily mark sensitive code blocks.
 
 **Acceptance Criteria:**
+
 - [ ] Parse marker rules from configuration (e.g., `// @secure-start` / `// @secure-end`)
 - [ ] Support language-specific comment styles (JS/TS: `//`, Python: `#`, HTML: `<!--`, etc.)
 - [ ] Function `findMarkerSegments(filePath, content)` returns array of `{ start, end, rule }` ranges
@@ -78,9 +88,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-005b: Implement AST-based segment detector
+
 **Description:** As a developer, I need to detect protected code segments via AST analysis so that functions and classes can be protected by name pattern.
 
 **Acceptance Criteria:**
+
 - [ ] Support AST parsing for common languages (TypeScript, JavaScript, Python, Go, Rust)
 - [ ] Parse function/class name patterns from configuration (regex patterns)
 - [ ] Function `findASTSegments(filePath, content)` returns array of `{ start, end, rule, nodeType }` ranges
@@ -90,9 +102,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-006: Integrate access control with Read tool
+
 **Description:** As a user, I want the Read tool to respect security rules so that protected content cannot be read.
 
 **Acceptance Criteria:**
+
 - [ ] Check file path against access rules before reading
 - [ ] If file is fully protected, return access denied error
 - [ ] If file contains protected segments, redact those segments with placeholder text `[REDACTED: Security Protected]`
@@ -100,9 +114,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-007: Integrate access control with Write/Edit tools
+
 **Description:** As a user, I want Write and Edit tools to respect security rules so that protected content cannot be modified.
 
 **Acceptance Criteria:**
+
 - [ ] Check file path against access rules before writing/editing
 - [ ] If file or target segment is protected, return access denied error
 - [ ] Prevent edits that would modify protected segments within files
@@ -110,9 +126,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-008: Integrate access control with Grep/Glob tools
+
 **Description:** As a user, I want search tools to respect security rules so that protected content is not exposed in search results.
 
 **Acceptance Criteria:**
+
 - [ ] Filter out protected files/directories from Glob results
 - [ ] Filter out matches in protected files from Grep results
 - [ ] Redact matches within protected segments (show file/line but not content)
@@ -120,9 +138,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-009: Integrate access control with Bash tool
+
 **Description:** As a user, I want the Bash tool to respect security rules so that shell commands cannot bypass protection.
 
 **Acceptance Criteria:**
+
 - [ ] Detect file access patterns in common commands (cat, less, head, tail, vim, etc.)
 - [ ] Block commands that would read protected files
 - [ ] Block commands that would write to protected files
@@ -131,9 +151,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-010: Implement LLM request interceptor
+
 **Description:** As a security admin, I want all LLM requests to be scanned so that protected content never reaches external providers.
 
 **Acceptance Criteria:**
+
 - [ ] Create middleware that intercepts all outgoing LLM requests
 - [ ] Scan request content (messages, context, tool results) for protected content patterns
 - [ ] If protected content detected, either redact it or block the request entirely
@@ -142,9 +164,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-011: Implement audit logging
+
 **Description:** As a security admin, I want all access attempts logged so that I can review security events.
 
 **Acceptance Criteria:**
+
 - [ ] Log location configurable via `logging.path` in security config (default: `.opencode-security.log` in project root)
 - [ ] Support absolute paths or relative paths (relative to project root)
 - [ ] Log format: timestamp, user/role, operation, target path/content, result (allowed/denied), rule triggered
@@ -154,9 +178,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-012: Add security status to TUI
+
 **Description:** As a user, I want to see my security role and status in the TUI so that I understand my access level.
 
 **Acceptance Criteria:**
+
 - [ ] Display current role in status bar or header
 - [ ] Show indicator when security config is active
 - [ ] Provide command to view current security rules (filtered by role)
@@ -164,9 +190,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Verify in browser using dev-browser skill
 
 ### US-013: Add security CLI commands
+
 **Description:** As a user, I want CLI commands to manage and inspect security configuration.
 
 **Acceptance Criteria:**
+
 - [ ] `opencode security status` - show current role, active configs (merged), and rules count
 - [ ] `opencode security check <path>` - test if a path is accessible (shows inheritance chain)
 - [ ] `opencode security logs` - view recent security audit logs
@@ -178,9 +206,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-014: Implement symbolic link protection
+
 **Description:** As a security admin, I want symbolic links to protected content to be handled safely so that users cannot bypass protection via symlinks.
 
 **Acceptance Criteria:**
+
 - [ ] Resolve symbolic link targets before checking access rules
 - [ ] If symlink target is protected, deny access to the symlink
 - [ ] Symlinks remain visible in directory listings (existence is not hidden)
@@ -189,9 +219,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-015: Implement rule inheritance
+
 **Description:** As a security admin, I want protection rules to be inherited by subdirectories so that I don't need to specify rules for every nested path.
 
 **Acceptance Criteria:**
+
 - [ ] Child paths automatically inherit parent directory protection rules
 - [ ] More restrictive child rules take precedence over inherited rules
 - [ ] Less restrictive child rules do NOT override parent restrictions
@@ -199,9 +231,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-016: Integrate security with MCP servers
+
 **Description:** As a security admin, I want to configure whether MCP server tools are subject to security rules so that external tools don't bypass protection.
 
 **Acceptance Criteria:**
+
 - [ ] Add `mcp` section to security config with per-server settings
 - [ ] Each MCP server can be: `enforced` (full security rules), `trusted` (exempt), or `blocked` (no access)
 - [ ] Default behavior for unlisted MCP servers is configurable (`defaultMcpPolicy`)
@@ -210,9 +244,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-017: Handle nested project configurations
+
 **Description:** As a developer working in a monorepo, I want nested projects to have their own security configs that merge with parent configs.
 
 **Acceptance Criteria:**
+
 - [ ] Detect `.opencode-security.json` files in parent directories up to git root
 - [ ] Merge multiple configs: nested configs can only ADD restrictions, not remove them
 - [ ] Role definitions must match across configs (conflict = error)
@@ -221,9 +257,11 @@ OpenCode needs a security access control system to protect confidential director
 - [ ] Typecheck passes
 
 ### US-018: Implement token generation for role authentication
+
 **Description:** As a security admin, I want to generate signed role tokens so that team members can prove their access level.
 
 **Acceptance Criteria:**
+
 - [ ] `opencode security issue-token --role <role> --expires <days>` generates signed token
 - [ ] Token is JWT format with claims: role, project, exp, iat, jti
 - [ ] Signing uses private key from admin's key file
@@ -418,20 +456,20 @@ OpenCode needs a security access control system to protect confidential director
 
 The following design decisions have been made:
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
+| Decision                 | Choice                          | Rationale                                                                                  |
+| ------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------ |
 | Segment detection method | Both AST-based and marker-based | AST provides precise function/class protection; markers are language-agnostic and explicit |
-| Config error handling | Fail-open with warning | Prevents accidental lockouts; admins should monitor logs |
-| Break glass mechanism | Not implemented | All access must follow rules; no bypass to prevent abuse |
-| Symbolic link handling | Link visible, content protected | Users can see symlinks exist but cannot follow to protected targets |
-| Rule inheritance | Yes, inheritable | Subdirectories inherit parent protection; simplifies configuration |
-| Role authentication | Signed JWT tokens | Cryptographic verification prevents role spoofing; tokens can expire and be revoked |
-| MCP server security | Configurable per server | Flexibility to trust some MCP servers while enforcing rules on others |
-| Audit log location | Configurable in config | Teams can centralize logs or keep them per-project as needed |
-| Nested project configs | Merge (more restrictive) | Monorepo support; child projects can add restrictions but not remove parent rules |
-| Dry-run mode | Not needed | Use `opencode security check <path>` to test individual paths instead |
-| Git history protection | Out of scope | Only protect current working tree; past commits not blocked |
-| Key passphrase | Optional | Balance between security and convenience; teams can choose their policy |
+| Config error handling    | Fail-open with warning          | Prevents accidental lockouts; admins should monitor logs                                   |
+| Break glass mechanism    | Not implemented                 | All access must follow rules; no bypass to prevent abuse                                   |
+| Symbolic link handling   | Link visible, content protected | Users can see symlinks exist but cannot follow to protected targets                        |
+| Rule inheritance         | Yes, inheritable                | Subdirectories inherit parent protection; simplifies configuration                         |
+| Role authentication      | Signed JWT tokens               | Cryptographic verification prevents role spoofing; tokens can expire and be revoked        |
+| MCP server security      | Configurable per server         | Flexibility to trust some MCP servers while enforcing rules on others                      |
+| Audit log location       | Configurable in config          | Teams can centralize logs or keep them per-project as needed                               |
+| Nested project configs   | Merge (more restrictive)        | Monorepo support; child projects can add restrictions but not remove parent rules          |
+| Dry-run mode             | Not needed                      | Use `opencode security check <path>` to test individual paths instead                      |
+| Git history protection   | Out of scope                    | Only protect current working tree; past commits not blocked                                |
+| Key passphrase           | Optional                        | Balance between security and convenience; teams can choose their policy                    |
 
 ## Open Questions
 
