@@ -42,6 +42,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - `SecuritySchema.MarkerConfig` has `deniedOperations` and `allowedRoles` directly (not nested in a `rule` field) — `findMarkerSegments()` returns `MarkerSegment` with `.rule` being the full `MarkerConfig`
 - AI SDK content parts: `ImagePart` = `{ type: "image", image, mediaType? }`, `FilePart` = `{ type: "file", data, mediaType }` — do NOT use `mimeType`
 - For programmatic LLM calls from tools: `generateText({ model: await Provider.getLanguage(model), messages, system })` from "ai" package
+- MCP tool keys use `sanitizedServer_sanitizedTool` format; resources/prompts use `sanitizedServer:sanitizedName` (colon separator). Sanitize with `.replace(/[^a-zA-Z0-9_-]/g, "_")`
+- AI SDK `Tool.execute` is optional — cast through `unknown` when calling MCP tool execute directly: `(tool.execute as unknown as Function)(args, opts)`
 
 ---
 
@@ -653,4 +655,32 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - `Bun.file().type` may not correctly detect MIME types from extension alone — use explicit extension-to-MIME mapping as fallback
   - Security rules in tests require `type: "file"` field (Zod validates) — omitting it causes typecheck errors
   - `mock.module()` in Bun works well for mocking `ai` and `Provider` modules — allows testing without real API calls
+---
+
+## 2026-02-14 - US-024
+- Implemented `skill_mcp` tool in `packages/opencode/src/tool/skill-mcp.ts`
+  - `skill_mcp` tool: invokes MCP tools, reads resources, or executes prompts from within skill context
+  - Parameters: `mcp_name` (required), `tool_name` (optional), `resource_name` (optional), `prompt_name` (optional), `arguments` (optional, JSON string or object)
+  - Validates exactly ONE of tool_name/resource_name/prompt_name is provided
+  - Reuses existing MCP client infrastructure: `MCP.tools()`, `MCP.readResource()`, `MCP.getPrompt()`
+  - Security: `SecurityConfig.getMcpPolicy()` checks for blocked servers, `SecurityAudit.logSecurityEvent()` for denied operations
+  - Dynamic description builder: lists connected MCP servers with their available tools, resources, and prompts
+  - Tool key format matches MCP convention: `sanitizedServer_sanitizedTool`
+  - Error messages include available alternatives (available tools for server, available prompts, etc.)
+- Created tool description file `skill-mcp.txt` with `{mcp_info}` placeholder for dynamic content
+- Registered `SkillMcpTool` in `registry.ts` (always available, not behind experimental flag, like SkillTool)
+- 14 unit tests all passing, typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/skill-mcp.ts` (new)
+  - `packages/opencode/src/tool/skill-mcp.txt` (new)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered SkillMcpTool)
+  - `packages/opencode/test/tool/skill-mcp.test.ts` (new)
+- **Learnings for future iterations:**
+  - AI SDK `Tool` type from `dynamicTool()` has `execute` as optional — always check before calling, and cast through `unknown` to call with custom args
+  - MCP tool keys use format `sanitizedServer_sanitizedTool` — sanitize with `.replace(/[^a-zA-Z0-9_-]/g, "_")`
+  - MCP resources and prompts use key format `sanitizedServer:sanitizedName` (colon separator, not underscore)
+  - `MCP.status()` returns configured servers; `MCP.tools()` returns only tools from connected servers — check status before attempting tool calls
+  - For mocking the MCP module in tests, mock `../../src/mcp/index` (not `../../src/mcp`) to match the actual import path
+  - Don't use `setupSecurityConfig`/`teardownSecurityConfig` helpers when mocking `SecurityConfig` directly — the helpers rely on the real `SecurityConfig.resetConfig()` function
+  - `CallToolResult` from MCP has `.content` array with `{ type, text }` entries and optional `.isError` boolean — format accordingly
 ---

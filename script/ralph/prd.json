@@ -615,8 +615,8 @@
         "Typecheck passes"
       ],
       "priority": 24,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "SkillMcpTool registered in ToolRegistry without experimental flag (always available like SkillTool). MCP tools invoked via cast through unknown to handle AI SDK Tool type."
     },
     {
       "id": "US-025",
