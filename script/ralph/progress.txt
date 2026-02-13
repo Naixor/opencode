@@ -23,6 +23,7 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Config schema agent section has explicit fields for known agents + `.catchall(Agent)` — add new native agents to explicit fields
 - New subagent agents automatically appear in Sisyphus delegation table via dynamic `buildAgentsTable()` — no manual update needed
 - Search-only agents use `"*": "deny"` then explicit `"allow"` for each permitted tool
+- Optional (opt-in) agents: defined in `packages/opencode/src/agent/optional/index.ts`, enabled via `agent.<name>.enabled: true` in config. `replaces` field allows swapping existing agent slots (e.g., prometheus -> plan)
 
 ---
 
@@ -253,4 +254,59 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Agent names with hyphens (e.g., "omo-explore") work as record keys in JS and as config keys in JSONC — use quoted string keys in Zod schema definitions
   - The `"*": "deny"` permission rule denies all tools by default; subsequent explicit `"allow"` rules override for specific tools — this is the pattern for search-only agents
   - Agent registration doesn't require a separate module file — simpler agents can be defined inline in `agent.ts` alongside existing agents
+---
+
+## 2026-02-14 - US-011
+- Implemented Oracle agent as strategic advisor subagent
+  - Created `packages/opencode/src/agent/prompt/oracle.txt` with pragmatic minimalism philosophy, effort estimation (Quick/Short/Medium/Large), and bottom-line response format
+  - Registered `oracle` in agent registry in `agent.ts` as subagent mode with search-only permissions
+  - Tool restrictions: DENIED write, edit, task, delegate_task; ALLOWED read, grep, glob, lsp, bash, webfetch, websearch, codesearch
+  - Temperature: 0.1 for precise, deterministic analysis
+  - Added `oracle` to config schema explicit fields in `config.ts`
+  - Sisyphus delegation table automatically picks up oracle via dynamic `buildAgentsTable()`
+- Updated existing `agent.test.ts` to include `oracle` in default agents list assertion
+- 6 new unit tests all passing, 59 total agent tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/agent/prompt/oracle.txt` (new)
+  - `packages/opencode/src/agent/agent.ts` (modified - added oracle import and registration)
+  - `packages/opencode/src/config/config.ts` (modified - added oracle to agent config schema)
+  - `packages/opencode/test/agent/oracle.test.ts` (new)
+  - `packages/opencode/test/agent/agent.test.ts` (modified - added oracle to default agents assertion)
+- **Learnings for future iterations:**
+  - Oracle follows the exact same pattern as omo-explore: search-only subagent with `"*": "deny"` + explicit allows
+  - Adding a new native subagent requires 4 changes: prompt .txt file, agent definition in agent.ts, config schema field in config.ts, and updating the default agents list test
+  - The thinking budget (32k for Claude models) is handled by the think-mode hook (US-008) based on variant, not by the agent definition itself — agent just sets temperature
+  - Simple agents that don't need dynamic prompt building can be defined inline in agent.ts without a separate module file (unlike Sisyphus which has sisyphus.ts for buildDynamicPrompt)
+---
+
+## 2026-02-14 - US-012
+- Implemented opt-in agent infrastructure and two optional agents: Hephaestus and Prometheus
+  - Created `packages/opencode/src/agent/optional/index.ts` with `OptionalAgents` namespace for resolving opt-in agents
+  - Created `packages/opencode/src/agent/prompt/hephaestus.txt` — full-access builder agent prompt
+  - Created `packages/opencode/src/agent/prompt/prometheus.txt` — strategic planning agent prompt with plan_exit integration
+  - Hephaestus: subagent mode, full tool access, enabled via `agent.hephaestus.enabled: true`
+  - Prometheus: primary mode, read-only (replaces plan agent when enabled), same edit restrictions as plan (only plan files)
+  - Per-agent config: model, temperature, prompt_append all supported through config overrides
+- Integration into agent.ts:
+  - Optional agents resolved before the main config merge loop
+  - Optional agent config entries skipped in main loop to prevent double-processing
+  - Replacement mechanism: prometheus replaces "plan" key in registry, so plan_enter/plan_exit tools continue working
+  - Per-agent overrides (model, temperature, prompt_append) applied after optional resolution
+- Added `hephaestus` and `prometheus` to Config.Agent schema explicit fields in config.ts
+- 9 new unit tests all passing, 1498 total tests pass (+ 1 skip)
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/agent/optional/index.ts` (new)
+  - `packages/opencode/src/agent/prompt/hephaestus.txt` (new)
+  - `packages/opencode/src/agent/prompt/prometheus.txt` (new)
+  - `packages/opencode/src/agent/agent.ts` (modified — added OptionalAgents import and integration)
+  - `packages/opencode/src/config/config.ts` (modified — added hephaestus, prometheus to agent config schema)
+  - `packages/opencode/test/agent/optional-agents.test.ts` (new)
+- **Learnings for future iterations:**
+  - Optional agents use `options.enabled === true` to detect opt-in — the `enabled` field flows through Config.Agent's `.catchall(z.any())` into `options`
+  - The `replaces` field in OptionalAgentDef allows an optional agent to take over an existing agent slot (e.g., prometheus -> plan) without changing any tool references
+  - Optional agent config entries must be skipped in the main config merge loop to prevent them from being treated as custom agents with `native: false`
+  - `prompt_append` is read from `options.prompt_append` since it's an unknown field that gets swept into options by the transform
+  - The per-agent override logic for optional agents is separate from the main loop — first resolve the optional agents, then apply config overrides like model/temperature/prompt_append
 ---

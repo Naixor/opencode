@@ -22,6 +22,7 @@ import { Global } from "@/global"
 import path from "path"
 import { Plugin } from "@/plugin"
 import { Skill } from "../skill"
+import { OptionalAgents } from "./optional"
 
 export namespace Agent {
   export const Info = z
@@ -279,7 +280,15 @@ export namespace Agent {
       },
     }
 
+    // Resolve optional (opt-in) agents — enabled via config
+    const optional = OptionalAgents.resolve(cfg, defaults, user)
+    for (const [key, info] of Object.entries(optional.agents)) {
+      result[key] = info
+    }
+
     for (const [key, value] of Object.entries(cfg.agent ?? {})) {
+      // Skip optional agent config entries — already handled above
+      if (OptionalAgents.list().includes(key)) continue
       if (value.disable) {
         delete result[key]
         continue
@@ -306,6 +315,29 @@ export namespace Agent {
       item.steps = value.steps ?? item.steps
       item.options = mergeDeep(item.options, value.options ?? {})
       item.permission = PermissionNext.merge(item.permission, PermissionNext.fromConfig(value.permission ?? {}))
+    }
+
+    // Apply per-agent config overrides from config for optional agents
+    for (const [key, optKey] of Object.entries(optional.replacements)) {
+      const value = cfg.agent?.[optKey]
+      if (!value) continue
+      const item = result[key]
+      if (!item) continue
+      if (value.model) item.model = Provider.parseModel(value.model)
+      item.temperature = value.temperature ?? item.temperature
+      if (value.options?.prompt_append && typeof value.options.prompt_append === "string") {
+        item.prompt = (item.prompt ?? "") + "\n\n" + value.options.prompt_append
+      }
+    }
+    for (const key of OptionalAgents.list()) {
+      if (key in optional.replacements) continue
+      const value = cfg.agent?.[key]
+      if (!value || !result[key]) continue
+      if (value.model) result[key].model = Provider.parseModel(value.model)
+      result[key].temperature = value.temperature ?? result[key].temperature
+      if (value.options?.prompt_append && typeof value.options.prompt_append === "string") {
+        result[key].prompt = (result[key].prompt ?? "") + "\n\n" + value.options.prompt_append
+      }
     }
 
     // Ensure Truncate.GLOB is allowed unless explicitly configured
