@@ -1,7 +1,90 @@
 # Ralph Progress Log
-Started: Thu 13 Feb 2026
-
-## Codebase Patterns
-- (To be populated as patterns are discovered)
+Started: Fri 13 Feb 2026 18:47:44 CST
 ---
 
+## Codebase Patterns
+- CLI entry is `packages/opencode/src/index.ts` — yargs middleware runs before any command
+- Bootstrap phases are in `packages/opencode/src/project/bootstrap.ts` — already has `measure()` helper
+- Instance creation flow: `Instance.provide()` → `Project.fromDirectory()` → `init()` (InstanceBootstrap)
+- Config loading is in `Config.state()` (lazy per-Instance) with sub-phases: auth, remote-fetch, global, project, directory-scan
+- Worker thread entry: `packages/opencode/src/cli/cmd/tui/worker.ts` — `Log.init()` is now synchronous, followed by `await Log.flush()`
+- `Log.init()` is synchronous — buffers to in-memory array. Call `Log.flush()` after directories are ready to write buffer to disk
+- TUI init: `packages/opencode/src/cli/cmd/tui/app.tsx` — `getTerminalBackgroundColor()` now uses COLORFGBG/cache/150ms timeout
+- KV store file is at `~/.local/state/opencode/kv.json` — can be read directly outside SolidJS context via `Bun.file().json()`
+- `packages/opencode/src/global/index.ts` — no module-level await; call `Global.ensureDirectories()` explicitly before `Log.flush()`
+- Pre-existing 6 security test failures in `write-edit-bypass.test.ts`, `audit-log.test.ts`, `inheritance.test.ts`, `config.test.ts`, `mcp-policy.test.ts` — not related to cold-start work
+- TUI thread (`thread.ts`) now starts TUI with RPC immediately; resolveNetworkOptions runs in background. HTTP server only started if CLI flags or config require it
+
+---
+
+## 2026-02-13 - US-001
+- Implemented `--startup-trace` CLI flag with per-phase startup timing output to stderr in JSON format
+- Created `packages/opencode/src/util/startup-trace.ts` — StartupTrace module with begin/end/measure/record/output functions supporting nested phases
+- Instrumented phases: global-init, log-init, worker-spawn, terminal-bg-detect, resolve-network-options, project-detect, git-metadata, config-load (with sub-phases: remote-fetch, global-config, project-config, directory-scan), server-init, instance-bootstrap (with per-phase detail from existing bootstrap.ts measure)
+- Files changed: startup-trace.ts (new), index.ts, bootstrap.ts, instance.ts, project.ts, config.ts, thread.ts, app.tsx
+- **Learnings for future iterations:**
+  - The StartupTrace module uses a stack-based approach for nested phases — `begin()` pushes a new children array, `end()` pops and nests
+  - `record()` is used for flat phase entries (e.g., bootstrap sub-phases that already have their own timing)
+  - Config.state() closure requires `??` guards for `result.agent` and `!` for `result.plugin` because TypeScript can't narrow through closures
+  - `--startup-trace` flag is checked via `process.argv.includes()` BEFORE yargs parses, so timing starts from first import
+  - Output happens after `cli.parse()` completes — for TUI commands that block, trace won't output until TUI exits
+---
+
+## 2026-02-13 - US-002
+- Optimized terminal background color detection from ~1000ms to ~0ms on subsequent launches
+- Three-tier detection: COLORFGBG env var (instant) → KV cache (fast read) → OSC 11 query (150ms timeout)
+- Cache stored in `terminal_bg_cache` key in `~/.local/state/opencode/kv.json`
+- Exported `clearTerminalBgCache()` from app.tsx for manual re-detection
+- Files changed: app.tsx
+- **Learnings for future iterations:**
+  - COLORFGBG format: "foreground;background" — last value is terminal color index 0-15
+  - KV store is a SolidJS context (useKV) — can't use inside getTerminalBackgroundColor, must read file directly
+  - `Bun.file().json()` is async — use it for cache reads since the function is already async
+  - The KV file may not exist on first launch — handle gracefully with .catch()
+---
+
+## 2026-02-13 - US-003
+- Made Log.init() synchronous — no longer awaits any IO operations
+- Logs buffer to an in-memory array until Log.flush() is called
+- Log.flush() writes buffered messages to disk and switches to direct file writer mode
+- cleanup() is now fire-and-forget with .catch(() => {}) to prevent unhandled rejections
+- fs.truncate() moved into flush() — no longer blocks init()
+- When print: true, init() immediately switches to stderr writer (no buffering needed)
+- Files changed: log.ts, index.ts, worker.ts, preload.ts, client.test.ts, e2e-local.ts
+- **Learnings for future iterations:**
+  - `Log.init()` with `print: true` doesn't need flush — writes directly to stderr
+  - `Log.init()` with `print: false` buffers to array until `flush()` is called
+  - Multiple `Log.init()` calls in test files (after preload) don't re-create writers — they just update level/logpath
+  - `flushed` flag prevents double-flush and ensures buffer is only written once
+  - The `write` variable is a function reference that gets swapped: buffer → file writer (or stderr)
+  - US-005 (Global.ensureDirectories) will further optimize by decoupling directory creation from module-level await, allowing Log.init() + flush() to happen earlier
+---
+
+## 2026-02-13 - US-004
+- Decoupled resolveNetworkOptions() from TUI rendering — TUI now starts immediately with RPC in the common case
+- Split logic into two paths: CLI-explicit server flags (--port/--hostname/--mdns) block as before; common case starts TUI first, resolves config in background
+- Background resolution checks if config says server is needed (mdns, non-default port/hostname) and starts HTTP server asynchronously
+- TUI works fine over RPC regardless — HTTP server is only for external access
+- Files changed: thread.ts
+- **Learnings for future iterations:**
+  - `SDKProvider` in `sdk.tsx` takes url/fetch/events as props at init time — can't easily change after mount
+  - RPC path always works: `createWorkerFetch` → worker `rpc.fetch` → `Server.App().fetch(request)` in-process
+  - HTTP server started via `client.call("server", networkOpts)` is additive — doesn't break RPC communication
+  - `Config.global()` is the blocking call in `resolveNetworkOptions()` — it's a lazy() that reads config files
+  - When CLI flags like `--port` are present, we still need to block to get the actual port value from config before starting the server
+---
+
+## 2026-02-13 - US-005
+- Eliminated module-level blocking `await` from `global/index.ts`
+- Moved directory creation (`fs.mkdir`) and cache version check into `Global.ensureDirectories()` async function
+- `Global.Path.*` properties are now pure path computations — no IO on import
+- Added `await Global.ensureDirectories()` calls before `await Log.flush()` in: CLI entry (`index.ts`), worker entry (`worker.ts`), test preload (`preload.ts`)
+- Cache version check now uses `.catch(() => [])` instead of try/catch for readdir failure (follows codebase no-try-catch style)
+- Files changed: global/index.ts, index.ts, worker.ts, preload.ts
+- **Learnings for future iterations:**
+  - Importing `Global` no longer triggers IO — safe to import anywhere without blocking
+  - The initialization order is: `Log.init()` (sync, buffers) → `Global.ensureDirectories()` (creates dirs) → `Log.flush()` (writes buffer to disk)
+  - `Global.Path.*` reads are always available immediately — they're just `path.join()` results
+  - The cache version check clears the entire cache directory when version mismatches — includes `readdir` + `rm` for each item
+  - Test preload uses dynamic `await import()` for both `Log` and `Global` to ensure env vars are set before xdg-basedir reads them
+---
