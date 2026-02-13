@@ -10,6 +10,7 @@ import { GlobalBus } from "@/bus/global"
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
+import { Global } from "@/global"
 
 Log.init({
   print: process.argv.includes("--print-logs"),
@@ -19,6 +20,7 @@ Log.init({
     return "INFO"
   })(),
 })
+await Global.ensureDirectories()
 await Log.flush()
 
 process.on("unhandledRejection", (e) => {

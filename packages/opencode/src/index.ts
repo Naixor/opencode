@@ -8,6 +8,7 @@ import { hideBin } from "yargs/helpers"
 import { RunCommand } from "./cli/cmd/run"
 import { GenerateCommand } from "./cli/cmd/generate"
 import { Log } from "./util/log"
+import { Global } from "./global"
 import { AuthCommand } from "./cli/cmd/auth"
 import { AgentCommand } from "./cli/cmd/agent"
 import { UpgradeCommand } from "./cli/cmd/upgrade"
@@ -80,6 +81,7 @@ const cli = yargs(hideBin(process.argv))
         return "INFO"
       })(),
     })
+    await Global.ensureDirectories()
     await Log.flush()
     StartupTrace.end("log-init")
 

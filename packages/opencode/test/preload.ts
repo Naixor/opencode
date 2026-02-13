@@ -55,10 +55,12 @@ delete process.env["SAMBANOVA_API_KEY"]
 
 // Now safe to import from src/
 const { Log } = await import("../src/util/log")
+const { Global } = await import("../src/global")
 
 Log.init({
   print: false,
   dev: true,
   level: "DEBUG",
 })
+await Global.ensureDirectories()
 await Log.flush()
