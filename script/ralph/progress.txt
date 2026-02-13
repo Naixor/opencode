@@ -49,6 +49,10 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Security config schema top-level: `{ version, rules: [...] }` — NOT nested under `files.rules`
 - File-based persistent storage: use `.opencode/<feature>/` for project-local persistent data, `Lock.read()`/`Lock.write()` with namespaced keys for atomic operations
 - Status transition enforcement: define `VALID_TRANSITIONS` lookup table, check before applying status changes
+- `Tool.Context.agent` is a string (agent name), NOT `Agent.Info` — use `InitContext.agent` from the init closure for agent metadata (name, permission, etc.)
+- Skill frontmatter supports optional fields: `mcp` (string[]) and `agent` (string[]) — parsed via `Info.pick({ name, description, mcp, agent })`
+- Skill lazy loading: content >50KB stored as "" on discovery, loaded on first `Skill.get()` — `lazyContent` Map tracks which skills need loading
+- `Skill.extractInstruction(content)` extracts `<skill-instruction>` blocks for returning only instruction content from skill templates
 
 ---
 
@@ -752,4 +756,31 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - `PersistentTaskTool` is separate from the existing `TaskTool` (agent spawning) — they serve different purposes and coexist
   - `Bun.file().exists()` is async and works well for file existence checks in the task storage layer
   - `fs.readdir()` with `.catch(() => [])` gracefully handles missing task directory on first access
+---
+
+## 2026-02-14 - US-027
+- Enhanced Skill tool with MCP listing, lazy loading, agent restriction, and `<skill-instruction>` extraction
+  - Extended `Skill.Info` schema with optional `mcp` (string[]) and `agent` (string[]) fields parsed from YAML frontmatter
+  - MCP capability listing: skills with `mcp` frontmatter field get `<mcp_capabilities>` section in description listing connected MCP server tools/resources/prompts
+  - Lazy content loading: skills with content >50KB store empty string on discovery, load full content on first `Skill.get()` call
+  - Agent restriction: skills with `agent` frontmatter field (e.g., `agent: [sisyphus]`) only shown to listed agents, checked both in init (description) and execute
+  - `<skill-instruction>` XML block extraction: when skill content contains `<skill-instruction>...</skill-instruction>`, only that block is returned on execute
+  - PermissionNext filtering preserved (checks run before agent restriction)
+- Updated `SkillTool` to use `InitContext.agent` for agent-aware filtering (capturing `agentName` in closure for use in execute)
+- Consistent metadata shape across all execute branches (`name`, `dir`, `hasInstruction`, `denied`)
+- `buildSkillMcpSections()` reuses same MCP info pattern as `buildMcpInfo()` in skill-mcp.ts
+- 14 new unit tests all passing, 27 existing skill tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/skill/skill.ts` (modified — added mcp/agent fields, lazy loading, extractInstruction, isLazy)
+  - `packages/opencode/src/tool/skill.ts` (modified — added MCP listing, agent restriction, instruction extraction)
+  - `packages/opencode/test/tool/skill-enhanced.test.ts` (new)
+- **Learnings for future iterations:**
+  - `Tool.Context.agent` is a `string` (agent name), NOT `Agent.Info` — use `InitContext.agent` from the init closure for agent metadata access
+  - Tool.define execute return type requires consistent metadata shapes across all branches — include ALL fields with defaults in every branch to avoid union narrowing errors
+  - `Skill.Info.pick()` can include optional fields from the schema — they parse as `undefined` when absent from frontmatter, which is fine for optional fields
+  - Lazy loading threshold of 50KB is a good default — most skills are <10KB, but some bundled reference materials can be 100KB+
+  - `Skill.extractInstruction()` uses simple regex with `[\s\S]*?` (non-greedy) to match content between XML tags — only returns the first match if multiple blocks exist
+  - MCP info building for skills reuses the same sanitization pattern as skill-mcp.ts: `name.replace(/[^a-zA-Z0-9_-]/g, "_")` for server names
+  - For test mocking of MCP and SecurityConfig modules, use mutable objects (not const) so test can modify state between tests via `resetMcpMocks()`
 ---

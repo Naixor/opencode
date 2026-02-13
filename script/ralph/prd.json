@@ -688,8 +688,8 @@
         "Typecheck passes"
       ],
       "priority": 27,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Skill.Info extended with mcp/agent fields, lazy loading for >50KB skills, <skill-instruction> extraction, agent restriction filtering, MCP capability listing in skill descriptions"
     },
     {
       "id": "US-028",
