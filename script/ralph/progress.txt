@@ -18,6 +18,9 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - `SessionStatus.list()` returns `Record<string, Info>` with only non-idle sessions; idle sessions are deleted from state on `SessionStatus.set(id, { type: "idle" })`
 - For test observability of fire-and-forget operations (e.g., notifications), use internal log arrays + getter/reset exports instead of mocking `Bun.spawn`
 - `PreLLMContext.providerOptions` is the channel for hooks to set provider-specific LLM parameters (thinking, effort, etc.) — guard on model name to avoid incompatible settings
+- Agents are registered in a `Record<string, Info>` in `Instance.state()` — insertion order determines `defaultAgent()` fallback (first primary non-hidden agent wins)
+- Agent prompts are `.txt` files imported via Bun's text loader: `import PROMPT from "./prompt/file.txt"`
+- Config schema agent section has explicit fields for known agents + `.catchall(Agent)` — add new native agents to explicit fields
 
 ---
 
@@ -195,4 +198,33 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - LLM parameter hooks should guard on model name (e.g., `ctx.model.includes("claude")`) to avoid setting provider-specific options for incompatible models
   - The `variant` field flows through: user message -> keyword-detector hook -> think-mode/anthropic-effort hooks, creating a clean pipeline for mode-based parameter control
   - Think-mode and anthropic-effort hooks share the same `providerOptions` object via `ctx.providerOptions = ctx.providerOptions ?? {}` pattern — order matters (priority 50 before 60)
+---
+
+## 2026-02-14 - US-009
+- Implemented Sisyphus agent as default primary agent
+  - Created `packages/opencode/src/agent/sisyphus.ts` with `Sisyphus.buildDynamicPrompt()` dynamic prompt builder
+  - Created `packages/opencode/src/agent/prompt/sisyphus.txt` with orchestration-focused system prompt
+  - Registered sisyphus in agent registry as first entry (before build) — makes it the default agent
+  - Sisyphus: mode=primary, temperature=0.1, full tool access, question+plan_enter allowed
+  - Dynamic prompt builder injects: agents table (subagent/all mode agents), skills list, categories (future US-030)
+  - Build agent kept accessible with explicit name, description updated to "Full-access builder agent"
+  - Updated `Agent.list()` sort to use sisyphus as default sort key
+  - Updated Config schema to include sisyphus in agent config object
+  - Updated 3 existing tests: defaultAgent now returns "sisyphus", disabled-all-primary test includes sisyphus
+- 10 new unit tests + 35 existing agent tests all passing, 1475 total tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/agent/sisyphus.ts` (new)
+  - `packages/opencode/src/agent/prompt/sisyphus.txt` (new)
+  - `packages/opencode/src/agent/agent.ts` (modified - added sisyphus, updated list sort)
+  - `packages/opencode/src/config/config.ts` (modified - added sisyphus to agent config schema)
+  - `packages/opencode/test/agent/agent.test.ts` (modified - updated default agent tests)
+  - `packages/opencode/test/agent/sisyphus.test.ts` (new)
+- **Learnings for future iterations:**
+  - Agents are registered in a `Record<string, Info>` inside `Instance.state()` — insertion order matters for `Object.values().find()` in `defaultAgent()` fallback
+  - `defaultAgent()` returns the first primary non-hidden agent when no `default_agent` config is set — putting sisyphus first in the record makes it the default
+  - Agent prompts are imported as `.txt` files using Bun's text loader — just `import PROMPT from "./prompt/file.txt"`
+  - Categories config field doesn't exist yet (US-030) — access via `(cfg as Record<string, unknown>).categories` for forward compatibility
+  - The `Agent.list()` sort uses the default agent name for sorting — update this when changing the default agent
+  - Config schema's agent object has explicit fields for known agents plus `.catchall()` — new native agents should be added to the explicit fields
 ---
