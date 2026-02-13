@@ -37,11 +37,46 @@ import open from "open"
 import { writeHeapSnapshot } from "v8"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { StartupTrace } from "@/util/startup-trace"
+import { Global } from "@/global"
+import path from "path"
 
-async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
-  // can't set raw mode if not a TTY
-  if (!process.stdin.isTTY) return "dark"
+const KV_PATH = path.join(Global.Path.state, "kv.json")
+const CACHE_KEY = "terminal_bg_cache"
 
+function inferFromCOLORFGBG(): "dark" | "light" | undefined {
+  const colorfgbg = process.env.COLORFGBG
+  if (!colorfgbg) return undefined
+  // Format: "foreground;background" where values are terminal color indices (0-15)
+  // Background >= 8 or white-ish (15) suggests light theme
+  const parts = colorfgbg.split(";")
+  const bg = parseInt(parts[parts.length - 1])
+  if (isNaN(bg)) return undefined
+  // Color indices: 0=black, 7=white/light gray, 8-15=bright variants
+  // Background > 6 and not 8 (bright black/dark gray) suggests light
+  return bg > 6 && bg !== 8 ? "light" : "dark"
+}
+
+async function readCachedMode(): Promise<"dark" | "light" | undefined> {
+  const data = await Bun.file(KV_PATH).json().catch(() => undefined)
+  if (!data) return undefined
+  const cached = data[CACHE_KEY]
+  if (cached === "dark" || cached === "light") return cached
+  return undefined
+}
+
+function writeCachedMode(mode: "dark" | "light") {
+  Bun.file(KV_PATH)
+    .json()
+    .then((data: Record<string, unknown>) => {
+      data[CACHE_KEY] = mode
+      return Bun.write(KV_PATH, JSON.stringify(data, null, 2))
+    })
+    .catch(() => {
+      Bun.write(KV_PATH, JSON.stringify({ [CACHE_KEY]: mode }, null, 2)).catch(() => {})
+    })
+}
+
+function detectTerminalBackground(): Promise<"dark" | "light"> {
   return new Promise((resolve) => {
     let timeout: NodeJS.Timeout
 
@@ -65,9 +100,9 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
 
         if (color.startsWith("rgb:")) {
           const parts = color.substring(4).split("/")
-          r = parseInt(parts[0], 16) >> 8 // Convert 16-bit to 8-bit
-          g = parseInt(parts[1], 16) >> 8 // Convert 16-bit to 8-bit
-          b = parseInt(parts[2], 16) >> 8 // Convert 16-bit to 8-bit
+          r = parseInt(parts[0], 16) >> 8
+          g = parseInt(parts[1], 16) >> 8
+          b = parseInt(parts[2], 16) >> 8
         } else if (color.startsWith("#")) {
           r = parseInt(color.substring(1, 3), 16)
           g = parseInt(color.substring(3, 5), 16)
@@ -79,10 +114,7 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
           b = parseInt(parts[2])
         }
 
-        // Calculate luminance using relative luminance formula
         const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-
-        // Determine if dark or light based on luminance threshold
         resolve(luminance > 0.5 ? "light" : "dark")
       }
     }
@@ -94,8 +126,35 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
     timeout = setTimeout(() => {
       cleanup()
       resolve("dark")
-    }, 1000)
+    }, 150)
   })
+}
+
+async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
+  if (!process.stdin.isTTY) return "dark"
+
+  // Fast path: COLORFGBG environment variable
+  const fromEnv = inferFromCOLORFGBG()
+  if (fromEnv) return fromEnv
+
+  // Cache path: read from KV store file directly
+  const cached = await readCachedMode()
+  if (cached) return cached
+
+  // Detection path: OSC 11 query with 150ms timeout
+  const detected = await detectTerminalBackground()
+  writeCachedMode(detected)
+  return detected
+}
+
+export function clearTerminalBgCache() {
+  Bun.file(KV_PATH)
+    .json()
+    .then((data: Record<string, unknown>) => {
+      delete data[CACHE_KEY]
+      return Bun.write(KV_PATH, JSON.stringify(data, null, 2))
+    })
+    .catch(() => {})
 }
 
 import type { EventSource } from "./context/sdk"
