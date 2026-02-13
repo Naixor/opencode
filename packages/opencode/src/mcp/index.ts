@@ -188,9 +188,13 @@ export namespace MCP {
   const state = Instance.state(
     async () => {
       const cfg = await Config.get()
-      const config = cfg.mcp ?? {}
+      const userConfig = cfg.mcp ?? {}
       const clients: Record<string, MCPClient> = {}
       const status: Record<string, Status> = {}
+
+      // Merge built-in MCP servers (auto-enabled by API key, respecting disabled_mcps)
+      const builtinConfigs = BuiltinMcp.resolve(userConfig, cfg.disabled_mcps ?? [])
+      const config: Record<string, Config.Mcp | { enabled: boolean }> = { ...builtinConfigs, ...userConfig }
 
       await Promise.all(
         Object.entries(config).map(async ([key, mcp]) => {
@@ -543,10 +547,12 @@ export namespace MCP {
   export async function status() {
     const s = await state()
     const cfg = await Config.get()
-    const config = cfg.mcp ?? {}
+    const userConfig = cfg.mcp ?? {}
+    const builtinConfigs = BuiltinMcp.resolve(userConfig, cfg.disabled_mcps ?? [])
+    const config: Record<string, Config.Mcp | { enabled: boolean }> = { ...builtinConfigs, ...userConfig }
     const result: Record<string, Status> = {}
 
-    // Include all configured MCPs from config, not just connected ones
+    // Include all configured MCPs (user + built-in), not just connected ones
     for (const [key, mcp] of Object.entries(config)) {
       if (!isMcpConfigured(mcp)) continue
       result[key] = s.status[key] ?? { status: "disabled" }

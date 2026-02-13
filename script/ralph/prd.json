@@ -715,7 +715,7 @@
         "Typecheck passes"
       ],
       "priority": 28,
-      "passes": false,
+      "passes": true,
       "notes": "AD-11: Built-in MCP servers default disabled, auto-enable on API key"
     },
     {

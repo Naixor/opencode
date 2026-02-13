@@ -3,6 +3,7 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 
 ## Codebase Patterns
 - Use `Instance.state()` with synchronous initializer for per-instance state that needs synchronous access (like Bus does); use async initializer only when lazy async loading is needed
+- Built-in MCP servers: defined in `packages/opencode/src/mcp/builtin.ts`, auto-enabled by API key env vars, disabled via `disabled_mcps` config. User configs override built-in via spread order
 - Hook chain uses priority-based ordering: lower priority number = runs earlier (security hooks ~10-50, transform ~100-200, output ~300-500)
 - Config schema extends `Config.Info` in `packages/opencode/src/config/config.ts` with Zod validators
 - Plugin.trigger() pattern: `Plugin.trigger(hookName, input, output)` where output is mutated in-place
@@ -40,6 +41,19 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Tool deprecation pattern: log warning via `Log.warn()`, prepend deprecation message to output, add `deprecated: true` + `replacement` to metadata
 - For optional/peer dependencies, use exported `Loader` object with injectable `.load()` method for test isolation — avoids `mock.module` hoisting issues with dynamic `import()`
 - `SecuritySchema.MarkerConfig` has `deniedOperations` and `allowedRoles` directly (not nested in a `rule` field) — `findMarkerSegments()` returns `MarkerSegment` with `.rule` being the full `MarkerConfig`
+- AI SDK content parts: `ImagePart` = `{ type: "image", image, mediaType? }`, `FilePart` = `{ type: "file", data, mediaType }` — do NOT use `mimeType`
+- For programmatic LLM calls from tools: `generateText({ model: await Provider.getLanguage(model), messages, system })` from "ai" package
+- MCP tool keys use `sanitizedServer_sanitizedTool` format; resources/prompts use `sanitizedServer:sanitizedName` (colon separator). Sanitize with `.replace(/[^a-zA-Z0-9_-]/g, "_")`
+- AI SDK `Tool.execute` is optional — cast through `unknown` when calling MCP tool execute directly: `(tool.execute as unknown as Function)(args, opts)`
+- BashScanner only detects paths from known FILE_ACCESS_COMMANDS as the first token of a pipeline segment — supplement with direct path extraction for tools that embed paths in non-standard formats
+- `SecurityAudit.SecurityEvent` interface: `{ role, operation, path, allowed, reason? }` — does NOT have `type` or `tool` fields
+- Security config schema top-level: `{ version, rules: [...] }` — NOT nested under `files.rules`
+- File-based persistent storage: use `.opencode/<feature>/` for project-local persistent data, `Lock.read()`/`Lock.write()` with namespaced keys for atomic operations
+- Status transition enforcement: define `VALID_TRANSITIONS` lookup table, check before applying status changes
+- `Tool.Context.agent` is a string (agent name), NOT `Agent.Info` — use `InitContext.agent` from the init closure for agent metadata (name, permission, etc.)
+- Skill frontmatter supports optional fields: `mcp` (string[]) and `agent` (string[]) — parsed via `Info.pick({ name, description, mcp, agent })`
+- Skill lazy loading: content >50KB stored as "" on discovery, loaded on first `Skill.get()` — `lazyContent` Map tracks which skills need loading
+- `Skill.extractInstruction(content)` extracts `<skill-instruction>` blocks for returning only instruction content from skill templates
 
 ---
 
@@ -617,4 +631,194 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Background execution pattern: create BackgroundManager task, resolve prompt parts, then fire-and-forget via `executeInBackground().catch()` — failures handled by `BackgroundManager.fail()`
   - `delegate_task` disables itself (`delegate_task: false`) in the tools map when calling `SessionPrompt.prompt()` to prevent the sub-agent from calling it, in addition to the permission-level deny
   - The existing `task` tool remains unchanged — `delegate_task` is an enhanced alternative with category routing and background execution
+---
+
+## 2026-02-14 - US-023
+- Implemented `look_at` multimodal analyzer tool in `packages/opencode/src/tool/look-at.ts`
+  - `look_at` tool: analyzes images, PDFs, and diagrams using vision-capable models
+  - Parameters: `file_path` (optional), `image_data` (base64, optional), `goal` (required)
+  - At least one of `file_path` or `image_data` must be provided
+  - Vision model resolution: configurable via `vision_model` in opencode.jsonc, falls back to priority list (gemini-2.5-flash, gpt-5-mini, claude-haiku, etc.), ultimate fallback to default model
+  - Uses AI SDK `generateText()` with `ImagePart` (for images) or `FilePart` (for PDFs) content types
+- SecurityAccess integration:
+  - `checkAccess(filePath, 'read')` before reading file from disk
+  - `checkAccess(filePath, 'llm')` before sending to vision model
+  - `SecurityAudit.logSecurityEvent()` for all denied operations
+- Gated behind `OPENCODE_EXPERIMENTAL_LOOK_AT` flag (or `OPENCODE_EXPERIMENTAL`)
+- Created tool description file: `look-at.txt`
+- Registered in `registry.ts` behind experimental flag
+- 11 unit tests all passing, 242 tool tests pass, 1681+ total tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/look-at.ts` (new)
+  - `packages/opencode/src/tool/look-at.txt` (new)
+  - `packages/opencode/src/flag/flag.ts` (modified — added OPENCODE_EXPERIMENTAL_LOOK_AT)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered LookAtTool)
+  - `packages/opencode/test/tool/look-at.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-023 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - AI SDK `ImagePart` uses `{ type: "image", image: dataUrl, mediaType?: string }` — NOT `mimeType` or `type: "file"`
+  - AI SDK `FilePart` uses `{ type: "file", data: dataUrl, mediaType: string }` — use for PDFs
+  - For vision model calls from tools, use `generateText()` from "ai" + `Provider.getModel()`/`Provider.getLanguage()` — no need for agent loop
+  - Vision model resolution pattern: check config first (`vision_model`), then scan available providers for known vision models, fallback to default model
+  - `Bun.file().type` may not correctly detect MIME types from extension alone — use explicit extension-to-MIME mapping as fallback
+  - Security rules in tests require `type: "file"` field (Zod validates) — omitting it causes typecheck errors
+  - `mock.module()` in Bun works well for mocking `ai` and `Provider` modules — allows testing without real API calls
+---
+
+## 2026-02-14 - US-024
+- Implemented `skill_mcp` tool in `packages/opencode/src/tool/skill-mcp.ts`
+  - `skill_mcp` tool: invokes MCP tools, reads resources, or executes prompts from within skill context
+  - Parameters: `mcp_name` (required), `tool_name` (optional), `resource_name` (optional), `prompt_name` (optional), `arguments` (optional, JSON string or object)
+  - Validates exactly ONE of tool_name/resource_name/prompt_name is provided
+  - Reuses existing MCP client infrastructure: `MCP.tools()`, `MCP.readResource()`, `MCP.getPrompt()`
+  - Security: `SecurityConfig.getMcpPolicy()` checks for blocked servers, `SecurityAudit.logSecurityEvent()` for denied operations
+  - Dynamic description builder: lists connected MCP servers with their available tools, resources, and prompts
+  - Tool key format matches MCP convention: `sanitizedServer_sanitizedTool`
+  - Error messages include available alternatives (available tools for server, available prompts, etc.)
+- Created tool description file `skill-mcp.txt` with `{mcp_info}` placeholder for dynamic content
+- Registered `SkillMcpTool` in `registry.ts` (always available, not behind experimental flag, like SkillTool)
+- 14 unit tests all passing, typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/skill-mcp.ts` (new)
+  - `packages/opencode/src/tool/skill-mcp.txt` (new)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered SkillMcpTool)
+  - `packages/opencode/test/tool/skill-mcp.test.ts` (new)
+- **Learnings for future iterations:**
+  - AI SDK `Tool` type from `dynamicTool()` has `execute` as optional — always check before calling, and cast through `unknown` to call with custom args
+  - MCP tool keys use format `sanitizedServer_sanitizedTool` — sanitize with `.replace(/[^a-zA-Z0-9_-]/g, "_")`
+  - MCP resources and prompts use key format `sanitizedServer:sanitizedName` (colon separator, not underscore)
+  - `MCP.status()` returns configured servers; `MCP.tools()` returns only tools from connected servers — check status before attempting tool calls
+  - For mocking the MCP module in tests, mock `../../src/mcp/index` (not `../../src/mcp`) to match the actual import path
+  - Don't use `setupSecurityConfig`/`teardownSecurityConfig` helpers when mocking `SecurityConfig` directly — the helpers rely on the real `SecurityConfig.resetConfig()` function
+  - `CallToolResult` from MCP has `.content` array with `{ type, text }` entries and optional `.isError` boolean — format accordingly
+---
+
+## 2026-02-14 - US-025
+- Implemented `interactive_bash` tool for tmux session management in `packages/opencode/src/tool/interactive-bash.ts`
+  - `interactive_bash` tool: executes tmux subcommands for session/window/pane management
+  - Parameter: `tmux_command` (string) — the tmux subcommand and arguments
+  - Blocked subcommands: `send-keys`, `send`, `type`, `paste-buffer` — prevents shell injection bypass
+  - Case-insensitive subcommand blocking (lowercased before comparison)
+  - File path security scanning: BashScanner + direct extraction of path-like tokens from tmux arguments
+  - SecurityAccess.checkAccess(path, 'read', 'agent') for all detected file paths
+  - SecurityAudit.logSecurityEvent() for denied operations
+  - tmux availability check via `which tmux` before execution
+- Gated behind `OPENCODE_EXPERIMENTAL_INTERACTIVE_BASH` flag (or `OPENCODE_EXPERIMENTAL`)
+- Created tool description file `interactive-bash.txt`
+- Registered in `registry.ts` behind experimental flag
+- 11 unit tests all passing, typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/interactive-bash.ts` (new)
+  - `packages/opencode/src/tool/interactive-bash.txt` (new)
+  - `packages/opencode/src/flag/flag.ts` (modified — added OPENCODE_EXPERIMENTAL_INTERACTIVE_BASH)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered InteractiveBashTool)
+  - `packages/opencode/test/tool/interactive-bash.test.ts` (new)
+- **Learnings for future iterations:**
+  - BashScanner only detects file paths from known FILE_ACCESS_COMMANDS (cat, grep, find, etc.) as the first token of a pipeline segment — `tmux new-window cat /path` won't detect `/path` via BashScanner because `tmux` is the first token
+  - For tools that embed file paths in non-standard command formats (like tmux), supplement BashScanner with direct path extraction from arguments (look for tokens containing `/`)
+  - `SecurityAudit.SecurityEvent` interface requires: `{ role, operation, path, allowed, reason? }` — NOT `{ type, tool }` fields
+  - Security config schema (`SecuritySchema.SecurityConfig`) has `rules` at top level, NOT nested under `files.rules` — test setup must use `{ version: "1.0", rules: [...] }`
+  - `Bun.spawn(["which", "tmux"])` is a reliable cross-platform way to check tool availability
+---
+
+## 2026-02-14 - US-026
+- Implemented persistent task storage system with file-based storage in `.opencode/tasks/`
+  - Created `packages/opencode/src/session/persistent-task.ts` with `PersistentTask` namespace
+  - Task CRUD operations: `create`, `get`, `list`, `ready`, `update`, `remove`
+  - Task IDs use `T-{uuid}` format via `crypto.randomUUID()`
+  - Fields: id, subject, description, status, blockedBy, blocks, owner, metadata, activeForm, createdAt, updatedAt
+  - File-level locking via `Lock.read()`/`Lock.write()` for atomic operations
+  - Status transitions enforced: pending -> in_progress -> completed/failed/cancelled
+  - `ready()` filter: returns pending tasks where all blockedBy dependencies are completed
+  - Bus events for task lifecycle: Created, Updated, Deleted
+- Created `packages/opencode/src/tool/persistent-task-tool.ts` with `PersistentTaskTool`
+  - Tool ID: `persistent_task` — operations: create, get, list, update, delete
+  - List supports filters: all, ready, pending, in_progress, completed, failed, cancelled
+  - Registered in ToolRegistry (always available, not behind experimental flag)
+- Existing TaskTool (agent spawning) completely unchanged and still working
+- 23 unit tests all passing, 112 agent tests pass, 148 hook tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/persistent-task.ts` (new)
+  - `packages/opencode/src/tool/persistent-task-tool.ts` (new)
+  - `packages/opencode/src/tool/persistent-task.txt` (new)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered PersistentTaskTool)
+  - `packages/opencode/test/session/persistent-task.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-026 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - File-based task storage in `.opencode/tasks/` uses `Instance.directory` to locate the project root — tasks are per-project, not global
+  - `Lock` namespace provides read/write locks keyed by string — use `lockKey(id)` pattern to namespace lock keys per feature
+  - `crypto.randomUUID()` is available globally in Bun runtime — no import needed
+  - Status transition enforcement via lookup table: `VALID_TRANSITIONS[currentStatus].includes(newStatus)` prevents invalid state changes
+  - The `ready()` filter checks all `blockedBy` IDs against the full task list status map — O(n) for building the map, O(d) per task for dependency check
+  - `PersistentTaskTool` is separate from the existing `TaskTool` (agent spawning) — they serve different purposes and coexist
+  - `Bun.file().exists()` is async and works well for file existence checks in the task storage layer
+  - `fs.readdir()` with `.catch(() => [])` gracefully handles missing task directory on first access
+---
+
+## 2026-02-14 - US-027
+- Enhanced Skill tool with MCP listing, lazy loading, agent restriction, and `<skill-instruction>` extraction
+  - Extended `Skill.Info` schema with optional `mcp` (string[]) and `agent` (string[]) fields parsed from YAML frontmatter
+  - MCP capability listing: skills with `mcp` frontmatter field get `<mcp_capabilities>` section in description listing connected MCP server tools/resources/prompts
+  - Lazy content loading: skills with content >50KB store empty string on discovery, load full content on first `Skill.get()` call
+  - Agent restriction: skills with `agent` frontmatter field (e.g., `agent: [sisyphus]`) only shown to listed agents, checked both in init (description) and execute
+  - `<skill-instruction>` XML block extraction: when skill content contains `<skill-instruction>...</skill-instruction>`, only that block is returned on execute
+  - PermissionNext filtering preserved (checks run before agent restriction)
+- Updated `SkillTool` to use `InitContext.agent` for agent-aware filtering (capturing `agentName` in closure for use in execute)
+- Consistent metadata shape across all execute branches (`name`, `dir`, `hasInstruction`, `denied`)
+- `buildSkillMcpSections()` reuses same MCP info pattern as `buildMcpInfo()` in skill-mcp.ts
+- 14 new unit tests all passing, 27 existing skill tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/skill/skill.ts` (modified — added mcp/agent fields, lazy loading, extractInstruction, isLazy)
+  - `packages/opencode/src/tool/skill.ts` (modified — added MCP listing, agent restriction, instruction extraction)
+  - `packages/opencode/test/tool/skill-enhanced.test.ts` (new)
+- **Learnings for future iterations:**
+  - `Tool.Context.agent` is a `string` (agent name), NOT `Agent.Info` — use `InitContext.agent` from the init closure for agent metadata access
+  - Tool.define execute return type requires consistent metadata shapes across all branches — include ALL fields with defaults in every branch to avoid union narrowing errors
+  - `Skill.Info.pick()` can include optional fields from the schema — they parse as `undefined` when absent from frontmatter, which is fine for optional fields
+  - Lazy loading threshold of 50KB is a good default — most skills are <10KB, but some bundled reference materials can be 100KB+
+  - `Skill.extractInstruction()` uses simple regex with `[\s\S]*?` (non-greedy) to match content between XML tags — only returns the first match if multiple blocks exist
+  - MCP info building for skills reuses the same sanitization pattern as skill-mcp.ts: `name.replace(/[^a-zA-Z0-9_-]/g, "_")` for server names
+  - For test mocking of MCP and SecurityConfig modules, use mutable objects (not const) so test can modify state between tests via `resetMcpMocks()`
+---
+
+## 2026-02-14 - US-028
+- Implemented built-in MCP server integration with auto-enable on API key
+  - Created `packages/opencode/src/mcp/builtin.ts` with `BuiltinMcp` namespace
+  - 3 built-in MCP servers: websearch (Exa), context7 (documentation), grep_app (GitHub code search)
+  - Each server has: name, description, envVar, config factory function
+  - `BuiltinMcp.resolve()`: merges built-in configs with user config, respects disabled_mcps and security policy
+  - `BuiltinMcp.getDisabledMessage()`: returns clear message with required env var name when agent tries disabled MCP
+  - `BuiltinMcp.isBuiltin()` / `BuiltinMcp.getRequiredEnvVar()`: introspection helpers
+- Auto-enable logic: API key from explicit param > process.env[envVar] > not enabled
+- Built-in configs use `type: "remote"` with `oauth: false` (API key auth via headers)
+- User-configured servers always take priority over built-in (spread order: `{ ...builtinConfigs, ...userConfig }`)
+- Integration points:
+  - `MCP` state initialization: merged built-in configs before creating clients
+  - `MCP.status()`: includes built-in servers in status listing
+  - `SkillMcpTool`: enhanced "unknown server" error to show built-in MCP hint with required env var
+- Added `disabled_mcps` field to `Config.Info` schema (string array, optional)
+- SecurityConfig.getMcpPolicy() integration: blocked servers excluded from resolve()
+- Enforced servers still returned (monitoring applied downstream)
+- 18 unit tests all passing, 134 related tests pass, typecheck passes
+- Files changed:
+  - `packages/opencode/src/mcp/builtin.ts` (new)
+  - `packages/opencode/src/mcp/index.ts` (modified — integrated BuiltinMcp.resolve in state init and status)
+  - `packages/opencode/src/config/config.ts` (modified — added disabled_mcps schema field)
+  - `packages/opencode/src/tool/skill-mcp.ts` (modified — enhanced unknown server error with built-in hint)
+  - `packages/opencode/test/mcp/builtin-mcp.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-028 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - Built-in MCP servers use a factory pattern: `config: (apiKey) => Config.Mcp` — the API key is injected at resolve time, not at definition time
+  - `BuiltinMcp.resolve()` takes explicit `apiKeys` param for testing without polluting `process.env`
+  - User MCP configs override built-in by being spread second: `{ ...builtinConfigs, ...userConfig }` — user always wins
+  - `disabled_mcps` is a simple string array in Config.Info, checked as a Set in resolve() for O(1) lookup
+  - The `MCP.status()` function must also call `BuiltinMcp.resolve()` to include built-in servers in the status listing, since state init only runs once
+  - Built-in configs use `oauth: false` to disable OAuth auto-detection — these servers use API key auth via headers
+  - Mock pattern for SecurityConfig in MCP tests: use mutable `let mockMcpPolicy` variable that test cases reassign before calling resolve()
 ---
