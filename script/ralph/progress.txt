@@ -40,6 +40,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Tool deprecation pattern: log warning via `Log.warn()`, prepend deprecation message to output, add `deprecated: true` + `replacement` to metadata
 - For optional/peer dependencies, use exported `Loader` object with injectable `.load()` method for test isolation — avoids `mock.module` hoisting issues with dynamic `import()`
 - `SecuritySchema.MarkerConfig` has `deniedOperations` and `allowedRoles` directly (not nested in a `rule` field) — `findMarkerSegments()` returns `MarkerSegment` with `.rule` being the full `MarkerConfig`
+- AI SDK content parts: `ImagePart` = `{ type: "image", image, mediaType? }`, `FilePart` = `{ type: "file", data, mediaType }` — do NOT use `mimeType`
+- For programmatic LLM calls from tools: `generateText({ model: await Provider.getLanguage(model), messages, system })` from "ai" package
 
 ---
 
@@ -617,4 +619,38 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Background execution pattern: create BackgroundManager task, resolve prompt parts, then fire-and-forget via `executeInBackground().catch()` — failures handled by `BackgroundManager.fail()`
   - `delegate_task` disables itself (`delegate_task: false`) in the tools map when calling `SessionPrompt.prompt()` to prevent the sub-agent from calling it, in addition to the permission-level deny
   - The existing `task` tool remains unchanged — `delegate_task` is an enhanced alternative with category routing and background execution
+---
+
+## 2026-02-14 - US-023
+- Implemented `look_at` multimodal analyzer tool in `packages/opencode/src/tool/look-at.ts`
+  - `look_at` tool: analyzes images, PDFs, and diagrams using vision-capable models
+  - Parameters: `file_path` (optional), `image_data` (base64, optional), `goal` (required)
+  - At least one of `file_path` or `image_data` must be provided
+  - Vision model resolution: configurable via `vision_model` in opencode.jsonc, falls back to priority list (gemini-2.5-flash, gpt-5-mini, claude-haiku, etc.), ultimate fallback to default model
+  - Uses AI SDK `generateText()` with `ImagePart` (for images) or `FilePart` (for PDFs) content types
+- SecurityAccess integration:
+  - `checkAccess(filePath, 'read')` before reading file from disk
+  - `checkAccess(filePath, 'llm')` before sending to vision model
+  - `SecurityAudit.logSecurityEvent()` for all denied operations
+- Gated behind `OPENCODE_EXPERIMENTAL_LOOK_AT` flag (or `OPENCODE_EXPERIMENTAL`)
+- Created tool description file: `look-at.txt`
+- Registered in `registry.ts` behind experimental flag
+- 11 unit tests all passing, 242 tool tests pass, 1681+ total tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/look-at.ts` (new)
+  - `packages/opencode/src/tool/look-at.txt` (new)
+  - `packages/opencode/src/flag/flag.ts` (modified — added OPENCODE_EXPERIMENTAL_LOOK_AT)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered LookAtTool)
+  - `packages/opencode/test/tool/look-at.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-023 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - AI SDK `ImagePart` uses `{ type: "image", image: dataUrl, mediaType?: string }` — NOT `mimeType` or `type: "file"`
+  - AI SDK `FilePart` uses `{ type: "file", data: dataUrl, mediaType: string }` — use for PDFs
+  - For vision model calls from tools, use `generateText()` from "ai" + `Provider.getModel()`/`Provider.getLanguage()` — no need for agent loop
+  - Vision model resolution pattern: check config first (`vision_model`), then scan available providers for known vision models, fallback to default model
+  - `Bun.file().type` may not correctly detect MIME types from extension alone — use explicit extension-to-MIME mapping as fallback
+  - Security rules in tests require `type: "file"` field (Zod validates) — omitting it causes typecheck errors
+  - `mock.module()` in Bun works well for mocking `ai` and `Provider` modules — allows testing without real API calls
 ---

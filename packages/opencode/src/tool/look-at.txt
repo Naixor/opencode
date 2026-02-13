@@ -1,0 +1,12 @@
+Analyze images, screenshots, PDFs, and diagrams using a vision-capable model.
+
+Provide either a file_path to an image/PDF on disk, or base64-encoded image_data. At least one must be provided.
+
+The goal parameter describes what to extract or analyze from the image. Be specific about what information you need.
+
+Supported file types: PNG, JPEG, GIF, WebP, BMP, TIFF, PDF.
+
+Examples:
+- Analyze a screenshot: file_path="/path/to/screenshot.png", goal="Describe the UI layout and identify any errors"
+- Extract text from diagram: file_path="/path/to/diagram.png", goal="Extract all text labels and connections"
+- Analyze base64 image: image_data="iVBOR...", goal="What does this image show?"

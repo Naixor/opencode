@@ -591,8 +591,8 @@
         "Typecheck passes"
       ],
       "priority": 23,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Vision model resolved dynamically from available providers with fallback priority list. Gated behind OPENCODE_EXPERIMENTAL_LOOK_AT flag."
     },
     {
       "id": "US-024",
