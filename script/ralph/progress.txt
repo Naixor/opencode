@@ -862,3 +862,34 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Skills with `<skill-instruction>` blocks are ideal for built-ins: the full SKILL.md serves as documentation, while only the instruction block is returned to the agent
   - Command override order: built-in defaults first -> user config commands (overwrite) -> MCP prompts (overwrite) -> skills as commands (skip if exists)
 ---
+
+## 2026-02-14 - US-030
+- Extended opencode.jsonc schema with all OMO config sections
+  - **Already implemented in earlier stories**: `agent` (US-009/US-012), `categories` (US-016), `hooks` (US-001), `background_task` (US-015), `disabled_mcps` (US-028)
+  - **Added in this story**: `notification` config section with `enabled` (boolean) and `sound` (boolean) fields
+  - All config sections are optional with no required fields — backward compatible with empty/existing configs
+  - All fields have Zod validation with `.describe()` annotations for schema documentation
+  - Config loading precedence preserved (remote -> global -> custom -> project -> .opencode -> inline -> managed)
+  - Invalid values produce Zod errors with issue details (path, expected type, received value)
+- 10 new unit tests covering all acceptance criteria:
+  - Empty config -> all defaults applied
+  - Agents section with enabled/model/temperature -> loaded correctly
+  - Categories section with custom category -> available
+  - Hooks section disable -> hook config stored as `{ enabled: false }`
+  - Background task concurrency settings -> all fields enforced
+  - Notification settings -> enabled/sound fields stored
+  - disabled_mcps -> string array preserved
+  - Invalid value -> Zod error with issues
+  - Existing valid config -> no errors
+  - All OMO sections coexist without conflict
+- 106 total config tests pass, typecheck passes
+- Files changed:
+  - `packages/opencode/src/config/config.ts` (modified — added notification schema)
+  - `packages/opencode/test/config/omo-config.test.ts` (new)
+- **Learnings for future iterations:**
+  - Most OMO config sections were already added incrementally in their respective stories — US-030 primarily validates and tests the complete schema
+  - The `notification` config section is the only one that wasn't added in a previous story — the session-notification hook (US-007) used internal `configureNotification()` without a config schema field
+  - Config schema uses `.strict()` on the top-level Info object — all new fields must be explicitly added to the schema
+  - Agent config's `.catchall(z.any())` transform sweeps unknown fields into `options` — so `enabled`, `prompt_append`, etc. end up in `agent.<name>.options.<field>` after parsing
+  - Zod validation errors include issue path and expected/received types — test via `Config.InvalidError.isInstance(err)` and `err.data.issues`
+---

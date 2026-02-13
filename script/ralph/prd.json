@@ -767,8 +767,8 @@
         "Typecheck passes"
       ],
       "priority": 30,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Most config sections already added in earlier stories (hooks, background_task, categories, disabled_mcps, agent). US-030 added notification config and comprehensive tests."
     },
     {
       "id": "US-031",
