@@ -14,6 +14,25 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - Tool.define() returns Info with .id and .init() — access parameters via init() not directly
 ---
 
+## 2026-02-13 - US-018
+- What was implemented: Created test file for plugin security enforcement (Track B)
+- Files changed:
+  - test/plugin/security.test.ts — 13 tests covering all acceptance criteria
+- **Test coverage:**
+  - Plugin tool access denied for protected paths (uses absolute pattern with realpathSync)
+  - Plugin tool output redaction via scanAndRedact
+  - Write to .opencode-security.json blocked by implicit rule
+  - Write to .opencode-security-audit.log blocked by implicit rule
+  - MCP default policy: 'enforced' with rules, 'trusted' without config
+  - Structural diff: identity by info.id, syncs added messages, syncs removed messages, discards content modifications
+  - hasBuiltIn() returns true/false correctly
+  - Plugin registration skip when feature is built-in
+- **Learnings for future iterations:**
+  - Relative patterns like `secrets/**` don't match absolute paths in checkAccess — must use absolute patterns with realpathSync
+  - SecurityConfig.resetConfig() is essential in afterEach to avoid cross-test leakage
+  - SecurityConfig.loadSecurityConfig(dir) requires .git dir to exist (for findGitRoot)
+---
+
 ## 2026-02-13 - US-017
 - What was implemented: Created test files for core feature integrations (Track A)
 - Files changed:
