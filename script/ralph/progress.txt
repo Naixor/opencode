@@ -8,6 +8,10 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Plugin.trigger() pattern: `Plugin.trigger(hookName, input, output)` where output is mutated in-place
 - Test pattern: `await using tmp = await tmpdir({ git: true, config: {} })` + `Instance.provide({ directory: tmp.path, fn: async () => { ... } })`
 - All tests run per-package: `bun test --cwd packages/opencode -- test/path/to/test.ts`
+- Error recovery hooks pattern: register all hooks in a `register()` function, expose `resetErrorHistory()` for testing, use `ErrorRecoveryHooks.register()` in test setup
+- Hook modules follow namespace pattern with `register()` + `reset*()` exports for registration and test cleanup
+- In TypeScript namespaces, use `export function` directly — `export { name }` re-export syntax is NOT valid inside namespaces
+- Context window estimation uses ~4 chars per token as rough heuristic; model context windows are looked up by name pattern matching
 
 ---
 
@@ -30,4 +34,49 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Config can be loaded asynchronously via `init()` method and applied to already-registered hooks via `reloadConfig()`
   - The `CompiledChain` generic type requires `as unknown as CompiledChain<T>` cast due to TypeScript's strict narrowing of discriminated union types in Map lookups
   - Test fixture `tmpdir({ git: true })` initializes a git repo which is required for Instance.provide to work
+---
+
+## 2026-02-14 - US-002
+- Implemented 4 error recovery hooks in `packages/opencode/src/session/hooks/error-recovery.ts`
+  - `edit-error-recovery` (PostToolChain, priority 100): detects "oldString not found", "Found multiple matches", "oldString and newString must be different" and injects recovery guidance
+  - `context-window-limit-recovery` (SessionLifecycleChain, priority 10): detects context_window_exceeded errors and signals compaction via ctx.data.recovery
+  - `delegate-task-retry` (PostToolChain, priority 200): detects delegate_task/task failures, suggests retry with exponential backoff (1s, 2s), exhaustion message after 1 retry
+  - `iterative-error-recovery` (PostToolChain, priority 300): tracks error patterns per session, injects corrective guidance after 3+ identical errors
+- Added error recovery hook invocation point at processor.ts line 345 (after error conversion, before SessionRetry.retryable check)
+- All hooks individually toggleable via config (reloadConfig with { "hook-name": { enabled: false } })
+- 18 unit tests all passing, 1352 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/hooks/error-recovery.ts` (new)
+  - `packages/opencode/src/session/processor.ts` (modified - added HookChain import and error hook invocation)
+  - `packages/opencode/test/session/hooks/error-recovery.test.ts` (new)
+- **Learnings for future iterations:**
+  - Error recovery hooks modify `ctx.result.output` by appending recovery messages, keeping original output intact
+  - `iterative-error-recovery` uses a session-scoped Map to track error patterns; call `resetErrorHistory()` in tests to avoid cross-test contamination
+  - PostToolContext's `result.metadata` can be used to pass state between hook invocations (e.g., retryCount for delegate-task-retry)
+  - The processor.ts error handler uses `.catch(() => {})` on hook execution to ensure hook failures never block error handling flow
+  - Error detection uses string matching on tool output (includes-based), not structured error types, since tool outputs are plain strings
+---
+
+## 2026-02-14 - US-003
+- Implemented 5 output management hooks in `packages/opencode/src/session/hooks/output-management.ts`
+  - `tool-output-truncator` (PostToolChain, priority 50): truncates ALL tool outputs to 50KB max, preserves [REDACTED: Security Protected] markers
+  - `grep-output-truncator` (PostToolChain, priority 60): grep-specific truncation showing 50 of N matches
+  - `question-label-truncator` (PostToolChain, priority 70): truncates UI question labels to 200 chars with '...'
+  - `context-window-monitor` (PreLLMChain, priority 900): warns when context window >80% full, configurable threshold
+  - `preemptive-compaction` (PreLLMChain, priority 910): triggers compaction when context >90% full, sets variant='compact'
+- Streaming truncation support for 10MB+ outputs (read first N bytes + tail message)
+- Each hook individually toggleable via config
+- Configurable thresholds via `configureThresholds()` API
+- 23 unit tests all passing, 1375 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/hooks/output-management.ts` (new)
+  - `packages/opencode/test/session/hooks/output-management.test.ts` (new)
+- **Learnings for future iterations:**
+  - In TypeScript namespaces, `export { name }` re-export syntax causes SyntaxError — must use `export function` directly on the declaration
+  - Security marker preservation during truncation requires scanning for markers beyond the truncation boundary and appending them to the truncated output
+  - Context window usage estimation: system prompt text + JSON-serialized messages, divided by 4 chars per token, compared against model-specific context windows
+  - PreLLMContext.variant can be set by hooks to signal downstream behavior (e.g., 'compact' triggers compaction)
+  - The context-window-monitor checks ratio < compactionThreshold to avoid warning when compaction is about to fire (avoids duplicate warnings)
 ---
