@@ -1,6 +1,6 @@
 import { Agent } from "./agent"
 import { Skill } from "../skill"
-import { Config } from "../config/config"
+import { Categories } from "./background/categories"
 import PROMPT_SISYPHUS from "./prompt/sisyphus.txt"
 
 export namespace Sisyphus {
@@ -49,18 +49,8 @@ export namespace Sisyphus {
   }
 
   async function buildCategoriesSection(): Promise<string | undefined> {
-    const cfg = await Config.get()
-    // categories field will be added in US-030; access safely via record lookup
-    const categories = (cfg as Record<string, unknown>).categories as
-      | Record<string, { description: string; model?: string }>
-      | undefined
-    if (!categories || Object.keys(categories).length === 0) return undefined
-
-    const items = Object.entries(categories).map(
-      ([name, cat]) =>
-        `- **${name}**: ${cat.description}${cat.model ? ` (model: ${cat.model})` : ""}`,
-    )
-
-    return ["## Task Categories", "", ...items].join("\n")
+    const categories = await Categories.resolve()
+    if (Object.keys(categories).length === 0) return undefined
+    return Categories.buildDelegationTable(categories)
   }
 }
