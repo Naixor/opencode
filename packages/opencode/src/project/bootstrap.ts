@@ -59,17 +59,15 @@ export namespace Bootstrap {
     phases.push(await measure("snapshot", () => Snapshot.init()))
     phases.push(await measure("truncate", () => Truncate.init()))
 
-    // Group B (Plugin, LSP, Format, Security) and Group C (FileWatcher, File, Vcs) run concurrently
-    // Plugin.trigger() is not called during bootstrap — safe to parallelize all init functions
+    // Group B (Plugin, Format, Security) and Group C (File, Vcs) run concurrently
+    // LSP and FileWatcher deferred to background — not needed for TUI first-frame
     const [groupB, groupC] = await Promise.all([
       Promise.all([
         measure("plugin", () => Plugin.init()),
-        measure("lsp", () => LSP.init()),
         measure("format", () => Format.init()),
         measure("security", () => SecurityConfig.loadSecurityConfig(Instance.directory)),
       ]),
       Promise.all([
-        measure("file-watcher", () => FileWatcher.init()),
         measure("file", () => File.init()),
         measure("vcs", () => Vcs.init()),
       ]),
@@ -81,6 +79,14 @@ export namespace Bootstrap {
 
     Log.Default.info("bootstrap complete", { total, phases })
     StartupTrace.end("instance-bootstrap")
+
+    // Pre-warm LSP and FileWatcher in background after bootstrap completes
+    // LSP servers only spawn on first tool invocation (getClients), init just registers server configs
+    // FileWatcher.init() is sync (kicks off async state factory internally, already fire-and-forget)
+    queueMicrotask(() => {
+      LSP.init().catch((err) => Log.Default.error("background lsp init failed", { error: err }))
+      FileWatcher.init()
+    })
 
     Bus.subscribe(Command.Event.Executed, async (payload) => {
       if (payload.properties.name === Command.Default.INIT) {
