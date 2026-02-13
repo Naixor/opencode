@@ -1,26 +1,35 @@
 # Ralph Progress Log
-Started: Thu 13 Feb 2026
+Started: Fri 13 Feb 2026 15:15:57 CST
 
 ## Codebase Patterns
-- **Runtime:** Bun (not Node.js). Use Bun APIs like Bun.file(), Bun.write(), Bun.spawn() where applicable.
-- **Code style:** No try/catch (use .catch()), no any types, no else (early returns), prefer const, single-word names, functional array methods (flatMap/filter/map over for loops), snake_case for DB schemas.
-- **Tool pattern:** Tools use Tool.define() with Zod parameter schemas. See existing tools in packages/opencode/src/tool/ for the pattern.
-- **Security modules:** packages/opencode/src/security/ — config.ts, access.ts, role.ts, token.ts, segments.ts, redact.ts, audit.ts, bash-scanner.ts, llm-scanner.ts
-- **Plugin system:** packages/opencode/src/plugin/index.ts — Plugin.trigger() for hooks, ToolRegistry.fromPlugin() for plugin tools
-- **LSP:** packages/opencode/src/lsp/ — index.ts (client), server.ts (server type selection), tool defined in packages/opencode/src/tool/lsp.ts
-- **Session:** packages/opencode/src/session/ — llm.ts (LLM interaction), processor.ts (turn processing), instruction.ts (prompt construction), prompt.ts (tool resolution)
-- **Typecheck:** bun turbo typecheck
-- **Tests:** bun test --cwd packages/opencode
-- **Install deps:** bun add <pkg> in packages/opencode/ directory
-- All tools use local getDefaultRole() which returns the lowest role — SecurityRole.getCurrentRole() exists but is not integrated into tools
-- SecurityAccess.checkAccess(path, operation, role) returns { allowed, reason? }
-- LLMScanner.scanForProtectedContent(content, config) returns { violations: [{start, end, type}] }
-- SecurityRedact.redactContent(content, segments) replaces ranges with [REDACTED: Security Protected]
-- SecurityAudit.logSecurityEvent(event) logs to NDJSON audit log
-- getMcpPolicy(serverName) checks config.mcp.servers[name] → defaultPolicy → "trusted"
-- ToolRegistry.all() returns array of all built-in + plugin + custom tools
-- ToolRegistry.fromPlugin() wraps plugin tools for registration
-- Plugin.trigger(hookName, payload) fires all registered plugin hooks sequentially
-- InstructionPrompt.resolve() walks UP from target file to Instance.directory
-- Filesystem.findUp()/globUp() used for instruction file discovery
+- SecurityUtil namespace in packages/opencode/src/security/util.ts is the shared module for role/redaction logic
+- Tool files (read.ts, grep.ts, etc.) should import from SecurityUtil rather than defining local helpers
+- Pre-existing typecheck errors in ast_grep.ts due to missing @ast-grep/napi — not related to security work
+- findProtectedSegments is now in SecurityUtil — use it instead of duplicating segment-finding logic in tools
+- appendImplicitRules() in config.ts auto-protects .opencode-security.json and .opencode-security-audit.log
+- getMcpPolicy() falls back to 'enforced' when rules/segments exist but no mcp block — only returns 'trusted' when no security config at all
+---
+
+## 2026-02-13 - US-002
+- What was implemented: Verified all acceptance criteria already met by existing implementation (commit 5f4dca313)
+- Files changed: None (already committed)
+  - packages/opencode/src/security/config.ts — appendImplicitRules() adds write-deny rules for .opencode-security.json and .opencode-security-audit.log
+  - packages/opencode/src/security/config.ts — getMcpPolicy() returns 'enforced' when no mcp block but rules/segments exist
+  - packages/opencode/src/security/config.ts — mergeSecurityConfigs() calls appendImplicitRules() on merged result
+- **Learnings for future iterations:**
+  - Some user stories may already be implemented in prior commits — check git log before writing new code
+  - emptyConfig is shared and never mutated by appendImplicitRules (which is only called on validated.data)
+  - The implicit rules mean any loaded config will always have at least 2 rules, so getMcpPolicy correctly returns 'enforced' for any config file
+---
+
+## 2026-02-13 - US-001
+- What was implemented: Consolidated duplicated security utility functions into SecurityUtil namespace
+- Files changed:
+  - packages/opencode/src/security/util.ts — added findProtectedSegments(), import for SecuritySegments
+  - packages/opencode/src/tool/read.ts — removed duplicated getRoleLevel, isRoleAllowed, findProtectedSegments; use SecurityUtil.findProtectedSegments
+  - packages/opencode/src/tool/grep.ts — removed duplicated getRoleLevel, isRoleAllowed, findProtectedSegments; use SecurityUtil.findProtectedSegments
+- **Learnings for future iterations:**
+  - read.ts and grep.ts had identical findProtectedSegments + helper functions — always check for duplication before adding security logic to tool files
+  - The local isRoleAllowed had a different signature (pre-computed roleLevel) vs SecurityUtil.isRoleAllowed (computes internally) — both functionally equivalent
+  - SecurityRedact import is still needed in tool files for SecurityRedact.REDACTED_PLACEHOLDER and SecurityRedact.redactContent
 ---
