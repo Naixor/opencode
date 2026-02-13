@@ -12,6 +12,9 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Hook modules follow namespace pattern with `register()` + `reset*()` exports for registration and test cleanup
 - In TypeScript namespaces, use `export function` directly — `export { name }` re-export syntax is NOT valid inside namespaces
 - Context window estimation uses ~4 chars per token as rough heuristic; model context windows are looked up by name pattern matching
+- Security markers in `.opencode-security.json` use plain text (e.g., `@security-start`), NOT comment-prefixed (NOT `// @security-start`) — `buildMarkerPatterns()` adds comment prefixes automatically
+- Security rules require `allowedRoles: []` field (Zod validates); missing it causes config to fall back to empty/permissive
+- Per-session caching pattern: use Maps keyed by `ctx.sessionID`, expose `resetCaches()` for test isolation
 
 ---
 
@@ -79,4 +82,30 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Context window usage estimation: system prompt text + JSON-serialized messages, divided by 4 chars per token, compared against model-specific context windows
   - PreLLMContext.variant can be set by hooks to signal downstream behavior (e.g., 'compact' triggers compaction)
   - The context-window-monitor checks ratio < compactionThreshold to avoid warning when compaction is about to fire (avoids duplicate warnings)
+---
+
+## 2026-02-14 - US-004
+- Implemented 5 context injection hooks in `packages/opencode/src/session/hooks/context-injection.ts`
+  - `directory-agents-injector` (PreLLMChain, priority 100): scans for AGENTS.md in project root and `.opencode/`, injects into system prompt with per-session caching
+  - `directory-readme-injector` (PreLLMChain, priority 110): injects README.md only for first message or when working directory changes
+  - `rules-injector` (PreLLMChain, priority 120): injects custom rules from `.opencode/rules/*.md` and `.claude/rules/*.md`
+  - `compaction-context-injector` (SessionLifecycleChain, priority 100): extracts file references and decisions from pre-compaction messages, preserves as compaction context
+  - `compaction-todo-preserver` (SessionLifecycleChain, priority 110): extracts incomplete todos (markdown checkboxes, TODO/FIXME comments) and re-injects post-compaction
+- SecurityAccess.checkAccess(filePath, 'read') + checkAccess(filePath, 'llm') enforced before all injections
+- LLM scanner applied to injected content — protected segments redacted via SecurityRedact
+- Per-session caching: AGENTS.md, README.md, and rules files cached per session ID
+- Each hook individually toggleable via config
+- 26 unit tests all passing, 1401 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/hooks/context-injection.ts` (new)
+  - `packages/opencode/test/session/hooks/context-injection.test.ts` (new)
+  - `script/ralph/prd.json` (modified - US-004 passes: true)
+  - `script/ralph/progress.txt` (modified - appended progress)
+- **Learnings for future iterations:**
+  - Security markers in `.opencode-security.json` use plain marker text (e.g., `@security-start`), NOT comment-prefixed — `buildMarkerPatterns()` in `segments.ts` adds `//`, `#`, `<!-- -->`, etc. prefixes automatically
+  - Security config rules require `allowedRoles: []` field — Zod validation rejects configs without it, causing fallback to empty (permissive) config
+  - The `tmpdir()` fixture `init` callback runs before `Instance.provide()` — write test files here; load security configs inside the `fn` callback where Instance context is available
+  - Per-session cache maps using `sessionID` as key allow testing cache hit/miss behavior; expose `getXxxCache()` methods for test assertions
+  - `Bun.Glob.scan()` with `cwd` pointing to non-existent directory throws — wrap in try/catch to gracefully skip missing rule dirs
 ---

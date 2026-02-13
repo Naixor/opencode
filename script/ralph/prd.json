@@ -119,7 +119,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-001 hook infrastructure"
     },
     {
