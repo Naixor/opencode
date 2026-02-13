@@ -187,7 +187,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-001. Split from original US-006 (session lifecycle hooks)"
     },
     {

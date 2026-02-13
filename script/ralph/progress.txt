@@ -15,6 +15,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Security markers in `.opencode-security.json` use plain text (e.g., `@security-start`), NOT comment-prefixed (NOT `// @security-start`) — `buildMarkerPatterns()` adds comment prefixes automatically
 - Security rules require `allowedRoles: []` field (Zod validates); missing it causes config to fall back to empty/permissive
 - Per-session caching pattern: use Maps keyed by `ctx.sessionID`, expose `resetCaches()` for test isolation
+- `SessionStatus.list()` returns `Record<string, Info>` with only non-idle sessions; idle sessions are deleted from state on `SessionStatus.set(id, { type: "idle" })`
+- For test observability of fire-and-forget operations (e.g., notifications), use internal log arrays + getter/reset exports instead of mocking `Bun.spawn`
 
 ---
 
@@ -150,4 +152,25 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Stop signal pattern: use a per-session Map to communicate between hooks in the same chain execution; stop-continuation-guard (priority 190) sets the signal, todo-continuation-enforcer (priority 200) reads it
   - Subagent detection via `_isSubagent` arg flag allows callers to mark subagent context; alternative approach would be looking up Agent.Info.mode but that requires async agent resolution
   - The `withInstance` helper for these tests doesn't need `tmpPath` since all state is session-based (via Storage), not file-based
+---
+
+## 2026-02-14 - US-007
+- Implemented 3 session lifecycle hooks in `packages/opencode/src/session/hooks/session-lifecycle.ts`
+  - `session-recovery` (SessionLifecycleChain, priority 10): on `session.created` event, checks `SessionStatus.list()` for sessions stuck in 'busy' status, injects recovery message with stuck session IDs
+  - `session-notification` (SessionLifecycleChain, priority 300): on `agent.stopped` event, sends platform-native notification (macOS osascript, Linux notify-send). Configurable via `configureNotification({ enabled, sound })`
+  - `unstable-agent-babysitter` (SessionLifecycleChain, priority 250): tracks consecutive `agent.error` events per agent per session, injects diagnostic guidance after 3+ consecutive failures. Counter resets on `agent.stopped` (success)
+- All hooks individually toggleable via config (HookChain.reloadConfig)
+- 15 unit tests all passing, 135 existing hook tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/hooks/session-lifecycle.ts` (new)
+  - `packages/opencode/test/session/hooks/session-lifecycle.test.ts` (new)
+  - `script/ralph/prd.json` (modified - US-007 passes: true)
+  - `script/ralph/progress.txt` (modified - appended progress)
+- **Learnings for future iterations:**
+  - `SessionStatus.list()` returns `Record<string, SessionStatus.Info>` — only sessions with non-idle status are stored (idle sessions are deleted from state via `SessionStatus.set()`)
+  - `SessionStatus.set(id, { type: "busy" })` can be used in tests to simulate stuck sessions without needing actual LLM processing
+  - Platform notifications use `Bun.spawn()` with `stdout: "ignore", stderr: "ignore"` to fire-and-forget; `.exited.catch(() => {})` prevents unhandled promise rejections
+  - The notification log pattern (internal array tracking sent notifications) provides test observability without mocking `Bun.spawn` — track `{ platform, title, message }` entries
+  - Failure counter pattern: per-session Map<agent, count> allows tracking per-agent failures independently; success events reset only the specific agent's counter
 ---
