@@ -8,6 +8,19 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - findProtectedSegments is now in SecurityUtil — use it instead of duplicating segment-finding logic in tools
 - appendImplicitRules() in config.ts auto-protects .opencode-security.json and .opencode-security-audit.log
 - getMcpPolicy() falls back to 'enforced' when rules/segments exist but no mcp block — only returns 'trusted' when no security config at all
+- @ast-grep/napi must be installed (bun install) for ast_grep.ts to typecheck — it's in package.json but node_modules may be stale
+---
+
+## 2026-02-13 - US-004 & US-005
+- What was implemented: Verified both ast_grep_search and ast_grep_replace already implemented. Fixed typecheck by running bun install for @ast-grep/napi.
+- Files changed: None (already committed in 5f4dca313)
+  - packages/opencode/src/tool/ast_grep.ts — AstGrepSearchTool (findInFiles) and AstGrepReplaceTool (parse+findAll+commitEdits)
+  - packages/opencode/src/tool/registry.ts — both tools registered
+- **Learnings for future iterations:**
+  - @ast-grep/napi uses native bindings — `bun install` is required after clone/checkout
+  - findInFiles callback signature is (err, nodes) — both params need type annotations
+  - node.replace(rewritePattern) directly resolves meta-variables — no manual getMatch needed
+  - The globs parameter is defined but not forwarded to findInFiles — could be enhanced later
 ---
 
 ## 2026-02-13 - US-003
