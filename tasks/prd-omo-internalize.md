@@ -10,6 +10,59 @@ Oh-My-OpenCode (OMO) is a community plugin providing multi-agent orchestration, 
 
 The internalization is split into 8 phases across 30 user stories, all implemented together as a single milestone. Each US includes comprehensive unit tests.
 
+## OMO 源码参考
+
+**获取方式：**
+```bash
+gh repo clone code-yeongyu/oh-my-opencode /tmp/oh-my-opencode
+```
+
+**源码目录结构（实现时必须参考）：**
+```
+/tmp/oh-my-opencode/src/
+├── agents/          # 11 个 agent 定义（system prompt、model、tool restrictions）
+├── hooks/           # 46+ hook 实现（每个 hook 独立目录）
+├── tools/           # 18+ tool 实现（参数 schema、execute 逻辑、安全处理）
+├── features/        # 核心子系统（background-agent、opencode-skill-loader、claude-tasks 等）
+├── mcp/             # 内置 MCP 服务器配置（websearch、context7、grep_app）
+├── config/          # Zod config schema 定义
+├── shared/          # 通用工具函数
+├── plugin/          # 插件接口层
+├── plugin-handlers/ # 配置处理器
+├── cli/             # CLI 系统（不在内置范围内）
+└── index.ts         # 插件入口
+```
+
+> **重要原则：** 实现每个 US 时，**必须先阅读 OMO 对应的源码文件**，理解其实现细节、边界处理和错误恢复逻辑，再在 OpenCode 架构下重新实现。不要仅依赖 PRD 描述，PRD 是行为规格，OMO 源码是实现参考。具体对应关系：
+>
+> | US 主题 | OMO 源码参考路径 |
+> |---------|-----------------|
+> | Hook 基础设施 (US-001) | `src/plugin/hooks/`、`src/create-hooks.ts` |
+> | 错误恢复 hooks (US-002) | `src/hooks/edit-error-recovery/`、`src/hooks/anthropic-context-window-limit-recovery/`、`src/hooks/delegate-task-retry/`、`src/hooks/ralph-loop/` |
+> | 输出管理 hooks (US-003) | `src/hooks/tool-output-truncator/`、`src/hooks/grep-output-truncator/`、`src/hooks/context-window-monitor/`、`src/hooks/preemptive-compaction/` |
+> | 上下文注入 hooks (US-004) | `src/hooks/directory-agents-injector/`、`src/hooks/directory-readme-injector/`、`src/hooks/rules-injector/`、`src/hooks/compaction-context-injector/`、`src/hooks/compaction-todo-preserver/` |
+> | Agent 行为 hooks (US-005) | `src/hooks/keyword-detector/`、`src/hooks/comment-checker/`、`src/hooks/todo-continuation-enforcer/`、`src/hooks/subagent-question-blocker/`、`src/hooks/write-existing-file-guard/` |
+> | Session 管理 hooks (US-006) | `src/hooks/session-recovery/`、`src/hooks/session-notification/`、`src/hooks/unstable-agent-babysitter/`、`src/hooks/think-mode/`、`src/hooks/anthropic-effort/` |
+> | Sisyphus agent (US-007) | `src/agents/sisyphus.ts`、`src/agents/dynamic-agent-prompt-builder.ts` |
+> | omo-explore agent (US-008) | `src/agents/explore.ts` |
+> | Oracle agent (US-009) | `src/agents/oracle.ts` |
+> | 可选 agents (US-010) | `src/agents/hephaestus.ts`、`src/agents/prometheus/`、`src/agents/atlas/`、`src/agents/librarian.ts`、`src/agents/metis.ts`、`src/agents/momus.ts`、`src/agents/multimodal-looker.ts`、`src/agents/sisyphus-junior/` |
+> | Background manager (US-011) | `src/features/background-agent/` |
+> | Category 系统 (US-012) | `src/config/schema/categories.ts`、`src/tools/delegate-task/constants.ts` |
+> | Glob 增强 (US-013) | `src/tools/glob/` |
+> | Grep 增强 (US-014) | `src/tools/grep/` |
+> | LSP 拆分 (US-015) | `src/tools/lsp/` |
+> | AST-Grep 工具 (US-016) | `src/tools/ast-grep/` |
+> | delegate-task 工具 (US-017) | `src/tools/delegate-task/`、`src/tools/background-task/` |
+> | look-at 工具 (US-018) | `src/tools/look-at/` |
+> | skill-mcp 工具 (US-019) | `src/tools/skill-mcp/` |
+> | interactive-bash 工具 (US-020) | `src/tools/interactive-bash/` |
+> | Task 持久化 (US-021) | `src/features/claude-tasks/`、`src/tools/task/` |
+> | Skill 增强 (US-022) | `src/tools/skill/`、`src/features/opencode-skill-loader/` |
+> | MCP 服务器 (US-023) | `src/mcp/` |
+> | Skills & Commands (US-024) | `src/features/builtin-skills/`、`src/features/builtin-commands/` |
+> | Config schema (US-025) | `src/config/schema/` |
+
 ## Key Architectural Decisions
 
 ### AD-1: Sisyphus replaces `build` as default agent
