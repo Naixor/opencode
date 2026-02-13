@@ -193,8 +193,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "CommentChecker module existed; integrated into edit.ts, write.ts, and apply_patch.ts as post-processing step appending advisory to output"
     },
     {
       "id": "US-012",

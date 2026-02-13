@@ -12,9 +12,10 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { trimDiff } from "./edit"
 import { assertExternalDirectory } from "./external-directory"
+import { CommentChecker } from "./comment_checker"
 import { SecurityAccess } from "../security/access"
 import { SecurityConfig } from "../security/config"
-import { SecuritySchema } from "../security/schema"
+import { SecurityUtil } from "../security/util"
 import { Log } from "../util/log"
 
 const securityLog = Log.create({ service: "security-write" })
@@ -34,7 +35,7 @@ export const WriteTool = Tool.define("write", {
 
     // Security access control check for write operation
     const config = SecurityConfig.getSecurityConfig()
-    const currentRole = getDefaultRole(config)
+    const currentRole = SecurityUtil.getDefaultRole(config)
     const accessResult = SecurityAccess.checkAccess(filepath, "write", currentRole)
 
     securityLog.debug("write access check", {
@@ -94,6 +95,9 @@ export const WriteTool = Tool.define("write", {
       output += `\n\nLSP errors detected in other files:\n<diagnostics file="${file}">\n${limited.map(LSP.Diagnostic.pretty).join("\n")}${suffix}\n</diagnostics>`
     }
 
+    const advisory = await CommentChecker.check(params.content, filepath).catch(() => undefined)
+    if (advisory) output += `\n\n${advisory}`
+
     return {
       title: path.relative(Instance.worktree, filepath),
       metadata: {
@@ -106,17 +110,3 @@ export const WriteTool = Tool.define("write", {
   },
 })
 
-/**
- * Get the default role from security config.
- * Returns the lowest level role, or "viewer" if no roles defined.
- * Note: This is a placeholder until US-027 implements proper role detection.
- */
-function getDefaultRole(config: SecuritySchema.SecurityConfig): string {
-  const roles = config.roles ?? []
-  if (roles.length === 0) {
-    return "viewer"
-  }
-  // Find the role with the lowest level (least privileges)
-  const lowestRole = roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0])
-  return lowestRole.name
-}

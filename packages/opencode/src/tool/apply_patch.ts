@@ -12,6 +12,7 @@ import { trimDiff } from "./edit"
 import { LSP } from "../lsp"
 import { Filesystem } from "../util/filesystem"
 import DESCRIPTION from "./apply_patch.txt"
+import { CommentChecker } from "./comment_checker"
 import { File } from "../file"
 
 const PatchParams = z.object({
@@ -265,6 +266,16 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
         const suffix =
           errors.length > MAX_DIAGNOSTICS_PER_FILE ? `\n... and ${errors.length - MAX_DIAGNOSTICS_PER_FILE} more` : ""
         output += `\n\nLSP errors detected in ${path.relative(Instance.worktree, target)}, please fix:\n<diagnostics file="${target}">\n${limited.map(LSP.Diagnostic.pretty).join("\n")}${suffix}\n</diagnostics>`
+      }
+    }
+
+    for (const change of fileChanges) {
+      if (change.type === "delete") continue
+      const target = change.movePath ?? change.filePath
+      const advisory = await CommentChecker.check(change.newContent, target).catch(() => undefined)
+      if (advisory) {
+        output += `\n\n${advisory}`
+        break
       }
     }
 

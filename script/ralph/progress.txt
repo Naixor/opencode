@@ -13,6 +13,18 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - Both ty and pyright LSP servers now coexist — user config's `lsp` section can disable either
 ---
 
+## 2026-02-13 - US-011
+- What was implemented: Integrated CommentChecker.check() into edit.ts, write.ts, and apply_patch.ts
+- Files changed:
+  - packages/opencode/src/tool/edit.ts — import CommentChecker, call check() on contentNew before return
+  - packages/opencode/src/tool/write.ts — import CommentChecker, call check() on params.content before return
+  - packages/opencode/src/tool/apply_patch.ts — import CommentChecker, call check() on newContent for first non-delete change
+- **Learnings for future iterations:**
+  - CommentChecker.check() is async (reads Config) — use .catch(() => undefined) to prevent tool failure
+  - For apply_patch, break after first advisory to avoid redundant messages
+  - The advisory is appended to output string, not metadata
+---
+
 ## 2026-02-13 - US-008, US-009, US-010, US-012, US-013
 - What was implemented: Verified all five stories already implemented in commit 5f4dca313
 - Files already in place:

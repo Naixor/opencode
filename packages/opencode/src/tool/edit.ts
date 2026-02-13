@@ -17,10 +17,12 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Snapshot } from "@/snapshot"
 import { assertExternalDirectory } from "./external-directory"
+import { CommentChecker } from "./comment_checker"
 import { SecurityAccess } from "../security/access"
 import { SecurityConfig } from "../security/config"
 import { SecuritySchema } from "../security/schema"
 import { SecuritySegments } from "../security/segments"
+import { SecurityUtil } from "../security/util"
 import { Log } from "../util/log"
 
 const MAX_DIAGNOSTICS_PER_FILE = 20
@@ -52,7 +54,7 @@ export const EditTool = Tool.define("edit", {
 
     // Security access control check
     const config = SecurityConfig.getSecurityConfig()
-    const currentRole = getDefaultRole(config)
+    const currentRole = SecurityUtil.getDefaultRole(config)
 
     // Check file-level access for write operation
     const accessResult = SecurityAccess.checkAccess(filePath, "write", currentRole)
@@ -185,6 +187,9 @@ export const EditTool = Tool.define("edit", {
         errors.length > MAX_DIAGNOSTICS_PER_FILE ? `\n... and ${errors.length - MAX_DIAGNOSTICS_PER_FILE} more` : ""
       output += `\n\nLSP errors detected in this file, please fix:\n<diagnostics file="${filePath}">\n${limited.map(LSP.Diagnostic.pretty).join("\n")}${suffix}\n</diagnostics>`
     }
+
+    const advisory = await CommentChecker.check(contentNew, filePath).catch(() => undefined)
+    if (advisory) output += `\n\n${advisory}`
 
     return {
       metadata: {
@@ -698,54 +703,6 @@ export function replace(content: string, oldString: string, newString: string, r
   )
 }
 
-/**
- * Get the default role from security config.
- * Returns the lowest level role, or "viewer" if no roles defined.
- * Note: This is a placeholder until US-027 implements proper role detection.
- */
-function getDefaultRole(config: SecuritySchema.SecurityConfig): string {
-  const roles = config.roles ?? []
-  if (roles.length === 0) {
-    return "viewer"
-  }
-  // Find the role with the lowest level (least privileges)
-  const lowestRole = roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0])
-  return lowestRole.name
-}
-
-/**
- * Get the level for a given role name.
- */
-function getRoleLevel(roleName: string, roles: SecuritySchema.Role[]): number {
-  const role = roles.find((r) => r.name === roleName)
-  return role?.level ?? 0
-}
-
-/**
- * Check if a role is allowed based on role hierarchy.
- * Higher level roles can access content allowed for lower levels.
- */
-function isRoleAllowed(
-  roleName: string,
-  roleLevel: number,
-  allowedRoles: string[],
-  allRoles: SecuritySchema.Role[],
-): boolean {
-  // Direct match
-  if (allowedRoles.includes(roleName)) {
-    return true
-  }
-
-  // Check role hierarchy - higher level roles can access lower level content
-  for (const allowedRoleName of allowedRoles) {
-    const allowedRoleLevel = getRoleLevel(allowedRoleName, allRoles)
-    if (roleLevel > allowedRoleLevel) {
-      return true
-    }
-  }
-
-  return false
-}
 
 interface ProtectedSegment {
   start: number
@@ -769,17 +726,13 @@ function findProtectedSegments(
     return segments
   }
 
-  const roles = config.roles ?? []
-  const roleLevel = getRoleLevel(currentRole, roles)
-
   // Find marker-based segments
   if (segmentsConfig.markers && segmentsConfig.markers.length > 0) {
     const markerSegments = SecuritySegments.findMarkerSegments(content, segmentsConfig.markers)
     for (const segment of markerSegments) {
-      // Check if this segment denies "write" and the role is not allowed
       if (
         segment.rule.deniedOperations.includes("write") &&
-        !isRoleAllowed(currentRole, roleLevel, segment.rule.allowedRoles, roles)
+        !SecurityUtil.isRoleAllowed(currentRole, segment.rule.allowedRoles, config)
       ) {
         segments.push({ start: segment.start, end: segment.end })
       }
@@ -790,10 +743,9 @@ function findProtectedSegments(
   if (segmentsConfig.ast && segmentsConfig.ast.length > 0) {
     const astSegments = SecuritySegments.findASTSegments(filepath, content, segmentsConfig.ast)
     for (const segment of astSegments) {
-      // Check if this segment denies "write" and the role is not allowed
       if (
         segment.rule.deniedOperations.includes("write") &&
-        !isRoleAllowed(currentRole, roleLevel, segment.rule.allowedRoles, roles)
+        !SecurityUtil.isRoleAllowed(currentRole, segment.rule.allowedRoles, config)
       ) {
         segments.push({ start: segment.start, end: segment.end })
       }
