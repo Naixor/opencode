@@ -109,3 +109,23 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Per-session cache maps using `sessionID` as key allow testing cache hit/miss behavior; expose `getXxxCache()` methods for test assertions
   - `Bun.Glob.scan()` with `cwd` pointing to non-existent directory throws — wrap in try/catch to gracefully skip missing rule dirs
 ---
+
+## 2026-02-14 - US-005
+- Implemented 4 detection/checking hooks in `packages/opencode/src/session/hooks/detection-checking.ts`
+  - `keyword-detector` (PreLLMChain, priority 200): detects mode keywords ([ultrawork]/ulw -> 'max', [analyze-mode] -> 'analyze', [review-mode] -> 'review') in last user message, sets ctx.variant
+  - `comment-checker` (PostToolChain, priority 400): after edit/write tool success, calculates comment line ratio in new_string/content; warns if >40% (configurable threshold)
+  - `empty-task-response-detector` (PostToolChain, priority 350): detects empty/minimal (<10 chars) responses from delegate_task/task, injects warning
+  - `write-existing-file-guard` (PreToolChain, priority 200): checks if write tool targets existing file via `Bun.file().exists()`, injects warning into args._warning
+- Each hook individually toggleable via config
+- 23 unit tests all passing, 1424 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/hooks/detection-checking.ts` (new)
+  - `packages/opencode/test/session/hooks/detection-checking.test.ts` (new)
+- **Learnings for future iterations:**
+  - PreToolChain hooks run before tool execution so there's no output to modify — use `ctx.args._warning` to inject warnings that the tool/agent can read
+  - `getLastUserMessage()` helper iterates messages backwards to find the most recent user message, supporting both string and multipart content formats
+  - Comment detection uses simple prefix matching (// # /* * <!-- --) which covers most languages; a more sophisticated approach would use language-specific comment patterns
+  - `Bun.file().exists()` is async and works with absolute paths; test fixtures should use `fs.writeFileSync()` to create test files before checking existence
+  - The `withInstance` helper can pass `tmpPath` to test functions that need to create files on disk (e.g., for write-existing-file-guard)
+---
