@@ -104,7 +104,7 @@ From AGENTS.md - these are enforced preferences:
 
 ## Important Notes
 
-- **Default branch:** `dev` (not main)
+- **Default branch:** `master` (not dev, dev is origin opencode source)
 - **Always use parallel tools** when applicable
 - **Regenerate SDK** after API changes: `./script/generate.ts`
 - **PR titles:** Follow conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`)
