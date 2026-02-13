@@ -1119,6 +1119,15 @@ export namespace Config {
           prune: z.boolean().optional().describe("Enable pruning of old tool outputs (default: true)"),
         })
         .optional(),
+      hooks: z
+        .record(
+          z.string(),
+          z.object({
+            enabled: z.boolean().describe("Enable or disable this hook"),
+          }),
+        )
+        .optional()
+        .describe("Hook configuration: enable or disable individual hooks by name"),
       experimental: z
         .object({
           disable_paste_summary: z.boolean().optional(),
