@@ -54,6 +54,9 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Skill frontmatter supports optional fields: `mcp` (string[]) and `agent` (string[]) — parsed via `Info.pick({ name, description, mcp, agent })`
 - Skill lazy loading: content >50KB stored as "" on discovery, loaded on first `Skill.get()` — `lazyContent` Map tracks which skills need loading
 - `Skill.extractInstruction(content)` extracts `<skill-instruction>` blocks for returning only instruction content from skill templates
+- Built-in skills: stored as `SKILL.md` in `src/skill/builtin/<name>/SKILL.md`, loaded first in `Skill.state()` so user-defined skills override. Disable with `OPENCODE_DISABLE_BUILTIN_SKILLS` env var
+- Built-in commands: `.txt` templates in `src/command/template/`, imported via Bun text loader. User config `command` section overrides built-ins by key name
+- Skills with `<skill-instruction>` blocks: only that block is returned on execute, not the full content — useful for built-in skills with documentation sections
 
 ---
 
@@ -821,4 +824,41 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - The `MCP.status()` function must also call `BuiltinMcp.resolve()` to include built-in servers in the status listing, since state init only runs once
   - Built-in configs use `oauth: false` to disable OAuth auto-detection — these servers use API key auth via headers
   - Mock pattern for SecurityConfig in MCP tests: use mutable `let mockMcpPolicy` variable that test cases reassign before calling resolve()
+---
+
+## 2026-02-14 - US-029
+- Implemented built-in skills and commands for OpenCode core
+  - **Built-in Skills** (2): `git-master` (atomic commit generation, conventional commit enforcement) and `playwright` (browser automation for testing)
+    - Stored in `packages/opencode/src/skill/builtin/<name>/SKILL.md` as standard SKILL.md files with YAML frontmatter
+    - Both use `<skill-instruction>` blocks for focused content extraction
+    - Loaded first in `Skill.state()` before user-defined skills, so user skills override by name
+    - Disable via `OPENCODE_DISABLE_BUILTIN_SKILLS` env var (runtime-checked, not module-load-time)
+  - **Built-in Commands** (4): `compact` (context summary), `debug` (systematic debugging), `test` (run tests/fix failures), `explain` (code explanation)
+    - Stored as `.txt` templates in `packages/opencode/src/command/template/`
+    - Imported via Bun text loader alongside existing `init` and `review` templates
+    - User config `command` section overrides built-in commands by key name (existing precedence pattern)
+  - **User Override**: skills and commands follow the same override pattern — built-ins loaded first, user-defined loaded after and overwrite by name
+  - **Skill Permission Filtering**: built-in skills respect PermissionNext rules (same as user skills — no special handling needed)
+  - **SecurityAccess**: built-in commands are `source: "command"` (templates processed through same security pipeline as all commands)
+- Updated existing `skill.test.ts` to disable built-in skills via env var for isolated testing of user-defined skill discovery
+- 11 new unit tests all passing, 52 total skill tests pass, 356 agent/hook/config tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/skill/builtin/git-master/SKILL.md` (new)
+  - `packages/opencode/src/skill/builtin/playwright/SKILL.md` (new)
+  - `packages/opencode/src/skill/skill.ts` (modified — added built-in skill loading, isBuiltin, builtinDir)
+  - `packages/opencode/src/command/index.ts` (modified — added 4 new built-in commands)
+  - `packages/opencode/src/command/template/compact.txt` (new)
+  - `packages/opencode/src/command/template/debug.txt` (new)
+  - `packages/opencode/src/command/template/test.txt` (new)
+  - `packages/opencode/src/command/template/explain.txt` (new)
+  - `packages/opencode/test/skill/builtin-skills.test.ts` (new)
+  - `packages/opencode/test/skill/skill.test.ts` (modified — added OPENCODE_DISABLE_BUILTIN_SKILLS for test isolation)
+- **Learnings for future iterations:**
+  - Built-in skills use `BUILTIN_DIR = path.resolve(fileURLToPath(import.meta.url), "..", "builtin")` to resolve the built-in directory relative to the source file
+  - `process.env.OPENCODE_DISABLE_BUILTIN_SKILLS` is checked at runtime (not module load) since `Skill.state()` is lazy — allows tests to toggle without flag module changes
+  - The `addSkill` function's duplicate name warning provides visibility when user skills override built-ins — no separate handling needed
+  - Built-in skills are always discoverable regardless of tmpdir path since BUILTIN_DIR resolves from source — existing tests need env var to disable for count assertions
+  - Skills with `<skill-instruction>` blocks are ideal for built-ins: the full SKILL.md serves as documentation, while only the instruction block is returned to the agent
+  - Command override order: built-in defaults first -> user config commands (overwrite) -> MCP prompts (overwrite) -> skills as commands (skip if exists)
 ---

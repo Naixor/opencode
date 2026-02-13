@@ -1,0 +1,10 @@
+Summarize the current conversation context and outstanding tasks. Provide a concise overview of:
+
+1. What has been accomplished so far
+2. What tasks remain (check todos if any)
+3. Key decisions made
+4. Current state of the codebase changes
+
+Keep the summary brief and actionable. This will be used to restore context after compaction.
+
+$ARGUMENTS

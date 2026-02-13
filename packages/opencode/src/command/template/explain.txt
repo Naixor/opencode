@@ -1,0 +1,11 @@
+Explain the specified code, file, or concept in detail. Provide:
+
+1. **Overview**: What does this code/file do at a high level?
+2. **Key components**: Break down the main parts and their responsibilities
+3. **Data flow**: How does data move through the code?
+4. **Dependencies**: What does this code depend on and what depends on it?
+5. **Edge cases**: Important edge cases or error handling to be aware of
+
+Adjust the depth of explanation based on complexity. Be concise for simple code, more detailed for complex logic.
+
+Target: $ARGUMENTS

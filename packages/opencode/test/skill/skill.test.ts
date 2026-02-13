@@ -1,8 +1,16 @@
-import { test, expect } from "bun:test"
+import { test, expect, beforeEach, afterEach } from "bun:test"
 import { Skill } from "../../src/skill"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import path from "path"
+
+// Disable built-in skills for these tests so they test user-defined skill discovery in isolation
+beforeEach(() => {
+  process.env.OPENCODE_DISABLE_BUILTIN_SKILLS = "1"
+})
+afterEach(() => {
+  delete process.env.OPENCODE_DISABLE_BUILTIN_SKILLS
+})
 import fs from "fs/promises"
 
 async function createGlobalSkill(homeDir: string) {

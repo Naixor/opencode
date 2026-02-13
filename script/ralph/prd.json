@@ -739,8 +739,8 @@
         "Typecheck passes"
       ],
       "priority": 29,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Built-in skills: git-master, playwright in src/skill/builtin/. Built-in commands: compact, debug, test, explain in src/command/template/. Disable via OPENCODE_DISABLE_BUILTIN_SKILLS env var."
     },
     {
       "id": "US-030",

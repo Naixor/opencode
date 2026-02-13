@@ -5,6 +5,10 @@ import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
+import PROMPT_COMPACT from "./template/compact.txt"
+import PROMPT_DEBUG from "./template/debug.txt"
+import PROMPT_TEST from "./template/test.txt"
+import PROMPT_EXPLAIN from "./template/explain.txt"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
 
@@ -54,6 +58,10 @@ export namespace Command {
   export const Default = {
     INIT: "init",
     REVIEW: "review",
+    COMPACT: "compact",
+    DEBUG: "debug",
+    TEST: "test",
+    EXPLAIN: "explain",
   } as const
 
   const state = Instance.state(async () => {
@@ -78,6 +86,42 @@ export namespace Command {
         },
         subtask: true,
         hints: hints(PROMPT_REVIEW),
+      },
+      [Default.COMPACT]: {
+        name: Default.COMPACT,
+        description: "summarize conversation context and outstanding tasks",
+        source: "command",
+        get template() {
+          return PROMPT_COMPACT
+        },
+        hints: hints(PROMPT_COMPACT),
+      },
+      [Default.DEBUG]: {
+        name: Default.DEBUG,
+        description: "systematic debugging of an issue",
+        source: "command",
+        get template() {
+          return PROMPT_DEBUG
+        },
+        hints: hints(PROMPT_DEBUG),
+      },
+      [Default.TEST]: {
+        name: Default.TEST,
+        description: "run tests and fix failures",
+        source: "command",
+        get template() {
+          return PROMPT_TEST
+        },
+        hints: hints(PROMPT_TEST),
+      },
+      [Default.EXPLAIN]: {
+        name: Default.EXPLAIN,
+        description: "explain code, file, or concept in detail",
+        source: "command",
+        get template() {
+          return PROMPT_EXPLAIN
+        },
+        hints: hints(PROMPT_EXPLAIN),
       },
     }
 

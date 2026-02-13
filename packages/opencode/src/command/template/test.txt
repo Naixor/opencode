@@ -1,0 +1,10 @@
+Run the test suite and analyze results. If tests fail, investigate and fix the failures.
+
+Strategy:
+1. Run the relevant test command for this project
+2. If tests pass, report success with a summary
+3. If tests fail, analyze the failure output to understand root cause
+4. Fix test failures (distinguish between broken tests vs broken code)
+5. Re-run tests to confirm fixes
+
+$ARGUMENTS
