@@ -1030,6 +1030,7 @@ export namespace Config {
           general: Agent.optional(),
           explore: Agent.optional(),
           "omo-explore": Agent.optional(),
+          oracle: Agent.optional(),
           // specialized
           title: Agent.optional(),
           summary: Agent.optional(),

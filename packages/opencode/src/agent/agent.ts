@@ -12,6 +12,7 @@ import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_OMO_EXPLORE from "./prompt/omo-explore.txt"
+import PROMPT_ORACLE from "./prompt/oracle.txt"
 import PROMPT_SISYPHUS from "./prompt/sisyphus.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
@@ -197,6 +198,35 @@ export namespace Agent {
           user,
         ),
         prompt: PROMPT_OMO_EXPLORE,
+        options: {},
+        mode: "subagent",
+        native: true,
+      },
+      oracle: {
+        name: "oracle",
+        description:
+          "Strategic advisor for hard debugging problems and architecture decisions. Read-only analysis with effort estimation.",
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            bash: "allow",
+            read: "allow",
+            lsp: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+        prompt: PROMPT_ORACLE,
+        temperature: 0.1,
         options: {},
         mode: "subagent",
         native: true,
