@@ -13,6 +13,18 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - Both ty and pyright LSP servers now coexist — user config's `lsp` section can disable either
 ---
 
+## 2026-02-13 - US-016
+- What was implemented: Created CLI command for plugin audit
+- Files changed:
+  - packages/opencode/src/cli/cmd/plugin/audit.ts — new PluginAuditCommand using cmd() pattern
+  - packages/opencode/src/cli/cmd/plugin/index.ts — PluginCommand group with audit subcommand
+  - packages/opencode/src/index.ts — imported and registered PluginCommand
+- **Learnings for future iterations:**
+  - CLI commands use cmd() helper from cmd.ts for type-safe yargs modules
+  - Subcommand groups use .demandCommand() in builder to require a subcommand
+  - process.exit(1) on critical findings, 0 otherwise
+---
+
 ## 2026-02-13 - US-015
 - What was implemented: Switched messages.transform clone from remeda clone() to structuredClone()
 - Files changed:

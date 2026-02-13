@@ -290,8 +290,8 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "PluginAudit module existed; added CLI command at cli/cmd/plugin/audit.ts, registered in index.ts as 'opencode plugin audit <target>'"
     },
     {
       "id": "US-017",
