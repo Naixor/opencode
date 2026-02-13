@@ -218,6 +218,7 @@ export namespace Config {
         log.debug("loading config from OPENCODE_CONFIG_DIR", { path: Flag.OPENCODE_CONFIG_DIR })
       }
 
+      const pendingInstalls: string[] = []
       for (const dir of unique(dirs)) {
         if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
           for (const file of ["opencode.jsonc", "opencode.json"]) {
@@ -232,13 +233,39 @@ export namespace Config {
 
         const shouldInstall = await needsInstall(dir)
         if (shouldInstall) {
-          await installDependencies(dir)
+          pendingInstalls.push(dir)
         }
 
         result.command = mergeDeep(result.command ?? {}, await loadCommand(dir))
         result.agent = mergeDeep(result.agent ?? {}, await loadAgent(dir))
         result.agent = mergeDeep(result.agent ?? {}, await loadMode(dir))
         result.plugin!.push(...(await loadPlugin(dir)))
+      }
+
+      // Defer dependency installation to background — don't block Config.state() from returning
+      if (pendingInstalls.length) {
+        const INSTALL_TIMEOUT_MS = 30_000
+        Promise.all(
+          pendingInstalls.map((dir) =>
+            Promise.race([
+              installDependencies(dir),
+              new Promise<void>((_, reject) =>
+                setTimeout(() => reject(new Error(`install timeout for ${dir}`)), INSTALL_TIMEOUT_MS),
+              ),
+            ]),
+          ),
+        )
+          .then(() => {
+            log.info("background dependency install complete, reloading config", {
+              directories: pendingInstalls,
+            })
+            return Instance.dispose()
+          })
+          .catch((err) => {
+            log.warn("background dependency install failed", {
+              error: err instanceof Error ? err.message : String(err),
+            })
+          })
       }
 
       return dirs
