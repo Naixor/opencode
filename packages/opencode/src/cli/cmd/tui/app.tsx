@@ -171,6 +171,7 @@ export function tui(input: {
   // promise to prevent immediate exit
   return new Promise<void>(async (resolve) => {
     const mode = await StartupTrace.measure("terminal-bg-detect", getTerminalBackgroundColor)
+    StartupTrace.record("tui-first-frame", Math.round(performance.now()))
     const onExit = async () => {
       await input.onExit?.()
       resolve()
