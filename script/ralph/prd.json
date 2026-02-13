@@ -122,8 +122,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already implemented — prepareRename and rename operations in LspTool union, LSP.prepareRename() and LSP.rename() in lsp/index.ts using textDocument/prepareRename and textDocument/rename requests"
     },
     {
       "id": "US-008",

@@ -13,6 +13,16 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - Both ty and pyright LSP servers now coexist — user config's `lsp` section can disable either
 ---
 
+## 2026-02-13 - US-007
+- What was implemented: Verified prepareRename and rename already implemented (commit 5f4dca313)
+- Files changed: None
+  - packages/opencode/src/tool/lsp.ts — operations union includes prepareRename, rename; newName param
+  - packages/opencode/src/lsp/index.ts — LSP.prepareRename() and LSP.rename() methods
+- **Learnings for future iterations:**
+  - LSP rename returns WorkspaceEdit (JSON) — currently tool returns it raw, doesn't write files
+  - All LSP position-based operations use 0-based indexing (tool converts from 1-based user input)
+---
+
 ## 2026-02-13 - US-006
 - What was implemented: Removed OPENCODE_EXPERIMENTAL_LSP_TY flag; added filePath/severity params to LSP.diagnostics()
 - Files changed:
