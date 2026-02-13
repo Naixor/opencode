@@ -827,7 +827,7 @@
         "Typecheck passes"
       ],
       "priority": 32,
-      "passes": false,
+      "passes": true,
       "notes": "AD-12: manual script + CI template, no postinstall hook"
     },
     {

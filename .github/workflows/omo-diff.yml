@@ -1,0 +1,56 @@
+name: omo-diff
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Every Monday at 09:00 UTC
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  diff:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Setup git committer
+        id: committer
+        uses: ./.github/actions/setup-git-committer
+        with:
+          opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
+          opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
+
+      - name: Run OMO diff
+        id: diff
+        run: |
+          bun run script/omo-diff.ts --update-baseline 2>&1 | tee /tmp/omo-diff-output.txt
+          echo "has_changes=$(git status --porcelain | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and create PR
+        if: steps.diff.outputs.has_changes != '0'
+        run: |
+          BRANCH="chore/omo-diff-$(date +%Y%m%d)"
+          git checkout -b "$BRANCH"
+          git add tasks/omo-diff-report-*.md packages/opencode/.omo-baseline.json
+          git commit -m "chore: OMO upstream diff report"
+          git push origin "$BRANCH" --no-verify
+          gh pr create \
+            --title "chore: OMO upstream diff report" \
+            --body "$(cat <<'EOF'
+          ## OMO Upstream Diff Report
+
+          Automated weekly diff report comparing internalized OMO components against the latest `oh-my-opencode` npm release.
+
+          Review the diff report in the `tasks/` directory for details on new, modified, or diverged components.
+
+          🤖 Generated automatically by the OMO diff workflow.
+          EOF
+          )" \
+            --base dev
+        env:
+          GH_TOKEN: ${{ steps.committer.outputs.token }}

@@ -3,6 +3,7 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 
 ## Codebase Patterns
 - **Bun mock.module contamination**: `mock.module()` is process-wide in Bun — mocking any module in one test file affects ALL other test files in the same `bun test` run. Integration tests using real SecurityConfig must be isolated from unit tests that mock `security/config`
+- **Root scripts vs workspace deps**: Scripts in `script/` at repo root cannot import workspace-only packages (like `zod`). Use plain types and manual validation for standalone scripts
 - Use `Instance.state()` with synchronous initializer for per-instance state that needs synchronous access (like Bus does); use async initializer only when lazy async loading is needed
 - Built-in MCP servers: defined in `packages/opencode/src/mcp/builtin.ts`, auto-enabled by API key env vars, disabled via `disabled_mcps` config. User configs override built-in via spread order
 - Hook chain uses priority-based ordering: lower priority number = runs earlier (security hooks ~10-50, transform ~100-200, output ~300-500)
@@ -921,4 +922,35 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Integration test files should avoid `mock.module` entirely — use real module implementations for end-to-end verification
   - `tmpdir()` fixture already resolves realpath internally (important for macOS `/var/folders` vs `/private/var/folders`)
   - PostToolContext requires `agent` field — always include it in test context objects
+---
+
+## 2026-02-14 - US-032
+- Implemented OMO upstream diff reporting tool as `script/omo-diff.ts`
+  - Fetches latest `oh-my-opencode` from npm registry (`fetchNpmVersion`)
+  - Downloads and extracts tarball to temp directory (`downloadAndExtract`)
+  - Reads/writes baseline file with defaults for missing fields (`readBaseline`/`writeBaseline`/`parseBaseline`)
+  - Scans extracted package directory for tools, hooks, agents, config files, and dependencies (`scanPackage`)
+  - Categorizes changes: "backport recommended" (new), "review needed" (internalized modified), "skip (diverged)" (skipped modified)
+  - Impact analysis maps each component to affected opencode files via static impact maps
+  - Generates structured markdown diff report with summary, per-section tables, and impact analysis
+  - Supports `--update-baseline` flag to update baseline version after comparison
+  - Exit codes: 0 for success, 1 for error
+- Created `.github/workflows/omo-diff.yml` CI workflow
+  - Weekly schedule: Monday 09:00 UTC + manual `workflow_dispatch` trigger
+  - Steps: checkout -> setup bun -> setup git committer -> run omo-diff.ts -> commit report + open PR if changes
+  - Does NOT run on bun install (no postinstall hook)
+- 34 unit tests all passing, typecheck passes
+- Files changed:
+  - `script/omo-diff.ts` (new)
+  - `.github/workflows/omo-diff.yml` (new)
+  - `packages/opencode/test/script/omo-diff.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-032 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - Scripts in `script/` at repo root cannot import workspace-only dependencies like `zod` — use plain types and manual validation for standalone scripts
+  - Test files in `packages/opencode/test/` importing root-level scripts need `../../../../script/` relative path
+  - The `parseBaseline()` function replaces Zod schema parsing for baseline validation — manually applies defaults for each field
+  - Impact maps (TOOL_IMPACT_MAP, HOOK_IMPACT_MAP, AGENT_IMPACT_MAP) provide static mappings from component names to affected opencode source files
+  - CI workflow uses `gh pr create` with heredoc body for markdown formatting
+  - `fs.mkdtempSync` + `fs.rmSync` for temp directory lifecycle in tests — cleanup in each test to avoid leaks
 ---
