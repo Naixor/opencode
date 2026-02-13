@@ -11,6 +11,7 @@ import { CodexAuthPlugin } from "./codex"
 import { Session } from "../session"
 import { NamedError } from "@opencode-ai/util/error"
 import { CopilotAuthPlugin } from "./copilot"
+import { BuiltIn } from "./builtin"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
@@ -35,6 +36,7 @@ export namespace Plugin {
       directory: Instance.directory,
       serverUrl: Server.url(),
       $: Bun.$,
+      hasBuiltIn: BuiltIn.has,
     }
 
     for (const plugin of INTERNAL_PLUGINS) {

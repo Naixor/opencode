@@ -8,11 +8,47 @@
 import { minimatch } from "minimatch"
 import type { AccessEvent, AccessOperation, MonitorConfig } from "./types"
 
-const READ_SYSCALLS = new Set(["open", "read", "stat", "stat64", "lstat", "lstat64", "readlink", "access", "pread", "getattrlist", "getxattr", "listxattr", "fstat", "fstat64", "open_nocancel", "read_nocancel", "pread_nocancel"])
+const READ_SYSCALLS = new Set([
+  "open",
+  "read",
+  "stat",
+  "stat64",
+  "lstat",
+  "lstat64",
+  "readlink",
+  "access",
+  "pread",
+  "getattrlist",
+  "getxattr",
+  "listxattr",
+  "fstat",
+  "fstat64",
+  "open_nocancel",
+  "read_nocancel",
+  "pread_nocancel",
+])
 
-const WRITE_SYSCALLS = new Set(["write", "pwrite", "truncate", "ftruncate", "write_nocancel", "pwrite_nocancel", "fsetxattr", "setattrlist"])
+const WRITE_SYSCALLS = new Set([
+  "write",
+  "pwrite",
+  "truncate",
+  "ftruncate",
+  "write_nocancel",
+  "pwrite_nocancel",
+  "fsetxattr",
+  "setattrlist",
+])
 
-const CREATE_SYSCALLS = new Set(["creat", "mkdir", "symlink", "link", "mkdirat", "symlinkat", "linkat", "open_nocancel"])
+const CREATE_SYSCALLS = new Set([
+  "creat",
+  "mkdir",
+  "symlink",
+  "link",
+  "mkdirat",
+  "symlinkat",
+  "linkat",
+  "open_nocancel",
+])
 
 const DELETE_SYSCALLS = new Set(["unlink", "rmdir", "unlinkat", "removexattr"])
 

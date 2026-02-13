@@ -85,11 +85,24 @@ export namespace LLM {
 
     const header = system[0]
     const original = clone(system)
+    const config = SecurityConfig.getSecurityConfig()
+    const hasRules = (config.rules?.length ?? 0) > 0 || config.segments !== undefined
+    const redactedSystem = hasRules
+      ? system.map((s) => {
+          const matches = LLMScanner.scanForProtectedContent(s, config)
+          return matches.length > 0 ? SecurityRedact.redactContent(s, matches) : s
+        })
+      : system
+    const pluginSystem = hasRules ? [...redactedSystem] : system
     await Plugin.trigger(
       "experimental.chat.system.transform",
       { sessionID: input.sessionID, model: input.model },
-      { system },
+      { system: pluginSystem },
     )
+    if (hasRules && pluginSystem.length > 0) {
+      system.length = 0
+      system.push(...pluginSystem)
+    }
     if (system.length === 0) {
       system.push(...original)
     }
@@ -443,7 +456,10 @@ export namespace LLM {
             path: "outgoing-request",
             allowed: false,
             reason: `Protected content detected in LLM request (${violation.match.ruleType} rule)`,
-            rulePattern: "rulePattern" in violation.match.rule ? (violation.match.rule as { rulePattern: string }).rulePattern : undefined,
+            rulePattern:
+              "rulePattern" in violation.match.rule
+                ? (violation.match.rule as { rulePattern: string }).rulePattern
+                : undefined,
             content: violation.text,
           })
         }
@@ -463,9 +479,7 @@ export namespace LLM {
 
         // If there are block violations, throw error
         if (blockViolations.length > 0) {
-          const details = blockViolations
-            .map((v) => `${v.match.ruleType}: "${v.text}..."`)
-            .join(", ")
+          const details = blockViolations.map((v) => `${v.match.ruleType}: "${v.text}..."`).join(", ")
           securityLog.info("blocked LLM request due to protected content", { count: blockViolations.length })
           throw new Error(
             `Security: LLM request blocked - protected content detected (${blockViolations.length} violation(s): ${details})`,

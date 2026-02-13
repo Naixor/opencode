@@ -30,6 +30,7 @@ export type PluginInput = {
   worktree: string
   serverUrl: URL
   $: BunShell
+  hasBuiltIn: (feature: string) => boolean
 }
 
 export type Plugin = (input: PluginInput) => Promise<Hooks>

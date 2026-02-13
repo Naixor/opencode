@@ -7,12 +7,7 @@ import { SecurityConfig } from "@/security/config"
 import { SecuritySchema } from "@/security/schema"
 import { SecuritySegments } from "@/security/segments"
 import { SecurityRedact } from "@/security/redact"
-import {
-  setupSecurityConfig,
-  teardownSecurityConfig,
-  loadBaseConfig,
-  protectedFilePath,
-} from "../helpers"
+import { setupSecurityConfig, teardownSecurityConfig, loadBaseConfig, protectedFilePath } from "../helpers"
 
 afterEach(() => {
   teardownSecurityConfig()
@@ -117,7 +112,8 @@ describe("CASE-GREP-002: Grep match inside @secure-start/@secure-end region is r
     const protectedSegments: SecurityRedact.Segment[] = []
     for (const seg of markerSegments) {
       if (seg.rule.deniedOperations.includes("read")) {
-        const allowed = seg.rule.allowedRoles.includes(currentRole) ||
+        const allowed =
+          seg.rule.allowedRoles.includes(currentRole) ||
           seg.rule.allowedRoles.some((ar) => {
             const arLevel = roles.find((r) => r.name === ar)?.level ?? 0
             return roleLevel > arLevel
@@ -135,9 +131,7 @@ describe("CASE-GREP-002: Grep match inside @secure-start/@secure-end region is r
     const lineStartPos = content.indexOf(lineText)
     const lineEndPos = lineStartPos + lineText.length
 
-    const isProtected = protectedSegments.some(
-      (seg) => lineStartPos < seg.end && lineEndPos > seg.start,
-    )
+    const isProtected = protectedSegments.some((seg) => lineStartPos < seg.end && lineEndPos > seg.start)
     expect(isProtected).toBe(true)
 
     // When protected, grep tool replaces content with:
@@ -164,9 +158,7 @@ describe("CASE-GREP-002: Grep match inside @secure-start/@secure-end region is r
     const lineEndPos = lineStartPos + lineText.length
 
     const protectedSegments: SecurityRedact.Segment[] = [{ start: markerSegments[0].start, end: markerSegments[0].end }]
-    const isProtected = protectedSegments.some(
-      (seg) => lineStartPos < seg.end && lineEndPos > seg.start,
-    )
+    const isProtected = protectedSegments.some((seg) => lineStartPos < seg.end && lineEndPos > seg.start)
     expect(isProtected).toBe(false)
   })
 
@@ -197,7 +189,8 @@ describe("CASE-GREP-002: Grep match inside @secure-start/@secure-end region is r
     const protectedSegments: SecurityRedact.Segment[] = []
     for (const seg of astSegments) {
       if (seg.rule.deniedOperations.includes("read")) {
-        const allowed = seg.rule.allowedRoles.includes(currentRole) ||
+        const allowed =
+          seg.rule.allowedRoles.includes(currentRole) ||
           seg.rule.allowedRoles.some((ar) => {
             const arLevel = roles.find((r) => r.name === ar)?.level ?? 0
             return roleLevel > arLevel
@@ -212,9 +205,7 @@ describe("CASE-GREP-002: Grep match inside @secure-start/@secure-end region is r
     const lineStartPos = content.indexOf(lineText)
     const lineEndPos = lineStartPos + lineText.length
 
-    const isProtected = protectedSegments.some(
-      (seg) => lineStartPos < seg.end && lineEndPos > seg.start,
-    )
+    const isProtected = protectedSegments.some((seg) => lineStartPos < seg.end && lineEndPos > seg.start)
     expect(isProtected).toBe(true)
   })
 
@@ -233,7 +224,8 @@ describe("CASE-GREP-002: Grep match inside @secure-start/@secure-end region is r
     const protectedSegments: SecurityRedact.Segment[] = []
     for (const seg of markerSegments) {
       if (seg.rule.deniedOperations.includes("read")) {
-        const allowed = seg.rule.allowedRoles.includes(currentRole) ||
+        const allowed =
+          seg.rule.allowedRoles.includes(currentRole) ||
           seg.rule.allowedRoles.some((ar) => {
             const arLevel = roles.find((r) => r.name === ar)?.level ?? 0
             return roleLevel > arLevel
@@ -491,9 +483,7 @@ describe("CASE-GLOB-003: Glob tool does not leak filtered file count in output",
     expect(allowedFiles.map((f) => f.path)).toEqual(["src/app.ts", "src/util.ts"])
 
     // The output would only list allowed files — no mention of filtered count
-    const output = allowedFiles.length === 0
-      ? ["No files found"]
-      : allowedFiles.map((f) => f.path)
+    const output = allowedFiles.length === 0 ? ["No files found"] : allowedFiles.map((f) => f.path)
 
     // Verify the output does NOT contain any reference to filtered files
     const outputStr = output.join("\n")

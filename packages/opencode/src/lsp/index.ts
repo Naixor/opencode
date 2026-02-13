@@ -61,21 +61,6 @@ export namespace LSP {
     })
   export type DocumentSymbol = z.infer<typeof DocumentSymbol>
 
-  const filterExperimentalServers = (servers: Record<string, LSPServer.Info>) => {
-    if (Flag.OPENCODE_EXPERIMENTAL_LSP_TY) {
-      // If experimental flag is enabled, disable pyright
-      if (servers["pyright"]) {
-        log.info("LSP server pyright is disabled because OPENCODE_EXPERIMENTAL_LSP_TY is enabled")
-        delete servers["pyright"]
-      }
-    } else {
-      // If experimental flag is disabled, disable ty
-      if (servers["ty"]) {
-        delete servers["ty"]
-      }
-    }
-  }
-
   const state = Instance.state(
     async () => {
       const clients: LSPClient.Info[] = []
@@ -96,7 +81,16 @@ export namespace LSP {
         servers[server.id] = server
       }
 
-      filterExperimentalServers(servers)
+      if (Flag.OPENCODE_EXPERIMENTAL_LSP_TY) {
+        if (servers["pyright"]) {
+          log.info("LSP server pyright is disabled because OPENCODE_EXPERIMENTAL_LSP_TY is enabled")
+          delete servers["pyright"]
+        }
+      } else {
+        if (servers["ty"]) {
+          delete servers["ty"]
+        }
+      }
 
       for (const [name, item] of Object.entries(cfg.lsp ?? {})) {
         const existing = servers[name]
@@ -452,6 +446,29 @@ export namespace LSP {
       if (!items?.length) return []
       return client.connection.sendRequest("callHierarchy/outgoingCalls", { item: items[0] }).catch(() => [])
     }).then((result) => result.flat().filter(Boolean))
+  }
+
+  export async function prepareRename(input: { file: string; line: number; character: number }) {
+    return run(input.file, (client) =>
+      client.connection
+        .sendRequest("textDocument/prepareRename", {
+          textDocument: { uri: pathToFileURL(input.file).href },
+          position: { line: input.line, character: input.character },
+        })
+        .catch(() => null),
+    ).then((result) => result.flat().filter(Boolean))
+  }
+
+  export async function rename(input: { file: string; line: number; character: number; newName: string }) {
+    return run(input.file, (client) =>
+      client.connection
+        .sendRequest("textDocument/rename", {
+          textDocument: { uri: pathToFileURL(input.file).href },
+          position: { line: input.line, character: input.character },
+          newName: input.newName,
+        })
+        .catch(() => null),
+    ).then((result) => result.flat().filter(Boolean))
   }
 
   async function runAll<T>(input: (client: LSPClient.Info) => Promise<T>): Promise<T[]> {

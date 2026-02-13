@@ -52,10 +52,7 @@ describe("CASE-AUTH-001: All tools use getDefaultRole() instead of SecurityRole.
   // all users are treated as the lowest role.
 
   const toolFiles = ["read.ts", "write.ts", "edit.ts", "grep.ts", "glob.ts", "bash.ts"]
-  const toolDir = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
-    "../../../../src/tool",
-  )
+  const toolDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../../src/tool")
 
   for (const file of toolFiles) {
     test(`${file} uses getDefaultRole (not getCurrentRole)`, () => {
@@ -73,10 +70,7 @@ describe("CASE-AUTH-001: All tools use getDefaultRole() instead of SecurityRole.
   test("getDefaultRole always returns the lowest-level role from config", () => {
     const baseConfig = loadBaseConfig()
     const roles = baseConfig.roles ?? []
-    const lowestRole = roles.reduce(
-      (prev, curr) => (curr.level < prev.level ? curr : prev),
-      roles[0],
-    )
+    const lowestRole = roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0])
 
     // The lowest role should be "viewer" (level 10)
     expect(lowestRole.name).toBe("viewer")
@@ -98,10 +92,7 @@ describe("CASE-AUTH-001: All tools use getDefaultRole() instead of SecurityRole.
 
     // But tools use getDefaultRole which always returns the lowest role
     const roles = baseConfig.roles ?? []
-    const lowestRole = roles.reduce(
-      (prev, curr) => (curr.level < prev.level ? curr : prev),
-      roles[0],
-    )
+    const lowestRole = roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0])
     expect(lowestRole.name).toBe("viewer")
 
     // So even with an admin token present, tool checks use "viewer"
@@ -350,11 +341,7 @@ describe("CASE-AUTH-008: Empty role name does not accidentally match defaults", 
 
     // Token with empty role: verifyRoleToken returns valid:false because role claim is falsy
     const publicKey = readPublicKey()
-    const verifyResult = SecurityToken.verifyRoleToken(
-      path.join(dir, ".opencode-role.token"),
-      publicKey,
-      [],
-    )
+    const verifyResult = SecurityToken.verifyRoleToken(path.join(dir, ".opencode-role.token"), publicKey, [])
     // Empty string is falsy in JS, so `!parsed.payload.role` is true => invalid
     expect(verifyResult.valid).toBe(false)
     expect(verifyResult.error).toContain("role")

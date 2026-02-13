@@ -10,8 +10,7 @@ export const SecurityStatusCommand = cmd({
     await bootstrap(process.cwd(), async () => {
       const config = SecurityConfig.getSecurityConfig()
       const hasRules = (config.rules?.length ?? 0) > 0
-      const hasSegments =
-        (config.segments?.markers?.length ?? 0) > 0 || (config.segments?.ast?.length ?? 0) > 0
+      const hasSegments = (config.segments?.markers?.length ?? 0) > 0 || (config.segments?.ast?.length ?? 0) > 0
 
       if (!hasRules && !hasSegments) {
         console.log("Security: inactive (no rules configured)")
@@ -22,7 +21,8 @@ export const SecurityStatusCommand = cmd({
 
       // Role info
       const roles = config.roles ?? []
-      const defaultRole = roles.length > 0 ? roles.reduce((min, r) => (r.level < min.level ? r : min), roles[0]) : undefined
+      const defaultRole =
+        roles.length > 0 ? roles.reduce((min, r) => (r.level < min.level ? r : min), roles[0]) : undefined
       console.log("Role:")
       if (roles.length === 0) {
         console.log("  No roles defined")

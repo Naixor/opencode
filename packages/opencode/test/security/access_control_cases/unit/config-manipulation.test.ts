@@ -184,9 +184,7 @@ describe("CASE-CFG-005: Conflicting role definitions across nested configs throw
       roles: [{ name: "admin", level: 50 }],
     }
 
-    expect(() => SecurityConfig.mergeSecurityConfigs([configA, configB])).toThrow(
-      /Role conflict.*admin.*100.*50/,
-    )
+    expect(() => SecurityConfig.mergeSecurityConfigs([configA, configB])).toThrow(/Role conflict.*admin.*100.*50/)
   })
 
   test("same role name with same level does not throw", () => {

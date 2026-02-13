@@ -218,7 +218,7 @@ describe("CASE-LOG-003: Log entries with newlines/control characters in path", (
     await setupSecurityConfig(config, dir)
 
     // Path with newline character
-    const maliciousPath = "secrets/key.pem\n{\"injected\":true}"
+    const maliciousPath = 'secrets/key.pem\n{"injected":true}'
 
     expect(() => {
       SecurityAudit.logSecurityEvent({
@@ -266,12 +266,7 @@ describe("CASE-LOG-003: Log entries with newlines/control characters in path", (
     await setupSecurityConfig(config, dir)
 
     // Paths with various control characters
-    const controlPaths = [
-      "secrets/key\t.pem",
-      "secrets/key\r\n.pem",
-      "secrets/\x00key.pem",
-      "secrets/key\x1b[31m.pem",
-    ]
+    const controlPaths = ["secrets/key\t.pem", "secrets/key\r\n.pem", "secrets/\x00key.pem", "secrets/key\x1b[31m.pem"]
 
     for (const p of controlPaths) {
       expect(() => {

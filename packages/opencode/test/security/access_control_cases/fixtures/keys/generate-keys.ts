@@ -24,9 +24,7 @@ const testPublicPath = path.join(keysDir, "test-public.pem")
 const wrongKeyPath = path.join(keysDir, "wrong-private.pem")
 
 const needsGeneration =
-  !fs.existsSync(testKeyPairPath) ||
-  !fs.existsSync(testPublicPath) ||
-  !fs.existsSync(wrongKeyPath)
+  !fs.existsSync(testKeyPairPath) || !fs.existsSync(testPublicPath) || !fs.existsSync(wrongKeyPath)
 
 if (needsGeneration) {
   console.log("Generating test RSA key pairs...")

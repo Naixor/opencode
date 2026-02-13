@@ -147,9 +147,7 @@ export const GrepTool = Tool.define("grep", {
         const lineEndPos = lineStartPos + lineText.length
 
         // Check if this match overlaps with any protected segment
-        const isProtected = protectedSegments.some(
-          (seg) => lineStartPos < seg.end && lineEndPos > seg.start,
-        )
+        const isProtected = protectedSegments.some((seg) => lineStartPos < seg.end && lineEndPos > seg.start)
 
         if (isProtected) {
           finalLineText = SecurityRedact.REDACTED_PLACEHOLDER
@@ -283,7 +281,10 @@ function findProtectedSegments(
     const markerSegments = SecuritySegments.findMarkerSegments(content, segmentsConfig.markers)
     for (const segment of markerSegments) {
       // Check if this segment denies "read" and the role is not allowed
-      if (segment.rule.deniedOperations.includes("read") && !isRoleAllowed(currentRole, roleLevel, segment.rule.allowedRoles, roles)) {
+      if (
+        segment.rule.deniedOperations.includes("read") &&
+        !isRoleAllowed(currentRole, roleLevel, segment.rule.allowedRoles, roles)
+      ) {
         segments.push({ start: segment.start, end: segment.end })
       }
     }
@@ -294,7 +295,10 @@ function findProtectedSegments(
     const astSegments = SecuritySegments.findASTSegments(filepath, content, segmentsConfig.ast)
     for (const segment of astSegments) {
       // Check if this segment denies "read" and the role is not allowed
-      if (segment.rule.deniedOperations.includes("read") && !isRoleAllowed(currentRole, roleLevel, segment.rule.allowedRoles, roles)) {
+      if (
+        segment.rule.deniedOperations.includes("read") &&
+        !isRoleAllowed(currentRole, roleLevel, segment.rule.allowedRoles, roles)
+      ) {
         segments.push({ start: segment.start, end: segment.end })
       }
     }

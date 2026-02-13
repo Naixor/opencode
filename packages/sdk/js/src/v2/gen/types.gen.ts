@@ -1816,6 +1816,18 @@ export type Config = {
      * Timeout in milliseconds for model context protocol (MCP) requests
      */
     mcp_timeout?: number
+    /**
+     * Enable README.md injection from subdirectories (default: true)
+     */
+    readme_injection?: boolean
+    /**
+     * Todo continuation enforcer: false to disable, number for max retries (default: 3)
+     */
+    todo_continuation?: boolean | number
+    /**
+     * Comment checker sensitivity: strict, normal, relaxed, or false to disable (default: normal)
+     */
+    comment_checker?: "strict" | "normal" | "relaxed" | false
   }
 }
 
@@ -4812,6 +4824,30 @@ export type PathGetResponses = {
 }
 
 export type PathGetResponse = PathGetResponses[keyof PathGetResponses]
+
+export type BootstrapTimingData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/bootstrap"
+}
+
+export type BootstrapTimingResponses = {
+  /**
+   * Bootstrap timing
+   */
+  200: {
+    total: number
+    phases: Array<{
+      name: string
+      duration: number
+    }>
+  }
+}
+
+export type BootstrapTimingResponse = BootstrapTimingResponses[keyof BootstrapTimingResponses]
 
 export type VcsGetData = {
   body?: never

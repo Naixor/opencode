@@ -13,7 +13,11 @@ import path from "path"
 import type { AccessEvent, AccessOperation, MonitorConfig, MonitorHandle } from "./types"
 import { isProtectedPath } from "./parser"
 
-function mapWatchEventType(eventType: string, filename: string, watchDir: string): { operation: AccessOperation; path: string } | undefined {
+function mapWatchEventType(
+  eventType: string,
+  filename: string,
+  watchDir: string,
+): { operation: AccessOperation; path: string } | undefined {
   const fullPath = path.resolve(watchDir, filename)
   const exists = fs.existsSync(fullPath)
 

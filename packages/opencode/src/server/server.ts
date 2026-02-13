@@ -30,7 +30,7 @@ import { ConfigRoutes } from "./routes/config"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProviderRoutes } from "./routes/provider"
 import { lazy } from "../util/lazy"
-import { InstanceBootstrap } from "../project/bootstrap"
+import { Bootstrap, InstanceBootstrap } from "../project/bootstrap"
 import { Storage } from "../storage/storage"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { websocket } from "hono/bun"
@@ -287,6 +287,27 @@ export namespace Server {
               worktree: Instance.worktree,
               directory: Instance.directory,
             })
+          },
+        )
+        .get(
+          "/bootstrap",
+          describeRoute({
+            summary: "Get bootstrap timing",
+            description: "Get timing information for each phase of the instance bootstrap process.",
+            operationId: "bootstrap.timing",
+            responses: {
+              200: {
+                description: "Bootstrap timing",
+                content: {
+                  "application/json": {
+                    schema: resolver(Bootstrap.Timing.optional()),
+                  },
+                },
+              },
+            },
+          }),
+          async (c) => {
+            return c.json(Bootstrap.timing())
           },
         )
         .get(

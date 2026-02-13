@@ -68,6 +68,7 @@ export namespace SecurityConfig {
 
     log.info("security config loaded", { path: configPath })
     currentConfig = validated.data
+    appendImplicitRules(currentConfig)
     configLoaded = true
     return currentConfig
   }
@@ -249,7 +250,7 @@ export namespace SecurityConfig {
           })()
         : undefined
 
-    return {
+    const result: SecuritySchema.SecurityConfig = {
       version: configs[0].version,
       roles: mergedRoles.length > 0 ? mergedRoles : undefined,
       rules: mergedRules.length > 0 ? mergedRules : undefined,
@@ -258,6 +259,8 @@ export namespace SecurityConfig {
       authentication: mergedAuthentication,
       mcp: mergedMcp,
     }
+    appendImplicitRules(result)
+    return result
   }
 
   export function getSecurityConfig(): SecuritySchema.SecurityConfig {
@@ -273,22 +276,30 @@ export namespace SecurityConfig {
     configLoaded = false
   }
 
-  /**
-   * Get the MCP security policy for a given server name.
-   * Returns the server-specific policy if configured, otherwise the default policy.
-   * If no MCP config exists, returns "trusted" (no restrictions).
-   */
+  function appendImplicitRules(config: SecuritySchema.SecurityConfig): void {
+    const protectedFiles = [".opencode-security.json", ".opencode-security-audit.log"]
+    if (!config.rules) config.rules = []
+    for (const file of protectedFiles) {
+      const exists = config.rules.some((r) => r.pattern === file)
+      if (exists) continue
+      config.rules.push({
+        pattern: file,
+        type: "file",
+        deniedOperations: ["write"],
+        allowedRoles: [],
+      })
+    }
+  }
+
   export function getMcpPolicy(serverName: string): "enforced" | "trusted" | "blocked" {
     const config = getSecurityConfig()
-    if (!config.mcp) {
-      return "trusted"
+    if (config.mcp) {
+      const serverPolicy = config.mcp.servers?.[serverName]
+      if (serverPolicy) return serverPolicy
+      return config.mcp.defaultPolicy ?? "trusted"
     }
-
-    const serverPolicy = config.mcp.servers?.[serverName]
-    if (serverPolicy) {
-      return serverPolicy
-    }
-
-    return config.mcp.defaultPolicy ?? "trusted"
+    const hasRules = (config.rules?.length ?? 0) > 0 || config.segments !== undefined
+    if (hasRules) return "enforced"
+    return "trusted"
   }
 }

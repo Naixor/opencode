@@ -36,7 +36,11 @@ function parseLogLines(content: string): AuditLogEntry[] {
     .split("\n")
     .filter((line) => line.startsWith("{"))
     .flatMap((line) => {
-      const jsonResult = z.string().transform((s) => JSON.parse(s)).pipe(AuditLogEntry).safeParse(line)
+      const jsonResult = z
+        .string()
+        .transform((s) => JSON.parse(s))
+        .pipe(AuditLogEntry)
+        .safeParse(line)
       if (!jsonResult.success) return []
       return [jsonResult.data]
     })

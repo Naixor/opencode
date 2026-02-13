@@ -1,5 +1,5 @@
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import { createMemo, Match, onMount, Show, Switch } from "solid-js"
+import { createMemo, For, Match, onMount, Show, Switch } from "solid-js"
 import { useTheme } from "@tui/context/theme"
 import { useKeybind } from "@tui/context/keybind"
 import { Logo } from "../component/logo"
@@ -112,6 +112,18 @@ export function Home() {
         </box>
         <Toast />
       </box>
+      <Show when={sync.data.bootstrap}>
+        <box paddingLeft={2} paddingRight={2} flexDirection="row" flexShrink={0} flexWrap="wrap" gap={1}>
+          <text fg={theme.textMuted}>bootstrapped in {sync.data.bootstrap!.total}ms</text>
+          <For each={sync.data.bootstrap!.phases.filter((p) => p.duration > 0)}>
+            {(phase) => (
+              <text fg={theme.textMuted}>
+                <span style={{ fg: theme.text }}>{phase.name}</span> {phase.duration}ms
+              </text>
+            )}
+          </For>
+        </box>
+      </Show>
       <box paddingTop={1} paddingBottom={1} paddingLeft={2} paddingRight={2} flexDirection="row" flexShrink={0} gap={2}>
         <text fg={theme.textMuted}>{directory()}</text>
         <box gap={1} flexDirection="row" flexShrink={0}>

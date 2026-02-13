@@ -17,12 +17,14 @@ export namespace SecurityToken {
     typ: z.string().optional(),
   })
 
-  const JWTPayload = z.object({
-    role: z.string().optional(),
-    exp: z.number().optional(),
-    iat: z.number().optional(),
-    jti: z.string().optional(),
-  }).passthrough()
+  const JWTPayload = z
+    .object({
+      role: z.string().optional(),
+      exp: z.number().optional(),
+      iat: z.number().optional(),
+      jti: z.string().optional(),
+    })
+    .passthrough()
 
   function base64UrlDecode(str: string): Buffer {
     return Buffer.from(str.replace(/-/g, "+").replace(/_/g, "/"), "base64")
@@ -33,7 +35,12 @@ export namespace SecurityToken {
   function parseJWTParts(
     token: string,
   ):
-    | { header: z.infer<typeof JWTHeader>; payload: z.infer<typeof JWTPayload>; signatureInput: string; signature: Buffer }
+    | {
+        header: z.infer<typeof JWTHeader>
+        payload: z.infer<typeof JWTPayload>
+        signatureInput: string
+        signature: Buffer
+      }
     | { error: string } {
     const parts = token.trim().split(".")
     if (parts.length !== 3) {
@@ -68,11 +75,7 @@ export namespace SecurityToken {
    * Verify a JWT role token using RS256 signature verification.
    * Checks signature, expiration, and revocation status.
    */
-  export function verifyRoleToken(
-    tokenPath: string,
-    publicKey: string,
-    revokedTokens: string[] = [],
-  ): VerifyResult {
+  export function verifyRoleToken(tokenPath: string, publicKey: string, revokedTokens: string[] = []): VerifyResult {
     const stat = fs.statSync(tokenPath, { throwIfNoEntry: false })
     if (!stat) {
       log.debug("token file not found", { path: tokenPath })

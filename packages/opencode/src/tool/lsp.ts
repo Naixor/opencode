@@ -17,6 +17,9 @@ const operations = [
   "prepareCallHierarchy",
   "incomingCalls",
   "outgoingCalls",
+  "diagnostics",
+  "prepareRename",
+  "rename",
 ] as const
 
 export const LspTool = Tool.define("lsp", {
@@ -24,8 +27,23 @@ export const LspTool = Tool.define("lsp", {
   parameters: z.object({
     operation: z.enum(operations).describe("The LSP operation to perform"),
     filePath: z.string().describe("The absolute or relative path to the file"),
-    line: z.number().int().min(1).describe("The line number (1-based, as shown in editors)"),
-    character: z.number().int().min(1).describe("The character offset (1-based, as shown in editors)"),
+    line: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe("The line number (1-based). Required for all operations except diagnostics."),
+    character: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe("The character offset (1-based). Required for all operations except diagnostics."),
+    newName: z.string().optional().describe("The new name for the symbol (required for rename operation)"),
+    severity: z
+      .enum(["error", "warning", "information", "hint"])
+      .optional()
+      .describe("Filter diagnostics by severity (only for diagnostics operation)"),
   }),
   execute: async (args, ctx) => {
     const file = path.isAbsolute(args.filePath) ? args.filePath : path.join(Instance.directory, args.filePath)
@@ -38,14 +56,7 @@ export const LspTool = Tool.define("lsp", {
       metadata: {},
     })
     const uri = pathToFileURL(file).href
-    const position = {
-      file,
-      line: args.line - 1,
-      character: args.character - 1,
-    }
-
     const relPath = path.relative(Instance.worktree, file)
-    const title = `${args.operation} ${relPath}:${args.line}:${args.character}`
 
     const exists = await Bun.file(file).exists()
     if (!exists) {
@@ -58,6 +69,28 @@ export const LspTool = Tool.define("lsp", {
     }
 
     await LSP.touchFile(file, true)
+
+    if (args.operation === "diagnostics") {
+      const severityMap: Record<string, number> = { error: 1, warning: 2, information: 3, hint: 4 }
+      const all = await LSP.diagnostics()
+      const fileDiags = all[file] ?? all[uri] ?? []
+      const filtered = args.severity ? fileDiags.filter((d) => d.severity === severityMap[args.severity!]) : fileDiags
+      const title = `diagnostics ${relPath}`
+      const output =
+        filtered.length === 0 ? "No diagnostics found" : filtered.map((d) => LSP.Diagnostic.pretty(d)).join("\n")
+      return { title, metadata: { result: filtered }, output }
+    }
+
+    if (!args.line || !args.character) {
+      throw new Error(`line and character are required for ${args.operation}`)
+    }
+
+    const position = {
+      file,
+      line: args.line - 1,
+      character: args.character - 1,
+    }
+    const title = `${args.operation} ${relPath}:${args.line}:${args.character}`
 
     const result: unknown[] = await (async () => {
       switch (args.operation) {
@@ -79,6 +112,13 @@ export const LspTool = Tool.define("lsp", {
           return LSP.incomingCalls(position)
         case "outgoingCalls":
           return LSP.outgoingCalls(position)
+        case "prepareRename":
+          return LSP.prepareRename(position)
+        case "rename":
+          if (!args.newName) throw new Error("newName is required for rename operation")
+          return LSP.rename({ ...position, newName: args.newName })
+        case "diagnostics":
+          return []
       }
     })()
 

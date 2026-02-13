@@ -19,10 +19,7 @@ export namespace LLMScanner {
    * @param config - The security configuration with rules and segment definitions
    * @returns Array of matches indicating protected content found, with rule info
    */
-  export function scanForProtectedContent(
-    content: string,
-    config: SecuritySchema.SecurityConfig,
-  ): ProtectedMatch[] {
+  export function scanForProtectedContent(content: string, config: SecuritySchema.SecurityConfig): ProtectedMatch[] {
     const matches: ProtectedMatch[] = []
 
     // Check against segment markers (comment-based protection markers)

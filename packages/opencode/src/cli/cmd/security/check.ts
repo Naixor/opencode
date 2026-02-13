@@ -59,8 +59,7 @@ export const SecurityCheckCommand = cmd({
       const chain = SecurityAccess.getInheritanceChain(targetPath)
 
       // If path is a symlink, also get inheritance chain for the target
-      const targetChain =
-        resolved?.isSymlink ? SecurityAccess.getInheritanceChain(resolved.realPath) : []
+      const targetChain = resolved?.isSymlink ? SecurityAccess.getInheritanceChain(resolved.realPath) : []
 
       const allRules = [...chain, ...targetChain]
 
@@ -71,8 +70,7 @@ export const SecurityCheckCommand = cmd({
 
       console.log("Inheritance chain:")
       for (const entry of allRules) {
-        const source =
-          entry.matchType === "inherited" ? `inherited from '${entry.inheritedFrom}'` : "direct match"
+        const source = entry.matchType === "inherited" ? `inherited from '${entry.inheritedFrom}'` : "direct match"
         const ops = entry.rule.deniedOperations.join(", ")
         const allowed = entry.rule.allowedRoles.join(", ")
         console.log(`  Pattern: ${entry.rule.pattern}`)

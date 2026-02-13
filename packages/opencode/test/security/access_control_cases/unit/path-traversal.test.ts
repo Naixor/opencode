@@ -4,12 +4,7 @@ import os from "os"
 import path from "path"
 import { SecurityAccess } from "@/security/access"
 import { SecuritySchema } from "@/security/schema"
-import {
-  setupSecurityConfig,
-  teardownSecurityConfig,
-  createTempSymlink,
-  loadBaseConfig,
-} from "../helpers"
+import { setupSecurityConfig, teardownSecurityConfig, createTempSymlink, loadBaseConfig } from "../helpers"
 
 afterEach(() => {
   teardownSecurityConfig()

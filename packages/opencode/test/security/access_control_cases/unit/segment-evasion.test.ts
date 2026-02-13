@@ -78,13 +78,7 @@ describe("CASE-SEG-001: Extra whitespace in marker comments is still detected", 
 // ---------------------------------------------------------------------------
 describe("CASE-SEG-002: Bare '@secure-start' without comment prefix is NOT detected", () => {
   test("bare '@secure-start' on its own line is not detected", () => {
-    const content = [
-      "const a = 1",
-      "@secure-start",
-      "const secret = 'hidden'",
-      "@secure-end",
-      "const b = 2",
-    ].join("\n")
+    const content = ["const a = 1", "@secure-start", "const secret = 'hidden'", "@secure-end", "const b = 2"].join("\n")
 
     const segments = SecuritySegments.findMarkerSegments(content, markers)
     expect(segments.length).toBe(0)
@@ -238,7 +232,7 @@ describe("CASE-SEG-004: Multi-line block comment marker detection behavior", () 
 describe("CASE-SEG-005: eval wrapping evades AST detection [KNOWN_LIMITATION]", () => {
   test("function declared inside eval string is NOT detected", () => {
     const content = [
-      '// Function hidden inside eval',
+      "// Function hidden inside eval",
       "eval('function encryptData() { return \"encrypted\" }')",
       "",
       "// Regular function IS detected",
@@ -271,10 +265,7 @@ describe("CASE-SEG-005: eval wrapping evades AST detection [KNOWN_LIMITATION]", 
   })
 
   test("template literal function definition is NOT detected", () => {
-    const content = [
-      "const code = `function encryptData() { return 'encrypted' }`",
-      "eval(code)",
-    ].join("\n")
+    const content = ["const code = `function encryptData() { return 'encrypted' }`", "eval(code)"].join("\n")
 
     const segments = SecuritySegments.findASTSegments("test.ts", content, astRules)
     // Template literal content is a string, not parsed as code by TypeScript compiler
@@ -439,13 +430,9 @@ describe("CASE-SEG-007: Computed method name detection behavior", () => {
   })
 
   test("numeric computed method name is NOT detected (no pattern match possible)", () => {
-    const content = [
-      "class CryptoService {",
-      "  [42](data: string): string {",
-      "    return data",
-      "  }",
-      "}",
-    ].join("\n")
+    const content = ["class CryptoService {", "  [42](data: string): string {", "    return data", "  }", "}"].join(
+      "\n",
+    )
 
     const segments = SecuritySegments.findASTSegments("test.ts", content, methodRules)
     expect(segments.length).toBe(0)
@@ -507,11 +494,7 @@ describe("CASE-SEG-008: Re-export aliasing behavior", () => {
   })
 
   test("default export of matching function IS detected at declaration", () => {
-    const content = [
-      "export default function encryptData(data: string): string {",
-      "  return data",
-      "}",
-    ].join("\n")
+    const content = ["export default function encryptData(data: string): string {", "  return data", "}"].join("\n")
 
     const segments = SecuritySegments.findASTSegments("test.ts", content, astRules)
     // Export default function with a name — the FunctionDeclaration is detected
@@ -643,11 +626,7 @@ describe("CASE-SEG-009: AST rules for unsupported languages return empty [KNOWN_
   })
 
   test("C file (.c) returns empty segments", () => {
-    const content = [
-      "void encrypt_data(unsigned char* data, int len) {",
-      "    // encryption logic",
-      "}",
-    ].join("\n")
+    const content = ["void encrypt_data(unsigned char* data, int len) {", "    // encryption logic", "}"].join("\n")
 
     const cRules: SecuritySchema.ASTConfig[] = [
       {

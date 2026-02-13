@@ -70,6 +70,7 @@
     "@ai-sdk/togetherai": "1.0.34",
     "@ai-sdk/vercel": "1.0.33",
     "@ai-sdk/xai": "2.0.56",
+    "@ast-grep/napi": "0.40.5",
     "@clack/prompts": "1.0.0-alpha.1",
     "@gitlab/gitlab-ai-provider": "3.4.0",
     "@hono/standard-validator": "0.1.5",

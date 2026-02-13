@@ -106,11 +106,7 @@ export namespace SecurityAccess {
    * - More restrictive child rules take precedence over inherited rules
    * - Less restrictive child rules do NOT override parent restrictions
    */
-  export function checkAccess(
-    filePath: string,
-    operation: SecuritySchema.Operation,
-    role: string,
-  ): AccessResult {
+  export function checkAccess(filePath: string, operation: SecuritySchema.Operation, role: string): AccessResult {
     const config = SecurityConfig.getSecurityConfig()
 
     if (!config.rules || config.rules.length === 0) {
@@ -228,8 +224,10 @@ export namespace SecurityAccess {
       }
 
       // Also check glob match
-      return minimatch(normalizedPath, normalizedPattern, { matchBase: true }) ||
+      return (
+        minimatch(normalizedPath, normalizedPattern, { matchBase: true }) ||
         minimatch(normalizedPath, `${normalizedPattern}/**`, { matchBase: true })
+      )
     }
 
     // For file rules, match directly

@@ -23,9 +23,7 @@ function createJWT(payload: Record<string, unknown>, privateKey: string, passphr
 
   const sign = crypto.createSign("RSA-SHA256")
   sign.update(signatureInput)
-  const signature = passphrase
-    ? sign.sign({ key: privateKey, passphrase })
-    : sign.sign(privateKey)
+  const signature = passphrase ? sign.sign({ key: privateKey, passphrase }) : sign.sign(privateKey)
   const signatureB64 = base64UrlEncode(signature)
 
   return `${signatureInput}.${signatureB64}`

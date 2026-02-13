@@ -6,12 +6,7 @@ import { SecurityAccess } from "@/security/access"
 import { SecurityConfig } from "@/security/config"
 import { SecuritySchema } from "@/security/schema"
 import { SecuritySegments } from "@/security/segments"
-import {
-  setupSecurityConfig,
-  teardownSecurityConfig,
-  loadBaseConfig,
-  protectedFilePath,
-} from "../helpers"
+import { setupSecurityConfig, teardownSecurityConfig, loadBaseConfig, protectedFilePath } from "../helpers"
 
 afterEach(() => {
   teardownSecurityConfig()
@@ -129,7 +124,12 @@ describe("CASE-EDIT-001: Edit overlapping @secure-start/@secure-end region is bl
     ].join("\n")
 
     const markersWithWriteDeny: SecuritySchema.MarkerConfig[] = [
-      { start: "@secure-start", end: "@secure-end", deniedOperations: ["read", "write", "llm"], allowedRoles: ["admin"] },
+      {
+        start: "@secure-start",
+        end: "@secure-end",
+        deniedOperations: ["read", "write", "llm"],
+        allowedRoles: ["admin"],
+      },
     ]
     const markerSegments = SecuritySegments.findMarkerSegments(content, markersWithWriteDeny)
     expect(markerSegments.length).toBe(1)
@@ -145,7 +145,8 @@ describe("CASE-EDIT-001: Edit overlapping @secure-start/@secure-end region is bl
     const protectedSegments: { start: number; end: number }[] = []
     for (const seg of markerSegments) {
       if (seg.rule.deniedOperations.includes("write")) {
-        const allowed = seg.rule.allowedRoles.includes(currentRole) ||
+        const allowed =
+          seg.rule.allowedRoles.includes(currentRole) ||
           seg.rule.allowedRoles.some((ar) => {
             const arLevel = roles.find((r) => r.name === ar)?.level ?? 0
             return roleLevel > arLevel
@@ -165,9 +166,7 @@ describe("CASE-EDIT-001: Edit overlapping @secure-start/@secure-end region is bl
     const editRange = { start: editStart, end: editStart + oldString.length }
 
     // Check overlap: edit range starts before segment ends AND ends after segment starts
-    const overlaps = protectedSegments.some(
-      (seg) => editRange.start < seg.end && editRange.end > seg.start,
-    )
+    const overlaps = protectedSegments.some((seg) => editRange.start < seg.end && editRange.end > seg.start)
     expect(overlaps).toBe(true)
   })
 
@@ -223,7 +222,8 @@ describe("CASE-EDIT-001: Edit overlapping @secure-start/@secure-end region is bl
     const protectedSegments: { start: number; end: number }[] = []
     for (const seg of astSegments) {
       if (seg.rule.deniedOperations.includes("write")) {
-        const allowed = seg.rule.allowedRoles.includes(currentRole) ||
+        const allowed =
+          seg.rule.allowedRoles.includes(currentRole) ||
           seg.rule.allowedRoles.some((ar) => {
             const arLevel = roles.find((r) => r.name === ar)?.level ?? 0
             return roleLevel > arLevel
@@ -242,9 +242,7 @@ describe("CASE-EDIT-001: Edit overlapping @secure-start/@secure-end region is bl
     expect(editStart).toBeGreaterThan(-1)
     const editRange = { start: editStart, end: editStart + oldString.length }
 
-    const overlaps = protectedSegments.some(
-      (seg) => editRange.start < seg.end && editRange.end > seg.start,
-    )
+    const overlaps = protectedSegments.some((seg) => editRange.start < seg.end && editRange.end > seg.start)
     expect(overlaps).toBe(true)
   })
 })
@@ -263,7 +261,12 @@ describe("CASE-EDIT-002: Edit that deletes the // @secure-start marker itself is
     ].join("\n")
 
     const markersWithWriteDeny: SecuritySchema.MarkerConfig[] = [
-      { start: "@secure-start", end: "@secure-end", deniedOperations: ["read", "write", "llm"], allowedRoles: ["admin"] },
+      {
+        start: "@secure-start",
+        end: "@secure-end",
+        deniedOperations: ["read", "write", "llm"],
+        allowedRoles: ["admin"],
+      },
     ]
     const segments = SecuritySegments.findMarkerSegments(content, markersWithWriteDeny)
     expect(segments.length).toBe(1)
@@ -275,22 +278,20 @@ describe("CASE-EDIT-002: Edit that deletes the // @secure-start marker itself is
     // The segment.start is the position of the marker match
     // Attempting to edit/delete "// @secure-start" overlaps with segment.start
     const editRange = { start: markerStart, end: markerStart + "// @secure-start".length }
-    const overlaps = segments.some(
-      (seg) => editRange.start < seg.end && editRange.end > seg.start,
-    )
+    const overlaps = segments.some((seg) => editRange.start < seg.end && editRange.end > seg.start)
     expect(overlaps).toBe(true)
   })
 
   test("deleting the end marker line overlaps the protected segment", () => {
-    const content = [
-      "// @secure-start",
-      "const secret = 'hidden'",
-      "// @secure-end",
-      "const public = true",
-    ].join("\n")
+    const content = ["// @secure-start", "const secret = 'hidden'", "// @secure-end", "const public = true"].join("\n")
 
     const markersWithWriteDeny: SecuritySchema.MarkerConfig[] = [
-      { start: "@secure-start", end: "@secure-end", deniedOperations: ["read", "write", "llm"], allowedRoles: ["admin"] },
+      {
+        start: "@secure-start",
+        end: "@secure-end",
+        deniedOperations: ["read", "write", "llm"],
+        allowedRoles: ["admin"],
+      },
     ]
     const segments = SecuritySegments.findMarkerSegments(content, markersWithWriteDeny)
     expect(segments.length).toBe(1)
@@ -301,9 +302,7 @@ describe("CASE-EDIT-002: Edit that deletes the // @secure-start marker itself is
     const editRange = { start: endMarkerPos, end: endMarkerPos + "// @secure-end".length }
 
     // The segment end is AFTER the end marker (it includes the end marker text)
-    const overlaps = segments.some(
-      (seg) => editRange.start < seg.end && editRange.end > seg.start,
-    )
+    const overlaps = segments.some((seg) => editRange.start < seg.end && editRange.end > seg.start)
     expect(overlaps).toBe(true)
   })
 })
@@ -322,7 +321,12 @@ describe("CASE-EDIT-003: Edit immediately adjacent to (but outside) protected se
     ].join("\n")
 
     const markersWithWriteDeny: SecuritySchema.MarkerConfig[] = [
-      { start: "@secure-start", end: "@secure-end", deniedOperations: ["read", "write", "llm"], allowedRoles: ["admin"] },
+      {
+        start: "@secure-start",
+        end: "@secure-end",
+        deniedOperations: ["read", "write", "llm"],
+        allowedRoles: ["admin"],
+      },
     ]
     const segments = SecuritySegments.findMarkerSegments(content, markersWithWriteDeny)
     expect(segments.length).toBe(1)
@@ -334,22 +338,22 @@ describe("CASE-EDIT-003: Edit immediately adjacent to (but outside) protected se
     const editRange = { start: editStart, end: editStart + oldString.length }
 
     // Should NOT overlap with the protected segment
-    const overlaps = segments.some(
-      (seg) => editRange.start < seg.end && editRange.end > seg.start,
-    )
+    const overlaps = segments.some((seg) => editRange.start < seg.end && editRange.end > seg.start)
     expect(overlaps).toBe(false)
   })
 
   test("edit just after @secure-end marker is allowed", () => {
-    const content = [
-      "// @secure-start",
-      "const secret = 'hidden'",
-      "// @secure-end",
-      "const public2 = false",
-    ].join("\n")
+    const content = ["// @secure-start", "const secret = 'hidden'", "// @secure-end", "const public2 = false"].join(
+      "\n",
+    )
 
     const markersWithWriteDeny: SecuritySchema.MarkerConfig[] = [
-      { start: "@secure-start", end: "@secure-end", deniedOperations: ["read", "write", "llm"], allowedRoles: ["admin"] },
+      {
+        start: "@secure-start",
+        end: "@secure-end",
+        deniedOperations: ["read", "write", "llm"],
+        allowedRoles: ["admin"],
+      },
     ]
     const segments = SecuritySegments.findMarkerSegments(content, markersWithWriteDeny)
     expect(segments.length).toBe(1)
@@ -361,9 +365,7 @@ describe("CASE-EDIT-003: Edit immediately adjacent to (but outside) protected se
     const editRange = { start: editStart, end: editStart + oldString.length }
 
     // Should NOT overlap with the protected segment
-    const overlaps = segments.some(
-      (seg) => editRange.start < seg.end && editRange.end > seg.start,
-    )
+    const overlaps = segments.some((seg) => editRange.start < seg.end && editRange.end > seg.start)
     expect(overlaps).toBe(false)
   })
 
@@ -379,7 +381,12 @@ describe("CASE-EDIT-003: Edit immediately adjacent to (but outside) protected se
     ].join("\n")
 
     const markersWithWriteDeny: SecuritySchema.MarkerConfig[] = [
-      { start: "@secure-start", end: "@secure-end", deniedOperations: ["read", "write", "llm"], allowedRoles: ["admin"] },
+      {
+        start: "@secure-start",
+        end: "@secure-end",
+        deniedOperations: ["read", "write", "llm"],
+        allowedRoles: ["admin"],
+      },
     ]
     const segments = SecuritySegments.findMarkerSegments(content, markersWithWriteDeny)
     expect(segments.length).toBe(2)
@@ -390,9 +397,7 @@ describe("CASE-EDIT-003: Edit immediately adjacent to (but outside) protected se
     expect(editStart).toBeGreaterThan(-1)
     const editRange = { start: editStart, end: editStart + oldString.length }
 
-    const overlaps = segments.some(
-      (seg) => editRange.start < seg.end && editRange.end > seg.start,
-    )
+    const overlaps = segments.some((seg) => editRange.start < seg.end && editRange.end > seg.start)
     expect(overlaps).toBe(false)
   })
 })

@@ -5506,6 +5506,61 @@
         ]
       }
     },
+    "/bootstrap": {
+      "get": {
+        "operationId": "bootstrap.timing",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Get bootstrap timing",
+        "description": "Get timing information for each phase of the instance bootstrap process.",
+        "responses": {
+          "200": {
+            "description": "Bootstrap timing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": {
+                      "type": "number"
+                    },
+                    "phases": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "duration": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["name", "duration"]
+                      }
+                    }
+                  },
+                  "required": ["total", "phases"]
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.bootstrap.timing({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/vcs": {
       "get": {
         "operationId": "vcs.get",
@@ -9884,6 +9939,34 @@
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 9007199254740991
+              },
+              "readme_injection": {
+                "description": "Enable README.md injection from subdirectories (default: true)",
+                "type": "boolean"
+              },
+              "todo_continuation": {
+                "description": "Todo continuation enforcer: false to disable, number for max retries (default: 3)",
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "comment_checker": {
+                "description": "Comment checker sensitivity: strict, normal, relaxed, or false to disable (default: normal)",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": ["strict", "normal", "relaxed"]
+                  },
+                  {
+                    "type": "boolean",
+                    "const": false
+                  }
+                ]
               }
             }
           }

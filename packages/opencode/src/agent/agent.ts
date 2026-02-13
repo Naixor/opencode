@@ -18,6 +18,9 @@ import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
 import path from "path"
 import { Plugin } from "@/plugin"
+import { SecurityConfig } from "@/security/config"
+import { LLMScanner } from "@/security/llm-scanner"
+import { SecurityRedact } from "@/security/redact"
 import { Skill } from "../skill"
 
 export namespace Agent {
@@ -286,7 +289,19 @@ export namespace Agent {
     const language = await Provider.getLanguage(model)
 
     const system = [PROMPT_GENERATE]
-    await Plugin.trigger("experimental.chat.system.transform", { model }, { system })
+    const secConfig = SecurityConfig.getSecurityConfig()
+    const secHasRules = (secConfig.rules?.length ?? 0) > 0 || secConfig.segments !== undefined
+    if (secHasRules) {
+      const redacted = system.map((s) => {
+        const matches = LLMScanner.scanForProtectedContent(s, secConfig)
+        return matches.length > 0 ? SecurityRedact.redactContent(s, matches) : s
+      })
+      await Plugin.trigger("experimental.chat.system.transform", { model }, { system: redacted })
+      system.length = 0
+      system.push(...redacted)
+    } else {
+      await Plugin.trigger("experimental.chat.system.transform", { model }, { system })
+    }
     const existing = await list()
 
     const params = {

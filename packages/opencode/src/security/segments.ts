@@ -27,10 +27,7 @@ export namespace SecuritySegments {
    * Handles nested markers (inner markers inherit outer protection)
    * and multiple separate marker blocks in the same file.
    */
-  export function findMarkerSegments(
-    content: string,
-    markers: SecuritySchema.MarkerConfig[],
-  ): MarkerSegment[] {
+  export function findMarkerSegments(content: string, markers: SecuritySchema.MarkerConfig[]): MarkerSegment[] {
     const allMatches: MarkerMatch[] = []
 
     // Find all start and end markers in the content
@@ -154,11 +151,7 @@ export namespace SecuritySegments {
    * Parse source code into a TypeScript AST.
    * Returns undefined if parsing fails.
    */
-  function parseSourceFile(
-    filePath: string,
-    content: string,
-    isTypeScript: boolean,
-  ): ts.SourceFile | undefined {
+  function parseSourceFile(filePath: string, content: string, isTypeScript: boolean): ts.SourceFile | undefined {
     const scriptKind = isTypeScript
       ? filePath.endsWith(".tsx")
         ? ts.ScriptKind.TSX
@@ -167,9 +160,8 @@ export namespace SecuritySegments {
         ? ts.ScriptKind.JSX
         : ts.ScriptKind.JS
 
-    return ts
-      .createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, scriptKind)
-      // TypeScript createSourceFile doesn't throw on syntax errors, but we catch any unexpected errors
+    return ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, scriptKind)
+    // TypeScript createSourceFile doesn't throw on syntax errors, but we catch any unexpected errors
   }
 
   /**

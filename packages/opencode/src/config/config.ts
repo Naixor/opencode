@@ -1138,6 +1138,18 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
+          readme_injection: z
+            .boolean()
+            .optional()
+            .describe("Enable README.md injection from subdirectories (default: true)"),
+          todo_continuation: z
+            .union([z.boolean(), z.number()])
+            .optional()
+            .describe("Todo continuation enforcer: false to disable, number for max retries (default: 3)"),
+          comment_checker: z
+            .union([z.enum(["strict", "normal", "relaxed"]), z.literal(false)])
+            .optional()
+            .describe("Comment checker sensitivity: strict, normal, relaxed, or false to disable (default: normal)"),
         })
         .optional(),
     })

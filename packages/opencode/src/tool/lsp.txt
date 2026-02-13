@@ -10,10 +10,17 @@ Supported operations:
 - prepareCallHierarchy: Get call hierarchy item at a position (functions/methods)
 - incomingCalls: Find all functions/methods that call the function at a position
 - outgoingCalls: Find all functions/methods called by the function at a position
+- diagnostics: Get diagnostics (errors, warnings) for a file. Optional severity filter.
+- prepareRename: Check if a symbol at a position can be renamed
+- rename: Rename a symbol across the workspace. Requires newName parameter.
 
 All operations require:
 - filePath: The file to operate on
+
+Most operations also require:
 - line: The line number (1-based, as shown in editors)
 - character: The character offset (1-based, as shown in editors)
+
+The diagnostics operation does not require line/character. The rename operation additionally requires newName.
 
 Note: LSP servers must be configured for the file type. If no server is available, an error will be returned.

@@ -27,6 +27,13 @@ import { LspTool } from "./lsp"
 import { Truncate } from "./truncation"
 import { PlanExitTool, PlanEnterTool } from "./plan"
 import { ApplyPatchTool } from "./apply_patch"
+import { AstGrepSearchTool, AstGrepReplaceTool } from "./ast_grep"
+import { LookAtTool } from "./look_at"
+import { SecurityConfig } from "../security/config"
+import { SecurityAccess } from "../security/access"
+import { SecurityAudit } from "../security/audit"
+import { SecurityUtil } from "../security/util"
+import fs from "fs"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -60,6 +67,13 @@ export namespace ToolRegistry {
     return { custom }
   })
 
+  function extractStrings(obj: unknown): string[] {
+    if (typeof obj === "string") return [obj]
+    if (Array.isArray(obj)) return obj.flatMap(extractStrings)
+    if (obj && typeof obj === "object") return Object.values(obj).flatMap(extractStrings)
+    return []
+  }
+
   function fromPlugin(id: string, def: ToolDefinition): Tool.Info {
     return {
       id,
@@ -67,16 +81,55 @@ export namespace ToolRegistry {
         parameters: z.object(def.args),
         description: def.description,
         execute: async (args, ctx) => {
+          const config = SecurityConfig.getSecurityConfig()
+          const dir = Instance.directory
+          if (SecurityUtil.hasSecurityRules(config)) {
+            const role = SecurityUtil.getDefaultRole(config)
+            const strings = extractStrings(args)
+            for (const str of strings) {
+              const resolved = path.resolve(dir, str)
+              if (!fs.existsSync(resolved)) continue
+              const access = SecurityAccess.checkAccess(resolved, "read", role)
+              if (!access.allowed) {
+                SecurityAudit.logSecurityEvent({
+                  role,
+                  operation: "read",
+                  path: resolved,
+                  allowed: false,
+                  reason: access.reason,
+                })
+                return {
+                  title: "Access denied",
+                  output: access.reason ?? `Plugin tool '${id}' denied access to '${resolved}'`,
+                  metadata: {},
+                }
+              }
+            }
+          }
           const pluginCtx = {
             ...ctx,
-            directory: Instance.directory,
+            directory: dir,
             worktree: Instance.worktree,
           } as unknown as PluginToolContext
           const result = await def.execute(args as any, pluginCtx)
-          const out = await Truncate.output(result, {}, initCtx?.agent)
+          let output = typeof result === "string" ? result : JSON.stringify(result)
+          if (SecurityUtil.hasSecurityRules(config)) {
+            const scanned = SecurityUtil.scanAndRedact(output, config)
+            if (scanned !== output) {
+              SecurityAudit.logSecurityEvent({
+                role: SecurityUtil.getDefaultRole(config),
+                operation: "llm",
+                path: `plugin-tool:${id}`,
+                allowed: true,
+                reason: "Plugin tool output contained protected content that was redacted",
+              })
+              output = scanned
+            }
+          }
+          const out = await Truncate.output(output, {}, initCtx?.agent)
           return {
             title: "",
-            output: out.truncated ? out.content : result,
+            output: out.truncated ? out.content : output,
             metadata: { truncated: out.truncated, outputPath: out.truncated ? out.outputPath : undefined },
           }
         },
@@ -115,7 +168,10 @@ export namespace ToolRegistry {
       CodeSearchTool,
       SkillTool,
       ApplyPatchTool,
-      ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
+      AstGrepSearchTool,
+      AstGrepReplaceTool,
+      LookAtTool,
+      LspTool,
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),
       ...custom,

@@ -27,10 +27,7 @@ function signJWT(header: object, payload: object, privateKeyPem: string): string
 /**
  * Write .opencode-security.json to a directory and load it as the active security config.
  */
-export async function setupSecurityConfig(
-  config: SecuritySchema.SecurityConfig,
-  tempDir?: string,
-): Promise<string> {
+export async function setupSecurityConfig(config: SecuritySchema.SecurityConfig, tempDir?: string): Promise<string> {
   const dir = tempDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "sec-test-"))
   const configPath = path.join(dir, ".opencode-security.json")
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2))

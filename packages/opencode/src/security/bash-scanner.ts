@@ -1,23 +1,42 @@
 import path from "path"
 
 export namespace BashScanner {
-  const FILE_ACCESS_COMMANDS = new Set([
-    "cat",
-    "less",
-    "head",
-    "tail",
-    "vim",
-    "nano",
-    "grep",
-    "find",
-    "sed",
-    "awk",
-  ])
+  const FILE_ACCESS_COMMANDS = new Set(["cat", "less", "head", "tail", "vim", "nano", "grep", "find", "sed", "awk"])
 
   // Flags that take a value argument (next arg is not a file path)
   const FLAGS_WITH_VALUES: Record<string, Set<string>> = {
-    grep: new Set(["-e", "--regexp", "-f", "--file", "-m", "--max-count", "--label", "-C", "-A", "-B", "--color", "--include", "--exclude", "--exclude-dir"]),
-    find: new Set(["-name", "-iname", "-type", "-maxdepth", "-mindepth", "-newer", "-perm", "-user", "-group", "-size", "-exec", "-execdir", "-printf", "-fprintf"]),
+    grep: new Set([
+      "-e",
+      "--regexp",
+      "-f",
+      "--file",
+      "-m",
+      "--max-count",
+      "--label",
+      "-C",
+      "-A",
+      "-B",
+      "--color",
+      "--include",
+      "--exclude",
+      "--exclude-dir",
+    ]),
+    find: new Set([
+      "-name",
+      "-iname",
+      "-type",
+      "-maxdepth",
+      "-mindepth",
+      "-newer",
+      "-perm",
+      "-user",
+      "-group",
+      "-size",
+      "-exec",
+      "-execdir",
+      "-printf",
+      "-fprintf",
+    ]),
     sed: new Set(["-e", "--expression", "-f", "--file", "-i"]),
     awk: new Set(["-F", "-v", "--field-separator", "--assign", "-f", "--file"]),
     head: new Set(["-n", "--lines", "-c", "--bytes"]),
@@ -29,11 +48,15 @@ export namespace BashScanner {
   }
 
   function isAwkPattern(arg: string): boolean {
-    return arg.includes("{") || arg.includes("BEGIN") || arg.includes("END") || arg.startsWith("'") || arg.startsWith('"')
+    return (
+      arg.includes("{") || arg.includes("BEGIN") || arg.includes("END") || arg.startsWith("'") || arg.startsWith('"')
+    )
   }
 
   function isSedExpression(arg: string): boolean {
-    return arg.startsWith("s/") || arg.startsWith("s|") || arg.startsWith("y/") || arg.startsWith("'") || arg.startsWith('"')
+    return (
+      arg.startsWith("s/") || arg.startsWith("s|") || arg.startsWith("y/") || arg.startsWith("'") || arg.startsWith('"')
+    )
   }
 
   function resolvePath(filePath: string, cwd: string): string {

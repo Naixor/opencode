@@ -6,12 +6,7 @@ import { SecurityConfig } from "@/security/config"
 import { SecuritySchema } from "@/security/schema"
 import { SecuritySegments } from "@/security/segments"
 import { SecurityRedact } from "@/security/redact"
-import {
-  setupSecurityConfig,
-  teardownSecurityConfig,
-  loadBaseConfig,
-  protectedFilePath,
-} from "../helpers"
+import { setupSecurityConfig, teardownSecurityConfig, loadBaseConfig, protectedFilePath } from "../helpers"
 
 afterEach(() => {
   teardownSecurityConfig()
@@ -69,7 +64,8 @@ describe("CASE-READ-002: Segment redaction replaces content between @secure-star
     const protectedSegments: SecurityRedact.Segment[] = []
     for (const seg of markerSegments) {
       if (seg.rule.deniedOperations.includes("read")) {
-        const allowed = seg.rule.allowedRoles.includes("viewer") ||
+        const allowed =
+          seg.rule.allowedRoles.includes("viewer") ||
           seg.rule.allowedRoles.some((ar) => {
             const arLevel = roles.find((r) => r.name === ar)?.level ?? 0
             return viewerLevel > arLevel
@@ -384,11 +380,7 @@ describe("CASE-READ-007: Unicode lookalike markers (fullwidth @) do NOT create f
     ]
 
     for (const char of confusables) {
-      const content = [
-        `// ${char}secure-start`,
-        "should not be protected",
-        `// ${char}secure-end`,
-      ].join("\n")
+      const content = [`// ${char}secure-start`, "should not be protected", `// ${char}secure-end`].join("\n")
 
       const markers: SecuritySchema.MarkerConfig[] = [
         { start: "@secure-start", end: "@secure-end", deniedOperations: ["read"], allowedRoles: ["admin"] },
@@ -403,13 +395,13 @@ describe("CASE-READ-008: Nested marker mismatch uses stack-based handling", () =
   test("start-A, start-B, end-A, end-B — stack matches innermost start with first end", () => {
     // Test with two different marker types to see how the stack handles mismatched nesting
     const content = [
-      "// @secure-start",    // A start
+      "// @secure-start", // A start
       "outer protected A",
-      "# @region-start",     // B start
+      "# @region-start", // B start
       "inner protected B",
-      "// @secure-end",      // A end
+      "// @secure-end", // A end
       "between markers",
-      "# @region-end",       // B end
+      "# @region-end", // B end
       "public code",
     ].join("\n")
 
@@ -436,7 +428,7 @@ describe("CASE-READ-008: Nested marker mismatch uses stack-based handling", () =
 
   test("unmatched end marker is ignored", () => {
     const content = [
-      "// @secure-end",      // orphaned end — no matching start
+      "// @secure-end", // orphaned end — no matching start
       "public line 1",
       "// @secure-start",
       "protected line",

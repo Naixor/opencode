@@ -13,6 +13,7 @@ import type {
   AuthRemoveResponses,
   AuthSetErrors,
   AuthSetResponses,
+  BootstrapTimingResponses,
   CommandListResponses,
   Config as Config3,
   ConfigGetResponses,
@@ -2990,6 +2991,27 @@ export class Path extends HeyApiClient {
   }
 }
 
+export class Bootstrap extends HeyApiClient {
+  /**
+   * Get bootstrap timing
+   *
+   * Get timing information for each phase of the instance bootstrap process.
+   */
+  public timing<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
+    return (options?.client ?? this.client).get<BootstrapTimingResponses, unknown, ThrowOnError>({
+      url: "/bootstrap",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Vcs extends HeyApiClient {
   /**
    * Get VCS info
@@ -3279,6 +3301,11 @@ export class OpencodeClient extends HeyApiClient {
   private _path?: Path
   get path(): Path {
     return (this._path ??= new Path({ client: this.client }))
+  }
+
+  private _bootstrap?: Bootstrap
+  get bootstrap(): Bootstrap {
+    return (this._bootstrap ??= new Bootstrap({ client: this.client }))
   }
 
   private _vcs?: Vcs

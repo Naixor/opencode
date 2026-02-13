@@ -51,6 +51,8 @@ import { SecurityAccess } from "@/security/access"
 import { SecurityAudit } from "@/security/audit"
 import { LLMScanner } from "@/security/llm-scanner"
 import { SecurityRedact } from "@/security/redact"
+import { Todo } from "./todo"
+import { Config } from "../config/config"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -58,6 +60,7 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
   export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
+  const continuationCounts = new Map<string, number>()
 
   const state = Instance.state(
     () => {
@@ -306,6 +309,45 @@ export namespace SessionPrompt {
         !["tool-calls", "unknown"].includes(lastAssistant.finish) &&
         lastUser.id < lastAssistant.id
       ) {
+        const cfg = await Config.get()
+        const todoContinuation = cfg.experimental?.todo_continuation
+        const maxContinuations =
+          todoContinuation === false ? 0 : typeof todoContinuation === "number" ? todoContinuation : 3
+        const agent = await Agent.get(lastUser.agent)
+        if (maxContinuations > 0 && agent.name !== "plan") {
+          const todos = await Todo.get(sessionID)
+          const incomplete = todos.filter((t) => t.status === "pending" || t.status === "in_progress")
+          const count = continuationCounts.get(sessionID) ?? 0
+          if (incomplete.length > 0 && count < maxContinuations) {
+            continuationCounts.set(sessionID, count + 1)
+            log.info("todo continuation", { sessionID, count: count + 1, incomplete: incomplete.length })
+            const msg: MessageV2.User = {
+              id: Identifier.ascending("message"),
+              sessionID,
+              role: "user",
+              time: { created: Date.now() },
+              agent: lastUser.agent,
+              model: lastUser.model,
+            }
+            await Session.updateMessage(msg)
+            await Session.updatePart({
+              id: Identifier.ascending("part"),
+              messageID: msg.id,
+              sessionID,
+              type: "text",
+              text: [
+                "[SYSTEM REMINDER - TODO CONTINUATION]",
+                `You have ${incomplete.length} incomplete todo(s):`,
+                ...incomplete.map((t) => `- [${t.status}] ${t.content}`),
+                "",
+                "Continue working on these tasks. Mark items complete as you finish them.",
+              ].join("\n"),
+              synthetic: true,
+            } satisfies MessageV2.TextPart)
+            continue
+          }
+        }
+        continuationCounts.delete(sessionID)
         log.info("exiting loop", { sessionID })
         break
       }
@@ -603,7 +645,35 @@ export namespace SessionPrompt {
         }
       }
 
-      await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: sessionMessages })
+      const secConfig = SecurityConfig.getSecurityConfig()
+      const secHasRules = (secConfig.rules?.length ?? 0) > 0 || secConfig.segments !== undefined
+      if (secHasRules) {
+        const redactedMessages = clone(sessionMessages)
+        for (const msg of redactedMessages) {
+          for (const part of msg.parts) {
+            if (part.type === "text" && part.text) {
+              const matches = LLMScanner.scanForProtectedContent(part.text, secConfig)
+              if (matches.length > 0) part.text = SecurityRedact.redactContent(part.text, matches)
+            }
+          }
+        }
+        const originalIds = new Set(sessionMessages.map((m) => m.info.id))
+        await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: redactedMessages })
+        const mutatedIds = new Set(redactedMessages.map((m) => m.info.id))
+        const removed = new Set<string>()
+        for (const id of originalIds) {
+          if (!mutatedIds.has(id)) removed.add(id)
+        }
+        if (removed.size > 0) {
+          const filtered = sessionMessages.filter((m) => !removed.has(m.info.id))
+          sessionMessages.length = 0
+          sessionMessages.push(...filtered)
+        }
+        const added = redactedMessages.filter((m) => !originalIds.has(m.info.id))
+        if (added.length > 0) sessionMessages.push(...added)
+      } else {
+        await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: sessionMessages })
+      }
 
       const result = await processor.process({
         user: lastUser,

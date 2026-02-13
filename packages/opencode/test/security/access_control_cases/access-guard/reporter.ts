@@ -38,7 +38,9 @@ function loadAuditEntries(logPath: string): AuditLogEntry[] {
 
 function findDeniedEntry(entries: AuditLogEntry[], filePath: string, operation: string): AuditLogEntry | undefined {
   return entries.find(
-    (entry) => entry.result === "denied" && (entry.path === filePath || filePath.endsWith(entry.path) || entry.path.endsWith(path.basename(filePath))),
+    (entry) =>
+      entry.result === "denied" &&
+      (entry.path === filePath || filePath.endsWith(entry.path) || entry.path.endsWith(path.basename(filePath))),
   )
 }
 
@@ -96,7 +98,9 @@ export function generateReport(
 
   const warnings: string[] = []
   if (mode === "unprivileged") {
-    warnings.push("Running in unprivileged mode: READ operations were NOT detected. Only write/create/delete events are captured.")
+    warnings.push(
+      "Running in unprivileged mode: READ operations were NOT detected. Only write/create/delete events are captured.",
+    )
   }
   if (!appLogPath) {
     warnings.push("No application audit log path provided. Compliance violations are based on OS observations only.")

@@ -838,10 +838,7 @@ function findEditRange(content: string, oldString: string): EditRange | null {
  * Check if an edit range overlaps with any protected segment.
  * Returns the first overlapping segment if found, null otherwise.
  */
-function findOverlappingSegment(
-  editRange: EditRange,
-  protectedSegments: ProtectedSegment[],
-): ProtectedSegment | null {
+function findOverlappingSegment(editRange: EditRange, protectedSegments: ProtectedSegment[]): ProtectedSegment | null {
   for (const segment of protectedSegments) {
     // Check for overlap: edit range starts before segment ends AND edit range ends after segment starts
     if (editRange.start < segment.end && editRange.end > segment.start) {

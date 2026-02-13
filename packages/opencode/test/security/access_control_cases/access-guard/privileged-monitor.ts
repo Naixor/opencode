@@ -16,14 +16,7 @@ export function startPrivilegedMonitor(config: MonitorConfig): MonitorHandle {
   const events: AccessEvent[] = []
   const pid = config.pid ?? process.pid
 
-  const args = [
-    "fs_usage",
-    "-f",
-    "filesystem",
-    "-w",
-    "-p",
-    String(pid),
-  ]
+  const args = ["fs_usage", "-f", "filesystem", "-w", "-p", String(pid)]
 
   let child: ChildProcess | undefined
   let stopped = false

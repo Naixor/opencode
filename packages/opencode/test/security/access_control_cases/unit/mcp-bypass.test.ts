@@ -2,11 +2,7 @@ import { describe, test, expect, afterEach } from "bun:test"
 import { SecurityConfig } from "@/security/config"
 import { LLMScanner } from "@/security/llm-scanner"
 import { SecuritySchema } from "@/security/schema"
-import {
-  setupSecurityConfig,
-  teardownSecurityConfig,
-  loadBaseConfig,
-} from "../helpers"
+import { setupSecurityConfig, teardownSecurityConfig, loadBaseConfig } from "../helpers"
 
 afterEach(() => {
   teardownSecurityConfig()
@@ -85,12 +81,9 @@ describe("CASE-MCP-002: getMcpPolicy returns 'enforced' for enforced-server", ()
     await setupSecurityConfig(baseConfig)
 
     // Simulate MCP tool returning output that contains protected markers
-    const toolOutput = [
-      "File contents:",
-      "// @secure-start",
-      "const SECRET_KEY = 'abc123'",
-      "// @secure-end",
-    ].join("\n")
+    const toolOutput = ["File contents:", "// @secure-start", "const SECRET_KEY = 'abc123'", "// @secure-end"].join(
+      "\n",
+    )
 
     const outputMatches = LLMScanner.scanForProtectedContent(toolOutput, baseConfig)
     const markerMatches = outputMatches.filter((m) => m.ruleType === "marker")
@@ -363,8 +356,8 @@ describe("CASE-MCP-006: Server identity is based on config key name, not self-re
       mcp: {
         defaultPolicy: "enforced",
         servers: {
-          "my_custom_server": "blocked",
-          "my": "trusted",
+          my_custom_server: "blocked",
+          my: "trusted",
         },
       },
     }

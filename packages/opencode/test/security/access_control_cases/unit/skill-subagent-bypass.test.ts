@@ -45,7 +45,10 @@ describe("CASE-SKILL-001: Skill scanner follows symlinks to protected files — 
     const secretsDir = path.join(tempDir, "secrets")
     fs.mkdirSync(secretsDir, { recursive: true })
     const secretFile = path.join(secretsDir, "key.pem")
-    fs.writeFileSync(secretFile, "-----BEGIN RSA PRIVATE KEY-----\nSECRET_KEY_CONTENT_HERE\n-----END RSA PRIVATE KEY-----")
+    fs.writeFileSync(
+      secretFile,
+      "-----BEGIN RSA PRIVATE KEY-----\nSECRET_KEY_CONTENT_HERE\n-----END RSA PRIVATE KEY-----",
+    )
 
     // Setup: create .claude/skills/test/ dir with SKILL.md as symlink to secret
     const skillDir = path.join(tempDir, ".claude", "skills", "test")

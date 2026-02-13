@@ -16,6 +16,8 @@ const FILES = [
   "CONTEXT.md", // deprecated
 ]
 
+const README_FILES = ["README.md"]
+
 function globalFiles() {
   const files = []
   if (Flag.OPENCODE_CONFIG_DIR) {
@@ -168,6 +170,13 @@ export namespace InstructionPrompt {
     }
   }
 
+  async function findReadme(dir: string) {
+    for (const file of README_FILES) {
+      const filepath = path.resolve(path.join(dir, file))
+      if (await Bun.file(filepath).exists()) return filepath
+    }
+  }
+
   export async function resolve(messages: MessageV2.WithParts[], filepath: string, messageID: string) {
     const system = await systemPaths()
     const already = loaded(messages)
@@ -190,6 +199,29 @@ export namespace InstructionPrompt {
         }
       }
       current = path.dirname(current)
+    }
+
+    const config = await Config.get()
+    if (config.experimental?.readme_injection !== false) {
+      const dir = path.dirname(target)
+      if (dir !== root) {
+        const readme = await findReadme(dir)
+        if (
+          readme &&
+          readme !== target &&
+          !system.has(readme) &&
+          !already.has(readme) &&
+          !isClaimed(messageID, readme)
+        ) {
+          claim(messageID, readme)
+          const content = await Bun.file(readme)
+            .text()
+            .catch(() => undefined)
+          if (content) {
+            results.push({ filepath: readme, content: "Instructions from: " + readme + "\n" + content })
+          }
+        }
+      }
     }
 
     return results

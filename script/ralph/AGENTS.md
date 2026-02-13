@@ -24,7 +24,7 @@ cd flowchart && npm run build
 
 - `ralph.sh` - The bash loop that spawns fresh AI instances (supports `--tool amp` or `--tool claude`)
 - `prompt.md` - Instructions given to each AMP instance
--  `CLAUDE.md` - Instructions given to each Claude Code instance
+- `CLAUDE.md` - Instructions given to each Claude Code instance
 - `prd.json.example` - Example PRD format
 - `flowchart/` - Interactive React Flow diagram explaining how Ralph works
 
@@ -33,6 +33,7 @@ cd flowchart && npm run build
 The `flowchart/` directory contains an interactive visualization built with React Flow. It's designed for presentations - click through to reveal each step with animations.
 
 To run locally:
+
 ```bash
 cd flowchart
 npm install

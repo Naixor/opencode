@@ -44,7 +44,10 @@ describe("CASE-GUARD-001: withAccessGuard around skill symlink bypass — OS-lev
     const secretsDir = path.join(tempDir, "secrets")
     fs.mkdirSync(secretsDir, { recursive: true })
     const secretFile = path.join(secretsDir, "key.pem")
-    fs.writeFileSync(secretFile, "-----BEGIN RSA PRIVATE KEY-----\nGUARD_TEST_SECRET_001\n-----END RSA PRIVATE KEY-----")
+    fs.writeFileSync(
+      secretFile,
+      "-----BEGIN RSA PRIVATE KEY-----\nGUARD_TEST_SECRET_001\n-----END RSA PRIVATE KEY-----",
+    )
 
     // Setup: SKILL.md symlink to secret
     const skillDir = path.join(tempDir, ".claude", "skills", "test")
@@ -60,27 +63,31 @@ describe("CASE-GUARD-001: withAccessGuard around skill symlink bypass — OS-lev
     // Use withAccessGuard to monitor the skill scan operation
     // Pattern uses absolute path to match fs_usage/fs.watch output
     const absoluteSecretsPattern = path.join(tempDir, "secrets", "**")
-    const report = await withAccessGuard([absoluteSecretsPattern], async () => {
-      // Simulate Skill.state() pipeline: glob scan + parse
-      const SKILL_GLOB = new Bun.Glob("skills/**/SKILL.md")
-      const matches: string[] = []
-      for await (const match of SKILL_GLOB.scan({
-        cwd: path.join(tempDir, ".claude"),
-        absolute: true,
-        onlyFiles: true,
-        followSymlinks: true,
-        dot: true,
-      })) {
-        matches.push(match)
-      }
+    const report = await withAccessGuard(
+      [absoluteSecretsPattern],
+      async () => {
+        // Simulate Skill.state() pipeline: glob scan + parse
+        const SKILL_GLOB = new Bun.Glob("skills/**/SKILL.md")
+        const matches: string[] = []
+        for await (const match of SKILL_GLOB.scan({
+          cwd: path.join(tempDir, ".claude"),
+          absolute: true,
+          onlyFiles: true,
+          followSymlinks: true,
+          dot: true,
+        })) {
+          matches.push(match)
+        }
 
-      // The scanner discovers the symlinked SKILL.md
-      expect(matches.length).toBe(1)
+        // The scanner discovers the symlinked SKILL.md
+        expect(matches.length).toBe(1)
 
-      // ConfigMarkdown.parse reads the file content (following symlink)
-      const parsed = await ConfigMarkdown.parse(matches[0])
-      expect(parsed.content).toContain("GUARD_TEST_SECRET_001")
-    }, { cwd: tempDir })
+        // ConfigMarkdown.parse reads the file content (following symlink)
+        const parsed = await ConfigMarkdown.parse(matches[0])
+        expect(parsed.content).toContain("GUARD_TEST_SECRET_001")
+      },
+      { cwd: tempDir },
+    )
 
     // Verify report structure
     expect(report).toBeDefined()
@@ -111,18 +118,21 @@ describe("CASE-GUARD-001: withAccessGuard around skill symlink bypass — OS-lev
 
     // Create a dummy audit log with NO denied entry for secrets/key.pem
     const auditLogPath = path.join(tempDir, ".opencode-security-audit.log")
-    fs.writeFileSync(auditLogPath, JSON.stringify({
-      timestamp: new Date().toISOString(),
-      role: "viewer",
-      operation: "read",
-      path: "some/other/file.ts",
-      result: "allowed",
-    }) + "\n")
-
-    const guard = new AccessGuard(
-      [path.join(tempDir, "secrets", "**")],
-      { cwd: tempDir, logPath: path.join(tempDir, "report", "guard-events.ndjson") },
+    fs.writeFileSync(
+      auditLogPath,
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        role: "viewer",
+        operation: "read",
+        path: "some/other/file.ts",
+        result: "allowed",
+      }) + "\n",
     )
+
+    const guard = new AccessGuard([path.join(tempDir, "secrets", "**")], {
+      cwd: tempDir,
+      logPath: path.join(tempDir, "report", "guard-events.ndjson"),
+    })
     await guard.start()
 
     // Read the protected file directly (simulating what skill scanner does)
@@ -199,15 +209,19 @@ describe("CASE-GUARD-002: withAccessGuard around InstructionPrompt loading from 
     await setupSecurityConfig(config, tempDir)
 
     const absolutePattern = path.join(tempDir, "test-instructions", "**")
-    const report = await withAccessGuard([absolutePattern], async () => {
-      // Simulate InstructionPrompt loading via findUp
-      const found = await Filesystem.findUp("CLAUDE.md", protectedDir, tempDir)
-      expect(found.length).toBeGreaterThan(0)
+    const report = await withAccessGuard(
+      [absolutePattern],
+      async () => {
+        // Simulate InstructionPrompt loading via findUp
+        const found = await Filesystem.findUp("CLAUDE.md", protectedDir, tempDir)
+        expect(found.length).toBeGreaterThan(0)
 
-      // Read the content (what InstructionPrompt does via Bun.file().text())
-      const content = await Bun.file(found[0]).text()
-      expect(content).toContain("CANARY_GUARD_INSTRUCTION_002")
-    }, { cwd: tempDir })
+        // Read the content (what InstructionPrompt does via Bun.file().text())
+        const content = await Bun.file(found[0]).text()
+        expect(content).toContain("CANARY_GUARD_INSTRUCTION_002")
+      },
+      { cwd: tempDir },
+    )
 
     // Verify SecurityAccess denies the same path
     const accessResult = SecurityAccess.checkAccess("test-instructions/CLAUDE.md", "read", "viewer")
@@ -237,13 +251,16 @@ describe("CASE-GUARD-002: withAccessGuard around InstructionPrompt loading from 
 
     // Setup audit log with allowed-only entries
     const auditLogPath = path.join(tempDir, ".opencode-security-audit.log")
-    fs.writeFileSync(auditLogPath, JSON.stringify({
-      timestamp: new Date().toISOString(),
-      role: "viewer",
-      operation: "read",
-      path: "public/readme.md",
-      result: "allowed",
-    }) + "\n")
+    fs.writeFileSync(
+      auditLogPath,
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        role: "viewer",
+        operation: "read",
+        path: "public/readme.md",
+        result: "allowed",
+      }) + "\n",
+    )
 
     const baseConfig = loadBaseConfig()
     const config = {
@@ -305,14 +322,18 @@ describe("CASE-GUARD-003: withAccessGuard around Read tool that gets blocked by 
     await setupSecurityConfig(baseConfig, tempDir)
 
     const absolutePattern = path.join(tempDir, "secrets", "**")
-    const report = await withAccessGuard([absolutePattern], async () => {
-      // Simulate what the Read tool does: checkAccess first
-      const accessResult = SecurityAccess.checkAccess("secrets/key.pem", "read", "viewer")
-      expect(accessResult.allowed).toBe(false)
+    const report = await withAccessGuard(
+      [absolutePattern],
+      async () => {
+        // Simulate what the Read tool does: checkAccess first
+        const accessResult = SecurityAccess.checkAccess("secrets/key.pem", "read", "viewer")
+        expect(accessResult.allowed).toBe(false)
 
-      // Read tool would throw here — content is never read
-      // We do NOT read the file, simulating the tool's behavior after denial
-    }, { cwd: tempDir })
+        // Read tool would throw here — content is never read
+        // We do NOT read the file, simulating the tool's behavior after denial
+      },
+      { cwd: tempDir },
+    )
 
     // Verify report: no actual content read should have occurred
     expect(report).toBeDefined()
@@ -340,11 +361,15 @@ describe("CASE-GUARD-003: withAccessGuard around Read tool that gets blocked by 
     fs.writeFileSync(publicFile, "PUBLIC_CONTENT_003")
 
     const absolutePattern = path.join(tempDir, "public", "**")
-    const report = await withAccessGuard([absolutePattern], async () => {
-      // Actually read the file (simulating an allowed Read tool operation)
-      const content = fs.readFileSync(publicFile, "utf8")
-      expect(content).toBe("PUBLIC_CONTENT_003")
-    }, { cwd: tempDir })
+    const report = await withAccessGuard(
+      [absolutePattern],
+      async () => {
+        // Actually read the file (simulating an allowed Read tool operation)
+        const content = fs.readFileSync(publicFile, "utf8")
+        expect(content).toBe("PUBLIC_CONTENT_003")
+      },
+      { cwd: tempDir },
+    )
 
     expect(report).toBeDefined()
 
@@ -370,15 +395,18 @@ describe("CASE-GUARD-003: withAccessGuard around Read tool that gets blocked by 
 
     // Simulate the audit log entry that would be written by SecurityAudit
     const auditLogPath = path.join(tempDir, ".opencode-security-audit.log")
-    fs.writeFileSync(auditLogPath, JSON.stringify({
-      timestamp: new Date().toISOString(),
-      role: "viewer",
-      operation: "read",
-      path: "secrets/key.pem",
-      result: "denied",
-      reason: "Matched rule: secrets/**",
-      ruleTriggered: "secrets/**",
-    }) + "\n")
+    fs.writeFileSync(
+      auditLogPath,
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        role: "viewer",
+        operation: "read",
+        path: "secrets/key.pem",
+        result: "denied",
+        reason: "Matched rule: secrets/**",
+        ruleTriggered: "secrets/**",
+      }) + "\n",
+    )
 
     // Create the guard with the audit log path
     const absolutePattern = path.join(tempDir, "secrets", "**")
@@ -417,17 +445,21 @@ describe("CASE-GUARD-004: withAccessGuard around blocked 'cat secrets/key.pem' b
     await setupSecurityConfig(baseConfig, tempDir)
 
     const absolutePattern = path.join(tempDir, "secrets", "**")
-    const report = await withAccessGuard([absolutePattern], async () => {
-      // BashScanner checks the command BEFORE execution
-      const scanResult = BashScanner.scanBashCommand("cat secrets/key.pem", tempDir)
+    const report = await withAccessGuard(
+      [absolutePattern],
+      async () => {
+        // BashScanner checks the command BEFORE execution
+        const scanResult = BashScanner.scanBashCommand("cat secrets/key.pem", tempDir)
 
-      // Scanner returns the protected path — command would be blocked
-      expect(scanResult.length).toBeGreaterThan(0)
-      expect(scanResult).toContain(path.join(tempDir, "secrets", "key.pem"))
+        // Scanner returns the protected path — command would be blocked
+        expect(scanResult.length).toBeGreaterThan(0)
+        expect(scanResult).toContain(path.join(tempDir, "secrets", "key.pem"))
 
-      // The bash tool would NOT execute the command — no OS-level read occurs
-      // We do NOT spawn the command, simulating the tool's pre-execution block
-    }, { cwd: tempDir })
+        // The bash tool would NOT execute the command — no OS-level read occurs
+        // We do NOT spawn the command, simulating the tool's pre-execution block
+      },
+      { cwd: tempDir },
+    )
 
     expect(report).toBeDefined()
 
@@ -449,7 +481,7 @@ describe("CASE-GUARD-004: withAccessGuard around blocked 'cat secrets/key.pem' b
 
     // BashScanner does NOT catch cp
     const scanResult = BashScanner.scanBashCommand("cp secrets/key.pem /tmp/stolen.pem", tempDir)
-    expect(scanResult.length).toBe(0)  // cp is unscanned
+    expect(scanResult.length).toBe(0) // cp is unscanned
 
     // If cp were actually executed, OS-level events would appear
     // but BashScanner wouldn't have blocked it — this is the bypass documented in CASE-BASH-002
@@ -493,13 +525,17 @@ describe("CASE-GUARD-004: withAccessGuard around blocked 'cat secrets/key.pem' b
     fs.mkdirSync(secretsDir, { recursive: true })
     fs.writeFileSync(path.join(secretsDir, "key.pem"), "BLOCKED_DATA")
 
-    const report = await withAccessGuard([absolutePattern], async () => {
-      // Simulate: BashScanner checks → detects protected path → blocks
-      // No command is executed, no file I/O
-      const blocked = BashScanner.scanBashCommand("cat secrets/key.pem", tempDir)
-      expect(blocked.length).toBeGreaterThan(0)
-      // Command blocked — nothing executed
-    }, { cwd: tempDir })
+    const report = await withAccessGuard(
+      [absolutePattern],
+      async () => {
+        // Simulate: BashScanner checks → detects protected path → blocks
+        // No command is executed, no file I/O
+        const blocked = BashScanner.scanBashCommand("cat secrets/key.pem", tempDir)
+        expect(blocked.length).toBeGreaterThan(0)
+        // Command blocked — nothing executed
+      },
+      { cwd: tempDir },
+    )
 
     // Zero events for protected files (no I/O occurred)
     const secretsEvents = report.protectedAccesses.filter(
@@ -553,9 +589,7 @@ describe("CASE-GUARD-005: AccessGuard unprivileged mode fallback and limitations
       expect(report.warnings.some((w) => w.includes("READ"))).toBe(true)
 
       // Write/create events may be captured (fs.watch is not guaranteed to fire immediately)
-      const writeEvents = report.protectedAccesses.filter(
-        (e) => e.operation === "write" || e.operation === "create",
-      )
+      const writeEvents = report.protectedAccesses.filter((e) => e.operation === "write" || e.operation === "create")
       // fs.watch may or may not fire — the important thing is the warning is present
       // Document: fs.watch event timing is OS-dependent and may miss rapid writes
     }
@@ -619,12 +653,10 @@ describe("CASE-GUARD-005: AccessGuard unprivileged mode fallback and limitations
   test("report documents that no application audit log was provided", async () => {
     const guard = new AccessGuard([path.join(tempDir, "**")], { cwd: tempDir })
     await guard.start()
-    const report = await guard.report()  // No appLogPath
+    const report = await guard.report() // No appLogPath
 
     // Without audit log, report should note this
-    expect(report.warnings.some(
-      (w) => w.includes("audit log") || w.includes("No application"),
-    )).toBe(true)
+    expect(report.warnings.some((w) => w.includes("audit log") || w.includes("No application"))).toBe(true)
   })
 
   test("AccessGuard NDJSON log output is written when logPath is set", async () => {
@@ -632,10 +664,7 @@ describe("CASE-GUARD-005: AccessGuard unprivileged mode fallback and limitations
     const watchDir = path.join(tempDir, "logged")
     fs.mkdirSync(watchDir, { recursive: true })
 
-    const guard = new AccessGuard(
-      [path.join(watchDir, "**")],
-      { cwd: tempDir, logPath },
-    )
+    const guard = new AccessGuard([path.join(watchDir, "**")], { cwd: tempDir, logPath })
     await guard.start()
 
     await new Promise((resolve) => setTimeout(resolve, 200))

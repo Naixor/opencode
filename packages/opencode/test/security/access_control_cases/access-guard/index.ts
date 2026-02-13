@@ -39,9 +39,7 @@ export class AccessGuard {
 
     this.startTime = Date.now()
 
-    this.monitor = privileged
-      ? startPrivilegedMonitor(this.config)
-      : startUnprivilegedMonitor(this.config)
+    this.monitor = privileged ? startPrivilegedMonitor(this.config) : startUnprivilegedMonitor(this.config)
   }
 
   async stop(): Promise<AccessEvent[]> {
@@ -96,4 +94,12 @@ export async function withAccessGuard(
 export { generateReport, writeReport } from "./reporter"
 export { parseFsUsageLine, isProtectedPath } from "./parser"
 export { isPrivilegedAvailable } from "./privileged-monitor"
-export type { AccessEvent, AccessOperation, MonitorConfig, MonitorHandle, MonitorReport, ComplianceViolation, AuditLogEntry } from "./types"
+export type {
+  AccessEvent,
+  AccessOperation,
+  MonitorConfig,
+  MonitorHandle,
+  MonitorReport,
+  ComplianceViolation,
+  AuditLogEntry,
+} from "./types"

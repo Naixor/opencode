@@ -427,7 +427,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("matches test-file.ts at root", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "**/test*",
@@ -447,7 +450,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("matches deeply nested test-utils.ts", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "**/test*",
@@ -467,7 +473,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("does NOT match 'contest.ts' (test must be at segment start for matchBase)", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "**/test*",
@@ -489,7 +498,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("matches 'testing/' directory content when used as directory type", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "**/test*",
@@ -512,7 +524,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("matches src/module/private/secret.ts", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "src/*/private/**",
@@ -532,7 +547,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("does NOT match src/a/b/private/secret.ts (single * does not match multiple levels)", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "src/*/private/**",
@@ -553,7 +571,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("matches src/any-module/private/deep/nested/file.ts", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "src/*/private/**",
@@ -576,7 +597,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("[!.]env matches files like 'aenv', '1env' but NOT '.env'", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "[!.]env",
@@ -602,7 +626,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("[!.]env does not match multi-char prefix like 'myenv'", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "[!.]env",
@@ -625,7 +652,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("matches files with .secret extension at any depth", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "**/*.secret",
@@ -648,7 +678,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("does NOT match file without .secret extension", async () => {
       const config: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "**/*.secret",
@@ -670,7 +703,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
     test("merging configs with complementary glob patterns creates additive protection", async () => {
       const configA: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "**/*.pem",
@@ -683,7 +719,10 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
 
       const configB: SecuritySchema.SecurityConfig = {
         version: "1.0",
-        roles: [{ name: "admin", level: 100 }, { name: "viewer", level: 10 }],
+        roles: [
+          { name: "admin", level: 100 },
+          { name: "viewer", level: 10 },
+        ],
         rules: [
           {
             pattern: "**/*.key",

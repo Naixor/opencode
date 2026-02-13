@@ -52,18 +52,18 @@ bun run --cwd packages/desktop tauri dev
 
 ### Core Application (`packages/opencode/src/`)
 
-| Directory | Purpose |
-|-----------|---------|
-| `cli/cmd/` | CLI commands (run, auth, models, serve, mcp, etc.) |
-| `cli/cmd/tui/` | Terminal UI (SolidJS + OpenTUI) |
-| `server/` | Hono REST API server |
+| Directory        | Purpose                                            |
+| ---------------- | -------------------------------------------------- |
+| `cli/cmd/`       | CLI commands (run, auth, models, serve, mcp, etc.) |
+| `cli/cmd/tui/`   | Terminal UI (SolidJS + OpenTUI)                    |
+| `server/`        | Hono REST API server                               |
 | `server/routes/` | API routes (tui, project, session, pty, mcp, etc.) |
-| `agent/` | AI agent logic |
-| `agent/prompt/` | LLM system prompts |
-| `provider/` | LLM provider integrations |
-| `skill/` | Skills (tools) available to agents |
-| `tool/` | Tool implementations (file editing, execution) |
-| `bus/` | Event bus for inter-component communication |
+| `agent/`         | AI agent logic                                     |
+| `agent/prompt/`  | LLM system prompts                                 |
+| `provider/`      | LLM provider integrations                          |
+| `skill/`         | Skills (tools) available to agents                 |
+| `tool/`          | Tool implementations (file editing, execution)     |
+| `bus/`           | Event bus for inter-component communication        |
 
 ### Key Technologies
 

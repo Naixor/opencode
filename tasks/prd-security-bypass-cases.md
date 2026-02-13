@@ -18,9 +18,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 ## User Stories
 
 ### US-001: Set up test infrastructure and fixtures
+
 **Description:** As a security tester, I need a shared test infrastructure so that all attack cases can consistently set up and tear down security configurations.
 
 **Acceptance Criteria:**
+
 - [ ] Create `access_control_cases/` directory structure:
   - `access_control_cases/fixtures/` — shared security configs, test files, token fixtures
   - `access_control_cases/unit/` — bun test files for code-level attacks
@@ -40,9 +42,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-002: Implement config manipulation attack cases
+
 **Description:** As a security tester, I want to verify that malformed, tampered, or missing configurations cannot be exploited to bypass protection.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-CFG-001: Fail-open exploitation** — Verify that deliberately malforming `.opencode-security.json` (invalid JSON, bad schema) causes all protections to be dropped (fail-open behavior). Document this as a known design risk.
 - [ ] **CASE-CFG-002: Config race condition** — Test loading config while it's being written (truncated file). Verify behavior is fail-open, not crash.
 - [ ] **CASE-CFG-003: Config deletion at runtime** — Delete the config file after it's loaded. Verify cached config continues to protect (it does since config is loaded once).
@@ -53,9 +57,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-003: Implement role authentication bypass cases
+
 **Description:** As a security tester, I want to verify that role authentication cannot be forged, spoofed, or escalated.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-AUTH-001: getDefaultRole() weakness** — Verify that all tools use `getDefaultRole()` which always returns the lowest role, meaning role-based access control is NOT actually enforced. Document this as a CRITICAL finding.
 - [ ] **CASE-AUTH-002: Token forgery with wrong key** — Create a JWT signed with a different private key. Verify it is rejected and falls back to lowest role.
 - [ ] **CASE-AUTH-003: Expired token** — Create a JWT with past expiration. Verify rejected.
@@ -68,9 +74,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-004: Implement path traversal and symlink attack cases
+
 **Description:** As a security tester, I want to verify that path manipulation techniques cannot bypass file-level protection rules.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-PATH-001: Relative path traversal** — Access `public/../secrets/key.pem` when `secrets/**` is protected. Verify the path is normalized before checking.
 - [ ] **CASE-PATH-002: Double encoding** — Access path with `%2F` or `%2e%2e` URL-encoded segments. Verify not bypassed.
 - [ ] **CASE-PATH-003: Null byte injection** — Access `secrets/key.pem\x00.txt` to try to truncate path at null byte. Verify blocked.
@@ -84,9 +92,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-005: Implement Read tool bypass cases
+
 **Description:** As a security tester, I want to verify the Read tool cannot be tricked into revealing protected content.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-READ-001: Full file read of protected file** — Read a file matching a protected pattern. Verify access denied error.
 - [ ] **CASE-READ-002: Segment redaction completeness** — Read a file with `// @secure-start` / `// @secure-end` markers. Verify content between markers is fully replaced with `[REDACTED: Security Protected]`.
 - [ ] **CASE-READ-003: Partial read with offset** — Use line offset/limit to try to read only the protected segment. Verify redaction still applies.
@@ -98,9 +108,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-006: Implement Write/Edit tool bypass cases
+
 **Description:** As a security tester, I want to verify the Write and Edit tools cannot modify protected content.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-WRITE-001: Direct write to protected file** — Write to a file matching protected pattern. Verify access denied.
 - [ ] **CASE-WRITE-002: Write to new file in protected directory** — Create new file under `secrets/newfile.ts`. Verify directory rule blocks creation.
 - [ ] **CASE-EDIT-001: Edit protected segment** — Edit text overlapping with a `@secure-start`/`@secure-end` region. Verify edit is blocked.
@@ -111,9 +123,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-007: Implement Grep/Glob tool bypass cases
+
 **Description:** As a security tester, I want to verify search tools cannot leak protected content in their results.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-GREP-001: Grep in protected file** — Search for a known string inside a protected file. Verify the file is excluded from results.
 - [ ] **CASE-GREP-002: Grep match in protected segment** — Search for a string inside a `@secure-start`/`@secure-end` region of a partially-protected file. Verify the match is redacted (file/line shown but content hidden).
 - [ ] **CASE-GREP-003: Grep with glob pattern targeting protected dir** — Use `--include` glob that matches protected directory. Verify results are filtered.
@@ -123,9 +137,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-008: Implement Bash tool bypass cases
+
 **Description:** As a security tester, I want to verify the Bash tool command scanner cannot be evaded with alternative commands or encoding tricks.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-BASH-001: Standard commands blocked** — `cat secrets/key.pem`, `head secrets/key.pem`, `tail secrets/key.pem`. Verify all blocked.
 - [ ] **CASE-BASH-002: Unscanned command bypass** — Commands NOT in the scanner's list: `cp secrets/key.pem /tmp/`, `mv secrets/key.pem public/`, `tee`, `dd`, `sort`, `uniq`, `wc`, `xxd`, `od`, `hexdump`, `strings`, `file`, `stat`, `base64`, `openssl`. Verify whether these are caught.
 - [ ] **CASE-BASH-003: Path alias in command** — `cat ./secrets/../secrets/key.pem`. Verify normalized path is checked.
@@ -144,9 +160,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-009: Implement LLM request leakage cases
+
 **Description:** As a security tester, I want to verify that protected content cannot leak to LLM providers through any channel.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-LLM-001: Direct content in message** — Protected content pasted directly in a user message. Verify the LLM interceptor detects and blocks/redacts it.
 - [ ] **CASE-LLM-002: Content in tool result** — Tool that returns protected content in its output (e.g., a Read result that wasn't properly redacted). Verify the LLM interceptor catches it as a second line of defense.
 - [ ] **CASE-LLM-003: Content in system prompt** — Protected content injected via CLAUDE.md or instruction files. Verify the LLM scanner catches it.
@@ -158,9 +176,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-010: Implement segment detection evasion cases
+
 **Description:** As a security tester, I want to verify that comment-marker and AST-based segment detection cannot be evaded.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-SEG-001: Marker with extra whitespace** — `//   @secure-start` (extra spaces). Verify the regex `\\s*` handles this.
 - [ ] **CASE-SEG-002: Marker without comment prefix** — Just `@secure-start` on a line without `//` or `#`. Verify this is NOT detected (correct behavior — must be in a comment).
 - [ ] **CASE-SEG-003: Marker in block comment** — `/* @secure-start */`. Verify detected by the `/* */` pattern.
@@ -173,9 +193,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-011: Implement MCP security bypass cases
+
 **Description:** As a security tester, I want to verify that MCP server tools cannot be used to bypass security rules.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-MCP-001: Blocked server tool call** — Call a tool from a server with `blocked` policy. Verify the tool is not registered/callable.
 - [ ] **CASE-MCP-002: Enforced server reads protected file** — MCP tool on `enforced` server attempts to read protected content. Verify input is scanned and blocked.
 - [ ] **CASE-MCP-003: Trusted server exempt** — MCP tool on `trusted` server accesses protected content. Verify access is allowed (by design — document as trust model).
@@ -185,9 +207,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-012: Implement rule inheritance bypass cases
+
 **Description:** As a security tester, I want to verify that rule inheritance cannot be circumvented.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-INH-001: Child weakening parent** — Parent protects `secrets/**`, child config tries to allow `secrets/public/`. Verify parent restriction persists.
 - [ ] **CASE-INH-002: Deep nesting** — File at `a/b/c/d/e/f/g/file.ts` with protection rule on `a/`. Verify inheritance applies 7 levels deep.
 - [ ] **CASE-INH-003: Cross-directory rule** — Two separate directory rules that overlap (`src/**` and `src/auth/**`). Verify both rules apply and the most restrictive wins.
@@ -195,18 +219,22 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-013: Implement timing and race condition cases
+
 **Description:** As a security tester, I want to verify that race conditions cannot be exploited to bypass security checks.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-RACE-001: TOCTOU on file read** — File is unprotected at check time, becomes protected before read completes (or vice versa — protected file replaced with unprotected one). Document timing window.
 - [ ] **CASE-RACE-002: Config reload race** — Config is changed between check and enforcement. Verify cached config prevents this.
 - [ ] **CASE-RACE-003: Symlink swap** — Symlink target changed between symlink resolution and file read. Document timing window.
 - [ ] Typecheck passes
 
 ### US-014: Implement audit logging evasion cases
+
 **Description:** As a security tester, I want to verify that security events cannot be hidden from the audit log.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-LOG-001: Log path manipulation** — Config sets `logging.path` to `/dev/null` or a non-writable location. Verify logging gracefully degrades without breaking security enforcement.
 - [ ] **CASE-LOG-002: Content hash verification** — Verify that sensitive content in audit logs is hashed, not stored as plaintext.
 - [ ] **CASE-LOG-003: Log injection** — Path or content containing newlines/control characters. Verify logs are not injectable.
@@ -216,11 +244,13 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-015: Create integration test scripts
+
 **Description:** As a security tester, I need shell scripts that test CLI-level and end-to-end attack scenarios.
 
 **Acceptance Criteria:**
-- [ ] `access_control_cases/integration/test-config-manipulation.sh` — Tests CASE-CFG-* scenarios via CLI
-- [ ] `access_control_cases/integration/test-bash-bypass.sh` — Tests CASE-BASH-* scenarios by actually running bash commands through the tool layer
+
+- [ ] `access_control_cases/integration/test-config-manipulation.sh` — Tests CASE-CFG-\* scenarios via CLI
+- [ ] `access_control_cases/integration/test-bash-bypass.sh` — Tests CASE-BASH-\* scenarios by actually running bash commands through the tool layer
 - [ ] `access_control_cases/integration/test-cli-security-commands.sh` — Tests `opencode security status/check/logs/init/init-keys/issue-token/verify-token/revoke-token` commands
 - [ ] `access_control_cases/integration/test-symlink-attacks.sh` — Tests CASE-PATH-004 through CASE-PATH-007 with real filesystem symlinks
 - [ ] Each script outputs TAP (Test Anything Protocol) format for unified reporting
@@ -229,11 +259,13 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Scripts are executable (`chmod +x`)
 
 ### US-016: Create unified test runner and reporting
+
 **Description:** As a CI/CD system, I need a single command that runs all security tests and produces a structured report.
 
 **Acceptance Criteria:**
+
 - [ ] `access_control_cases/run-all.sh` runs both bun tests and integration scripts
-- [ ] Output includes per-category summary: `[PASS]` / `[FAIL]` / `[KNOWN_LIMITATION]` for each CASE-*
+- [ ] Output includes per-category summary: `[PASS]` / `[FAIL]` / `[KNOWN_LIMITATION]` for each CASE-\*
 - [ ] Known limitations (e.g., binary bypass, AST for non-JS languages) are marked as `[KNOWN_LIMITATION]` not `[FAIL]`
 - [ ] Exit code is non-zero if any unexpected `[FAIL]` exists
 - [ ] Generates `access_control_cases/report/summary.json` with structured results
@@ -243,9 +275,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-017: Implement plan agent and security interaction cases
+
 **Description:** As a security tester, I want to verify that the plan agent's read-only mode interacts correctly with the security access control system, with no gaps between the two permission layers.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-AGENT-001: Dual denial — plan agent + security** — Plan agent denies edit (read-only mode) AND security denies the same file. Verify the error message comes from the plan agent's permission layer (tool is removed before security check runs). Document the layering order.
 - [ ] **CASE-AGENT-002: Plan agent allows plan file, security blocks it** — Security config protects `.opencode/plans/*.md`. Plan agent allows editing plan files. Verify security denial wins (security check runs inside the tool even if plan agent permission allows it).
 - [ ] **CASE-AGENT-003: Plan agent read of protected file** — Plan agent is read-only but can still use the Read tool. Verify that reading a security-protected file is blocked by the security layer even though the plan agent allows reads.
@@ -255,10 +289,12 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] **CASE-AGENT-007: Tool removal vs security check ordering** — Plan agent removes edit tools at LLM level (tool doesn't exist for LLM to call). Verify that even if an edit tool call is somehow injected (e.g., via MCP tool forwarding), the security layer still blocks writes to protected files.
 - [ ] Typecheck passes
 
-### US-018: Implement skill and subagent read bypass cases (CASE-SKILL-*, CASE-SUB-*)
+### US-018: Implement skill and subagent read bypass cases (CASE-SKILL-_, CASE-SUB-_)
+
 **Description:** As a security tester, I want to verify that the skill loading system and subagent spawning cannot be used to bypass security access control and leak protected content into LLM context.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-SKILL-001: Skill file loading bypasses security** — Static analysis evidence: `skill/skill.ts`, `config/markdown.ts` contain ZERO calls to `SecurityAccess.checkAccess()` or any security import (confirmed via grep). Runtime verification: (1) load security config protecting `secrets/**`, (2) create `.claude/skills/test/SKILL.md` as symlink to `secrets/key.pem` (skill scanner uses `followSymlinks: true` at `skill.ts:95`), (3) call `Skill.state()`, (4) verify skill content contains the protected file content, (5) simultaneously verify `SecurityAccess.checkAccess("secrets/key.pem", "read", "viewer").allowed === false`. If skill loads the content while checkAccess says denied, bypass is confirmed. Document as HIGH severity.
 - [ ] **CASE-SKILL-002: Skill in protected directory** — Create `secrets/.claude/skills/leak/SKILL.md` with frontmatter `name: leak`. Call `Skill.state()`. Verify whether the skill scanner's `EXTERNAL_SKILL_GLOB.scan()` discovers and loads it. The scan starts from `Instance.directory` and walks up (`Filesystem.up()`), so it may or may not enter `secrets/`. Test both: (a) skill dir inside protected dir, (b) symlink from `.claude/skills/leak/SKILL.md` → `secrets/data.md`.
 - [ ] **CASE-SKILL-003: Skill content injection** — Create a SKILL.md with body containing a canary string `CANARY_SECRET_12345` that represents stolen protected content. Call `Skill.state()`. Verify `skills["test"].content` contains the canary. Then verify this content would reach LLM context by checking the skill is included in session prompt construction.
@@ -270,9 +306,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-019: Build access-guard OS-level filesystem monitor
+
 **Description:** As a security tester, I need an OS-level filesystem access monitor (`access-guard`) that captures actual macOS syscalls (open/read/write/unlink/rename) on protected files, providing ground-truth verification independent of the application security layer.
 
 **Acceptance Criteria:**
+
 - [ ] Create `access_control_cases/access-guard/` directory with the following modules:
 - [ ] `types.ts` — shared types: `AccessEvent { timestamp, pid, process, syscall, path, operation: "read"|"write"|"rename"|"delete"|"create", flaggedAsProtected, result }`, `MonitorConfig`, `MonitorReport`, `ComplianceViolation`
 - [ ] `index.ts` — main `AccessGuard` class with `start()`, `stop()`, `report(appLogPath?)` methods. Auto-detects privileged/unprivileged mode via `sudo -n true` check. Exports `withAccessGuard(patterns, testFn)` convenience wrapper for bun test `beforeAll`/`afterAll` integration.
@@ -285,9 +323,11 @@ This is a **defensive security testing** effort — every discovered bypass must
 - [ ] Typecheck passes
 
 ### US-020: Integrate access-guard with bypass test cases
+
 **Description:** As a security tester, I want the access-guard to be wired into key bypass test cases so that OS-level evidence corroborates application-level findings.
 
 **Acceptance Criteria:**
+
 - [ ] **CASE-GUARD-001: Skill loading OS-level proof** — Use `withAccessGuard(["**/secrets/**"])` around `Skill.state()` call that loads a SKILL.md symlinked to `secrets/key.pem`. Assert `report.protectedAccesses` contains a "read" event for the protected file. Assert `report.complianceViolations.length > 0` (OS recorded access, app security didn't block).
 - [ ] **CASE-GUARD-002: Instruction loading OS-level proof** — Use `withAccessGuard` around `InstructionPrompt.system()` that loads a CLAUDE.md from a protected path. Assert OS-level read detected and compliance violation recorded.
 - [ ] **CASE-GUARD-003: Read tool blocked — OS should NOT show read** — Use `withAccessGuard` around a Read tool call on a protected file. The Read tool should throw a security error. In privileged mode, `fs_usage` may still show the `open()` syscall (because `resolveSymlink` calls `fs.lstatSync`/`fs.realpathSync` before denying), but the actual `read()` syscall should NOT appear. Document this distinction.
@@ -454,6 +494,7 @@ access_control_cases/
 ### Test Naming Convention
 
 Each test follows this format:
+
 ```typescript
 describe("CASE-BASH-002: Unscanned command bypass", () => {
   it("should detect cp command accessing protected file", () => { ... })
@@ -464,13 +505,13 @@ describe("CASE-BASH-002: Unscanned command bypass", () => {
 
 ### Severity Classification
 
-| Severity | Meaning | Example |
-|----------|---------|---------|
-| CRITICAL | Full bypass of security control | `getDefaultRole()` ignoring real tokens |
-| HIGH | Bypass achievable with moderate effort | Unscanned bash commands |
-| MEDIUM | Partial bypass or information leak | Binary content bypassing LLM scanner |
-| LOW | Edge case or requires unusual conditions | Unicode normalization mismatch |
-| INFO | Known design limitation, documented | Fail-open on config error |
+| Severity | Meaning                                  | Example                                 |
+| -------- | ---------------------------------------- | --------------------------------------- |
+| CRITICAL | Full bypass of security control          | `getDefaultRole()` ignoring real tokens |
+| HIGH     | Bypass achievable with moderate effort   | Unscanned bash commands                 |
+| MEDIUM   | Partial bypass or information leak       | Binary content bypassing LLM scanner    |
+| LOW      | Edge case or requires unusual conditions | Unicode normalization mismatch          |
+| INFO     | Known design limitation, documented      | Fail-open on config error               |
 
 ### Integration with CI
 
@@ -487,24 +528,24 @@ security-tests:
 
 ## Success Metrics
 
-- 100% of CASE-* IDs have automated test coverage (either bun test or shell script)
+- 100% of CASE-\* IDs have automated test coverage (either bun test or shell script)
 - All CRITICAL and HIGH severity bypasses are documented with reproduction steps
 - The test suite runs in under 60 seconds
 - Zero false positives (tests that fail for wrong reasons)
 - The test suite can be run locally with `bash access_control_cases/run-all.sh`
-- Every known limitation is explicitly documented with a CASE-* ID and `[KNOWN_LIMITATION]` tag
+- Every known limitation is explicitly documented with a CASE-\* ID and `[KNOWN_LIMITATION]` tag
 - `--fix-check` mode correctly identifies which CRITICAL/HIGH findings have fix branches/PRs
 - Plan agent + security interaction cases confirm no permission gaps between the two layers
 
 ## Design Decisions
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Audit log file security | Added CASE-LOG-004/005/006 | Attackers who can run Bash commands may target the log file itself to hide their tracks |
-| Fix-check mode | Added `--fix-check` to test runner (US-016) | CI should be able to verify that all CRITICAL/HIGH findings have corresponding fix work |
-| Plan agent interaction | Added US-017 with 7 CASE-AGENT-* cases | The plan agent's dual-layer permission system (tool removal + PermissionNext) must not create gaps when combined with the security access control layer |
-| Skill/subagent bypass | Added US-018 with 8 CASE-SKILL/SUB-* cases | Skill loading (SKILL.md via ConfigMarkdown.parse) and instruction loading (CLAUDE.md/AGENTS.md via InstructionPrompt) both use Bun.file().text() WITHOUT SecurityAccess.checkAccess(), creating HIGH severity bypass paths |
-| OS-level access-guard | Added US-019 (infrastructure) and US-020 (5 CASE-GUARD-* cases) | Application-level tests prove code paths lack security calls (static + runtime). access-guard provides ground-truth OS-level syscall evidence via macOS `fs_usage`/DTrace. Dual mode: privileged (captures reads) and unprivileged (write-only fallback). Cross-references OS events with app audit log to produce compliance violation reports. |
+| Decision                | Choice                                                           | Rationale                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Audit log file security | Added CASE-LOG-004/005/006                                       | Attackers who can run Bash commands may target the log file itself to hide their tracks                                                                                                                                                                                                                                                          |
+| Fix-check mode          | Added `--fix-check` to test runner (US-016)                      | CI should be able to verify that all CRITICAL/HIGH findings have corresponding fix work                                                                                                                                                                                                                                                          |
+| Plan agent interaction  | Added US-017 with 7 CASE-AGENT-\* cases                          | The plan agent's dual-layer permission system (tool removal + PermissionNext) must not create gaps when combined with the security access control layer                                                                                                                                                                                          |
+| Skill/subagent bypass   | Added US-018 with 8 CASE-SKILL/SUB-\* cases                      | Skill loading (SKILL.md via ConfigMarkdown.parse) and instruction loading (CLAUDE.md/AGENTS.md via InstructionPrompt) both use Bun.file().text() WITHOUT SecurityAccess.checkAccess(), creating HIGH severity bypass paths                                                                                                                       |
+| OS-level access-guard   | Added US-019 (infrastructure) and US-020 (5 CASE-GUARD-\* cases) | Application-level tests prove code paths lack security calls (static + runtime). access-guard provides ground-truth OS-level syscall evidence via macOS `fs_usage`/DTrace. Dual mode: privileged (captures reads) and unprivileged (write-only fallback). Cross-references OS events with app audit log to produce compliance violation reports. |
 
 ## Open Questions
 

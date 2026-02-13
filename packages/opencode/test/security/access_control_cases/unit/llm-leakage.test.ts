@@ -3,12 +3,7 @@ import fs from "fs"
 import { LLMScanner } from "@/security/llm-scanner"
 import { SecuritySegments } from "@/security/segments"
 import { SecuritySchema } from "@/security/schema"
-import {
-  setupSecurityConfig,
-  teardownSecurityConfig,
-  loadBaseConfig,
-  protectedFilePath,
-} from "../helpers"
+import { setupSecurityConfig, teardownSecurityConfig, loadBaseConfig, protectedFilePath } from "../helpers"
 
 afterEach(() => {
   teardownSecurityConfig()
@@ -168,7 +163,7 @@ describe("CASE-LLM-004: Scanner limits with obfuscated content", () => {
 
     // Attacker breaks markers across multiple parts to avoid detection
     const obfuscated = [
-      "// @secure" + "-start",  // concatenated at JS level, but content is literal
+      "// @secure" + "-start", // concatenated at JS level, but content is literal
       "const secret = 'hidden'",
       "// @secure" + "-end",
     ].join("\n")
@@ -240,11 +235,7 @@ describe("CASE-LLM-005: Base64-encoded protected content is NOT detected", () =>
     await setupSecurityConfig(baseConfig)
 
     // Original content with markers
-    const original = [
-      "// @secure-start",
-      "const apiKey = 'sk-secret-key-12345'",
-      "// @secure-end",
-    ].join("\n")
+    const original = ["// @secure-start", "const apiKey = 'sk-secret-key-12345'", "// @secure-end"].join("\n")
 
     // Base64-encode the content
     const encoded = Buffer.from(original).toString("base64")
@@ -334,17 +325,11 @@ describe("CASE-LLM-006: Marker boundaries are detected in arbitrary text", () =>
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
       segments: {
-        markers: [
-          { start: "@secure-start", end: "@secure-end", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-        ],
+        markers: [{ start: "@secure-start", end: "@secure-end", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
       },
     }
 
-    const pythonContent = [
-      "# @secure-start",
-      "API_KEY = 'secret-python-key'",
-      "# @secure-end",
-    ].join("\n")
+    const pythonContent = ["# @secure-start", "API_KEY = 'secret-python-key'", "# @secure-end"].join("\n")
 
     const matches = LLMScanner.scanForProtectedContent(pythonContent, config)
     const markerMatches = matches.filter((m) => m.ruleType === "marker")
@@ -356,17 +341,13 @@ describe("CASE-LLM-006: Marker boundaries are detected in arbitrary text", () =>
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
       segments: {
-        markers: [
-          { start: "@secure-start", end: "@secure-end", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-        ],
+        markers: [{ start: "@secure-start", end: "@secure-end", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
       },
     }
 
-    const cStyleContent = [
-      "/* @secure-start */",
-      "const secret = 'block-comment-secret';",
-      "/* @secure-end */",
-    ].join("\n")
+    const cStyleContent = ["/* @secure-start */", "const secret = 'block-comment-secret';", "/* @secure-end */"].join(
+      "\n",
+    )
 
     const matches = LLMScanner.scanForProtectedContent(cStyleContent, config)
     const markerMatches = matches.filter((m) => m.ruleType === "marker")
@@ -378,17 +359,11 @@ describe("CASE-LLM-006: Marker boundaries are detected in arbitrary text", () =>
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
       segments: {
-        markers: [
-          { start: "@secure-start", end: "@secure-end", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-        ],
+        markers: [{ start: "@secure-start", end: "@secure-end", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
       },
     }
 
-    const htmlContent = [
-      "<!-- @secure-start -->",
-      "<div>secret HTML content</div>",
-      "<!-- @secure-end -->",
-    ].join("\n")
+    const htmlContent = ["<!-- @secure-start -->", "<div>secret HTML content</div>", "<!-- @secure-end -->"].join("\n")
 
     const matches = LLMScanner.scanForProtectedContent(htmlContent, config)
     const markerMatches = matches.filter((m) => m.ruleType === "marker")
@@ -472,9 +447,7 @@ describe("CASE-LLM-008: extractLiteralFromGlob handles partial matches correctly
   test("'**/.env*' extracts '.env' — matches .env, .env.example, .envrc", () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
-      rules: [
-        { pattern: "**/.env*", type: "file", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-      ],
+      rules: [{ pattern: "**/.env*", type: "file", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
     }
 
     // .env.example is matched because extracted literal ".env" is a substring
@@ -490,9 +463,7 @@ describe("CASE-LLM-008: extractLiteralFromGlob handles partial matches correctly
   test("'secrets/**' extracts 'secrets/' — trailing slash from glob expansion", () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
-      rules: [
-        { pattern: "secrets/**", type: "directory", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-      ],
+      rules: [{ pattern: "secrets/**", type: "directory", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
     }
 
     // "secrets/" is the extracted literal (everything before the **)
@@ -523,9 +494,7 @@ describe("CASE-LLM-008: extractLiteralFromGlob handles partial matches correctly
   test("'src/auth/keys.ts' (no wildcards) extracts full path as literal", () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
-      rules: [
-        { pattern: "src/auth/keys.ts", type: "file", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-      ],
+      rules: [{ pattern: "src/auth/keys.ts", type: "file", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
     }
 
     const content = "Modified src/auth/keys.ts for the new auth flow."
@@ -539,9 +508,7 @@ describe("CASE-LLM-008: extractLiteralFromGlob handles partial matches correctly
   test("glob with middle wildcard 'config/*.json' extracts 'config/' prefix", () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
-      rules: [
-        { pattern: "config/*.json", type: "file", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-      ],
+      rules: [{ pattern: "config/*.json", type: "file", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
     }
 
     const content = "Look in the config/ directory for settings."
@@ -557,9 +524,7 @@ describe("CASE-LLM-008: extractLiteralFromGlob handles partial matches correctly
   test("[INFO] over-matching: '.env' literal matches .envrc and .env.example", () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
-      rules: [
-        { pattern: "**/.env*", type: "file", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-      ],
+      rules: [{ pattern: "**/.env*", type: "file", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
     }
 
     // .envrc is a legitimate config file that might not need protection
@@ -583,9 +548,7 @@ describe("CASE-LLM-008: extractLiteralFromGlob handles partial matches correctly
   test("leading '*/' is stripped — '*/private/**' extracts 'private/'", () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
-      rules: [
-        { pattern: "*/private/**", type: "directory", deniedOperations: ["llm"], allowedRoles: ["admin"] },
-      ],
+      rules: [{ pattern: "*/private/**", type: "directory", deniedOperations: ["llm"], allowedRoles: ["admin"] }],
     }
 
     const content = "The private/ folder is restricted."
