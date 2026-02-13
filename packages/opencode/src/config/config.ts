@@ -1169,6 +1169,23 @@ export namespace Config {
         })
         .optional()
         .describe("Background task manager configuration"),
+      categories: z
+        .record(
+          z.string(),
+          z.object({
+            description: z.string().describe("Description of when to use this category"),
+            model: z
+              .string()
+              .optional()
+              .describe("Model to use for tasks in this category (provider/model format)"),
+            prompt_append: z
+              .string()
+              .optional()
+              .describe("Additional prompt text appended for tasks in this category"),
+          }),
+        )
+        .optional()
+        .describe("Task categories for delegated work routing — user categories merge with/override defaults"),
       experimental: z
         .object({
           disable_paste_summary: z.boolean().optional(),
