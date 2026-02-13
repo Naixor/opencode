@@ -50,23 +50,45 @@ export namespace Log {
   export function file() {
     return logpath
   }
+
+  const buffer: string[] = []
+  let flushed = false
+
   let write = (msg: any) => {
-    process.stderr.write(msg)
+    buffer.push(msg)
     return msg.length
   }
 
-  export async function init(options: Options) {
+  export function init(options: Options) {
     if (options.level) level = options.level
-    cleanup(Global.Path.log)
-    if (options.print) return
+    cleanup(Global.Path.log).catch(() => {})
+    if (options.print) {
+      write = (msg: any) => {
+        process.stderr.write(msg)
+        return msg.length
+      }
+      flushed = true
+      return
+    }
     logpath = path.join(
       Global.Path.log,
       options.dev ? "dev.log" : new Date().toISOString().split(".")[0].replace(/:/g, "") + ".log",
     )
-    const logfile = Bun.file(logpath)
+  }
+
+  export async function flush() {
+    if (flushed) return
+    flushed = true
+    if (!logpath) return
     await fs.truncate(logpath).catch(() => {})
+    const logfile = Bun.file(logpath)
     const writer = logfile.writer()
-    write = async (msg: any) => {
+    for (const msg of buffer) {
+      writer.write(msg)
+    }
+    buffer.length = 0
+    writer.flush()
+    write = (msg: any) => {
       const num = writer.write(msg)
       writer.flush()
       return num

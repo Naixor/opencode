@@ -11,7 +11,7 @@ import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
 
-await Log.init({
+Log.init({
   print: process.argv.includes("--print-logs"),
   dev: Installation.isLocal(),
   level: (() => {
@@ -19,6 +19,7 @@ await Log.init({
     return "INFO"
   })(),
 })
+await Log.flush()
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {

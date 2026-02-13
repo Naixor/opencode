@@ -70,17 +70,18 @@ const cli = yargs(hideBin(process.argv))
     type: "boolean",
   })
   .middleware(async (opts) => {
-    await StartupTrace.measure("log-init", () =>
-      Log.init({
-        print: process.argv.includes("--print-logs"),
-        dev: Installation.isLocal(),
-        level: (() => {
-          if (opts.logLevel) return opts.logLevel as Log.Level
-          if (Installation.isLocal()) return "DEBUG"
-          return "INFO"
-        })(),
-      }),
-    )
+    StartupTrace.begin("log-init")
+    Log.init({
+      print: process.argv.includes("--print-logs"),
+      dev: Installation.isLocal(),
+      level: (() => {
+        if (opts.logLevel) return opts.logLevel as Log.Level
+        if (Installation.isLocal()) return "DEBUG"
+        return "INFO"
+      })(),
+    })
+    await Log.flush()
+    StartupTrace.end("log-init")
 
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"

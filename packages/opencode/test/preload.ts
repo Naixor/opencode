@@ -61,3 +61,4 @@ Log.init({
   dev: true,
   level: "DEBUG",
 })
+await Log.flush()

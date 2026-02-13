@@ -101,7 +101,7 @@ process.env.OPENCODE = "1"
 
 const log = await import("../../opencode/src/util/log")
 const install = await import("../../opencode/src/installation")
-await log.Log.init({
+log.Log.init({
   print: true,
   dev: install.Installation.isLocal(),
   level: "WARN",

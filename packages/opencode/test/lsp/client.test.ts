@@ -18,7 +18,7 @@ function spawnFakeServer() {
 
 describe("LSPClient interop", () => {
   beforeEach(async () => {
-    await Log.init({ print: true })
+    Log.init({ print: true })
   })
 
   test("handles workspace/workspaceFolders request", async () => {
