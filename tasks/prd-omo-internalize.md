@@ -10,59 +10,6 @@ Oh-My-OpenCode (OMO) is a community plugin providing multi-agent orchestration, 
 
 The internalization is split into 8 phases across 30 user stories, all implemented together as a single milestone. Each US includes comprehensive unit tests.
 
-## OMO Source Code Reference
-
-**How to obtain:**
-```bash
-gh repo clone code-yeongyu/oh-my-opencode /tmp/oh-my-opencode
-```
-
-**Source directory structure (must be referenced during implementation):**
-```
-/tmp/oh-my-opencode/src/
-├── agents/          # 11 agent definitions (system prompts, models, tool restrictions)
-├── hooks/           # 46+ hook implementations (each hook in its own directory)
-├── tools/           # 18+ tool implementations (parameter schemas, execute logic, security handling)
-├── features/        # Core subsystems (background-agent, opencode-skill-loader, claude-tasks, etc.)
-├── mcp/             # Built-in MCP server configs (websearch, context7, grep_app)
-├── config/          # Zod config schema definitions
-├── shared/          # Shared utility functions
-├── plugin/          # Plugin interface layer
-├── plugin-handlers/ # Configuration handlers
-├── cli/             # CLI system (out of scope for internalization)
-└── index.ts         # Plugin entry point
-```
-
-> **Critical principle:** When implementing each US, you **MUST first read the corresponding OMO source files** to understand implementation details, edge case handling, and error recovery logic, then re-implement under OpenCode's architecture. Do NOT rely solely on PRD descriptions — the PRD defines behavioral specifications, while OMO source code serves as the implementation reference. The mapping is as follows:
->
-> | US Topic | OMO Source Reference Path |
-> |----------|--------------------------|
-> | Hook infrastructure (US-001) | `src/plugin/hooks/`, `src/create-hooks.ts` |
-> | Error recovery hooks (US-002) | `src/hooks/edit-error-recovery/`, `src/hooks/anthropic-context-window-limit-recovery/`, `src/hooks/delegate-task-retry/`, `src/hooks/ralph-loop/` |
-> | Output management hooks (US-003) | `src/hooks/tool-output-truncator/`, `src/hooks/grep-output-truncator/`, `src/hooks/context-window-monitor/`, `src/hooks/preemptive-compaction/` |
-> | Context injection hooks (US-004) | `src/hooks/directory-agents-injector/`, `src/hooks/directory-readme-injector/`, `src/hooks/rules-injector/`, `src/hooks/compaction-context-injector/`, `src/hooks/compaction-todo-preserver/` |
-> | Agent behavior hooks (US-005) | `src/hooks/keyword-detector/`, `src/hooks/comment-checker/`, `src/hooks/todo-continuation-enforcer/`, `src/hooks/subagent-question-blocker/`, `src/hooks/write-existing-file-guard/` |
-> | Session management hooks (US-006) | `src/hooks/session-recovery/`, `src/hooks/session-notification/`, `src/hooks/unstable-agent-babysitter/`, `src/hooks/think-mode/`, `src/hooks/anthropic-effort/` |
-> | Sisyphus agent (US-007) | `src/agents/sisyphus.ts`, `src/agents/dynamic-agent-prompt-builder.ts` |
-> | omo-explore agent (US-008) | `src/agents/explore.ts` |
-> | Oracle agent (US-009) | `src/agents/oracle.ts` |
-> | Optional agents (US-010) | `src/agents/hephaestus.ts`, `src/agents/prometheus/`, `src/agents/atlas/`, `src/agents/librarian.ts`, `src/agents/metis.ts`, `src/agents/momus.ts`, `src/agents/multimodal-looker.ts`, `src/agents/sisyphus-junior/` |
-> | Background manager (US-011) | `src/features/background-agent/` |
-> | Category system (US-012) | `src/config/schema/categories.ts`, `src/tools/delegate-task/constants.ts` |
-> | Glob enhancement (US-013) | `src/tools/glob/` |
-> | Grep enhancement (US-014) | `src/tools/grep/` |
-> | LSP split (US-015) | `src/tools/lsp/` |
-> | AST-Grep tools (US-016) | `src/tools/ast-grep/` |
-> | delegate-task tool (US-017) | `src/tools/delegate-task/`, `src/tools/background-task/` |
-> | look-at tool (US-018) | `src/tools/look-at/` |
-> | skill-mcp tool (US-019) | `src/tools/skill-mcp/` |
-> | interactive-bash tool (US-020) | `src/tools/interactive-bash/` |
-> | Task persistence (US-021) | `src/features/claude-tasks/`, `src/tools/task/` |
-> | Skill enhancement (US-022) | `src/tools/skill/`, `src/features/opencode-skill-loader/` |
-> | MCP servers (US-023) | `src/mcp/` |
-> | Skills & Commands (US-024) | `src/features/builtin-skills/`, `src/features/builtin-commands/` |
-> | Config schema (US-025) | `src/config/schema/` |
-
 ## Key Architectural Decisions
 
 ### AD-1: Sisyphus replaces `build` as default agent
