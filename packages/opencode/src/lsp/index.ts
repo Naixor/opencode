@@ -454,6 +454,29 @@ export namespace LSP {
     }).then((result) => result.flat().filter(Boolean))
   }
 
+  export async function prepareRename(input: { file: string; line: number; character: number }) {
+    return run(input.file, (client) =>
+      client.connection
+        .sendRequest("textDocument/prepareRename", {
+          textDocument: { uri: pathToFileURL(input.file).href },
+          position: { line: input.line, character: input.character },
+        })
+        .catch(() => null),
+    ).then((result) => result.filter(Boolean))
+  }
+
+  export async function rename(input: { file: string; line: number; character: number; newName: string }) {
+    return run(input.file, (client) =>
+      client.connection
+        .sendRequest("textDocument/rename", {
+          textDocument: { uri: pathToFileURL(input.file).href },
+          position: { line: input.line, character: input.character },
+          newName: input.newName,
+        })
+        .catch(() => null),
+    ).then((result) => result.filter(Boolean))
+  }
+
   async function runAll<T>(input: (client: LSPClient.Info) => Promise<T>): Promise<T[]> {
     const clients = await state().then((x) => x.clients)
     const tasks = clients.map((x) => input(x))

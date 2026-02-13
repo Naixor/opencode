@@ -1,0 +1,10 @@
+Check if a symbol at a given position can be renamed.
+
+Returns the range and placeholder text for the symbol if it is renameable. Use this before lsp_rename to verify the symbol can be renamed and to get the current name.
+
+Parameters:
+- filePath: The file containing the symbol
+- line: Line number (1-based)
+- character: Character offset (1-based)
+
+Note: LSP servers must be configured for the file type.

@@ -1,0 +1,11 @@
+Rename a symbol across all files using LSP.
+
+Renames the symbol at the given position to the new name. Returns all affected files and the changes that would be made. Changes are NOT automatically applied — review the output and use edit tools to apply.
+
+Parameters:
+- filePath: The file containing the symbol
+- line: Line number (1-based)
+- character: Character offset (1-based)
+- newName: The new name for the symbol
+
+Note: Use lsp_prepare_rename first to verify the symbol can be renamed. LSP servers must be configured for the file type.

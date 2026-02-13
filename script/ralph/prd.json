@@ -506,7 +506,7 @@
         "Typecheck passes"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-019 for shared LSP infrastructure"
     },
     {

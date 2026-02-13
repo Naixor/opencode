@@ -31,6 +31,12 @@ import {
   LspHoverTool,
   LspImplementationTool,
 } from "./lsp-tools"
+import {
+  LspDiagnosticsTool,
+  LspPrepareRenameTool,
+  LspRenameTool,
+  LspCallHierarchyTool,
+} from "./lsp-tools-extended"
 import { Truncate } from "./truncation"
 import { PlanExitTool, PlanEnterTool } from "./plan"
 import { ApplyPatchTool } from "./apply_patch"
@@ -123,7 +129,7 @@ export namespace ToolRegistry {
       SkillTool,
       ApplyPatchTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL
-        ? [LspTool, LspGotoDefinitionTool, LspFindReferencesTool, LspSymbolsTool, LspHoverTool, LspImplementationTool]
+        ? [LspTool, LspGotoDefinitionTool, LspFindReferencesTool, LspSymbolsTool, LspHoverTool, LspImplementationTool, LspDiagnosticsTool, LspPrepareRenameTool, LspRenameTool, LspCallHierarchyTool]
         : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),

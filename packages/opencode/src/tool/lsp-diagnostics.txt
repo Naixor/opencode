@@ -1,0 +1,14 @@
+Get diagnostics (errors, warnings, information, hints) from LSP servers.
+
+Returns diagnostics for all open files from all connected LSP servers. Use the severity filter to narrow results.
+
+Severity levels:
+- error: Compilation errors, type errors
+- warning: Potential issues, unused variables
+- information: Informational messages
+- hint: Suggestions, style recommendations
+- all: Show all severities (default)
+
+Results are formatted as: SEVERITY [line:col] message (file:line:col)
+
+Note: LSP servers must be running and files must have been opened for diagnostics to be available.

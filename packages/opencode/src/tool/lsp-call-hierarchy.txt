@@ -1,0 +1,14 @@
+Explore the call hierarchy of a function or method.
+
+Supports three directions:
+- prepare: Get the call hierarchy item at the position (required first step)
+- incoming: Find all callers of the function/method at the position
+- outgoing: Find all functions/methods called by the function at the position
+
+Parameters:
+- filePath: The file containing the function/method
+- line: Line number (1-based)
+- character: Character offset (1-based)
+- direction: One of 'prepare', 'incoming', 'outgoing'
+
+Note: LSP servers must be configured for the file type.

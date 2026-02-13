@@ -35,6 +35,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Security rule schema: `deniedOperations: ["read"]` NOT `operations: { read: "deny" }` — use `SecuritySchema.Rule` format with `deniedOperations` array
 - Tool descriptions: one `.txt` file per tool, imported as text via Bun loader: `import DESC from "./tool-name.txt"`
 - LSP result URIs: two formats to handle — `{ uri, range }` (definitions) and `{ location: { uri, range } }` (references/symbols). Use `fileURLToPath()` to convert `file://` URIs for SecurityAccess
+- LSP WorkspaceEdit: two formats — `changes: Record<uri, TextEdit[]>` or `documentChanges: TextDocumentEdit[]` — handle both
+- Tool deprecation pattern: log warning via `Log.warn()`, prepend deprecation message to output, add `deprecated: true` + `replacement` to metadata
 
 ---
 
@@ -515,4 +517,35 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - `fileURLToPath` from `url` module converts `file://` URIs back to file paths for SecurityAccess checks
   - Tool descriptions as separate `.txt` files are imported via Bun's text loader — one file per tool
   - Tools with no LSP server available (file type not supported) throw "No LSP server available for this file type" — test with unusual extensions
+---
+
+## 2026-02-14 - US-020
+- Split LSP tool: created 4 new focused tools and deprecated old unified lsp tool
+  - `lsp_diagnostics`: retrieves LSP diagnostics with severity filter (error/warning/information/hint/all), formats as SEVERITY [line:col] message (file:line:col)
+  - `lsp_prepare_rename`: checks if symbol at position can be renamed, returns range and placeholder
+  - `lsp_rename`: renames symbol across all files via LSP workspace edit, lists affected files with change counts
+  - `lsp_call_hierarchy`: explores call hierarchy with direction param (prepare/incoming/outgoing)
+- Added `prepareRename` and `rename` methods to `LSP` namespace in `packages/opencode/src/lsp/index.ts`
+- Deprecated old unified `lsp` tool: logs deprecation warning, prepends deprecation message to output, includes replacement tool name in metadata
+- All new tools registered in ToolRegistry behind `OPENCODE_EXPERIMENTAL_LSP_TOOL` flag
+- SecurityAccess.checkAccess(filePath, 'read', 'agent') filtering on all result file paths
+- 28 unit tests all passing, 58 total LSP tool tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/lsp-tools-extended.ts` (new)
+  - `packages/opencode/src/tool/lsp-diagnostics.txt` (new)
+  - `packages/opencode/src/tool/lsp-prepare-rename.txt` (new)
+  - `packages/opencode/src/tool/lsp-rename.txt` (new)
+  - `packages/opencode/src/tool/lsp-call-hierarchy.txt` (new)
+  - `packages/opencode/src/lsp/index.ts` (modified — added prepareRename, rename methods)
+  - `packages/opencode/src/tool/lsp.ts` (modified — added deprecation warning and metadata)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered 4 new tools)
+  - `packages/opencode/test/tool/lsp-tools-extended.test.ts` (new)
+- **Learnings for future iterations:**
+  - LSP rename returns a `WorkspaceEdit` object with either `changes` (Record<uri, TextEdit[]>) or `documentChanges` (TextDocumentEdit[]) — handle both formats
+  - `LSP.prepareRename()` can return either `{ range, placeholder }` or just a `Range` — the response format varies by LSP server
+  - Call hierarchy `incomingCalls` returns `{ from: CallHierarchyItem }` and `outgoingCalls` returns `{ to: CallHierarchyItem }` — extract the nested item for formatting/filtering
+  - Deprecation pattern: log warning via `Log.warn()`, prepend deprecation message to output, add `deprecated: true` and `replacement` to metadata — allows downstream processing to detect and handle deprecated tool usage
+  - LSP diagnostics (`LSP.diagnostics()`) returns all diagnostics from all connected clients with no file parameter — the file path is only used to ensure an LSP server is running
+  - `as const` is needed on string arrays used in `for...of` loops when the values are passed to functions expecting specific string literal types (Zod enum parse)
 ---
