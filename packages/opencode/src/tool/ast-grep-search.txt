@@ -1,0 +1,8 @@
+- AST-aware code search tool that finds structural patterns in source code
+- Uses ast-grep to match code patterns at the syntax tree level, not just text
+- More precise than regex: understands code structure (functions, classes, expressions)
+- Pattern syntax uses `$VAR` for wildcards (e.g., `console.log($MSG)` matches any console.log call)
+- Supports 25 programming languages
+- Use this when you need structural code matching that regex cannot provide
+- Results include file path, line number, matched code, and surrounding context
+- Requires @ast-grep/napi package to be installed

@@ -1,0 +1,9 @@
+- AST-aware code refactoring tool that searches and replaces structural patterns
+- Uses ast-grep to match and transform code at the syntax tree level
+- Pattern syntax uses `$VAR` for wildcards in both pattern and rewrite
+- Example: pattern `console.log($MSG)` with rewrite `logger.info($MSG)` transforms all console.log calls
+- Supports 25 programming languages
+- Default mode is dry run (shows changes without applying them)
+- Set dryRun=false to apply changes to files on disk
+- Respects security access controls: will not modify protected files or code segments
+- Requires @ast-grep/napi package to be installed

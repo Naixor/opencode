@@ -37,6 +37,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - LSP result URIs: two formats to handle — `{ uri, range }` (definitions) and `{ location: { uri, range } }` (references/symbols). Use `fileURLToPath()` to convert `file://` URIs for SecurityAccess
 - LSP WorkspaceEdit: two formats — `changes: Record<uri, TextEdit[]>` or `documentChanges: TextDocumentEdit[]` — handle both
 - Tool deprecation pattern: log warning via `Log.warn()`, prepend deprecation message to output, add `deprecated: true` + `replacement` to metadata
+- For optional/peer dependencies, use exported `Loader` object with injectable `.load()` method for test isolation — avoids `mock.module` hoisting issues with dynamic `import()`
+- `SecuritySchema.MarkerConfig` has `deniedOperations` and `allowedRoles` directly (not nested in a `rule` field) — `findMarkerSegments()` returns `MarkerSegment` with `.rule` being the full `MarkerConfig`
 
 ---
 
@@ -548,4 +550,37 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Deprecation pattern: log warning via `Log.warn()`, prepend deprecation message to output, add `deprecated: true` and `replacement` to metadata — allows downstream processing to detect and handle deprecated tool usage
   - LSP diagnostics (`LSP.diagnostics()`) returns all diagnostics from all connected clients with no file parameter — the file path is only used to ensure an LSP server is running
   - `as const` is needed on string arrays used in `for...of` loops when the values are passed to functions expecting specific string literal types (Zod enum parse)
+---
+
+## 2026-02-14 - US-021
+- Implemented AST-Grep search and replace tools in `packages/opencode/src/tool/ast-grep.ts`
+  - `ast_grep_search`: AST-aware code search with pattern, lang (25 languages), paths, globs, context params
+  - `ast_grep_replace`: AST-aware code refactoring with rewrite, dryRun (default true) params
+- @ast-grep/napi as peer dependency: `AstGrepLoader.load()` returns null if not installed, tools return clear "ast-grep not available. Install with: bun add @ast-grep/napi" message
+- SecurityAccess integration:
+  - `checkAccess(path, 'read')` for search files
+  - `checkAccess(path, 'write')` for replace files (only when dryRun=false)
+  - `findWriteProtectedSegments()` for segment-level protection in replace
+  - `SecurityAudit.logSecurityEvent()` for all denied operations
+- Gated behind `OPENCODE_EXPERIMENTAL_AST_GREP` flag (or `OPENCODE_EXPERIMENTAL`)
+- Created tool description files: `ast-grep-search.txt`, `ast-grep-replace.txt`
+- Registered both tools in `registry.ts` behind experimental flag
+- Added `AstGrepApi`, `AstGrepRoot`, `AstGrepNode` interfaces for type-safe API usage
+- 20 unit tests all passing, 1645 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/ast-grep.ts` (new)
+  - `packages/opencode/src/tool/ast-grep-search.txt` (new)
+  - `packages/opencode/src/tool/ast-grep-replace.txt` (new)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered tools)
+  - `packages/opencode/src/flag/flag.ts` (modified — added OPENCODE_EXPERIMENTAL_AST_GREP)
+  - `packages/opencode/test/tool/ast-grep.test.ts` (new)
+- **Learnings for future iterations:**
+  - `mock.module` in Bun is hoisted and persistent per file — cannot test "module not found" and "module mocked" in the same file
+  - Solution: export an injectable `Loader` object with `.load()` method; tests swap it with `enableMock()`/`disableMock()` + `restoreLoader()` in afterEach
+  - `SecuritySchema.MarkerConfig` has `deniedOperations` and `allowedRoles` directly on the object, not nested in a `rule` field — but `SecuritySegments.findMarkerSegments()` returns `MarkerSegment` where `.rule` IS the `MarkerConfig`
+  - Separate `AstGrepRoot` from `AstGrepNode` interface: root only needs `findAll`, individual nodes need `text/range/replace/findAll`
+  - `SgNode.range()` returns `{ start: Pos, end: Pos }` where `Pos` has `line`, `column`, AND `index` (byte offset) — use `.index` for precise position checking
+  - `SgNode.replace()` returns an `Edit { startPos, endPos, insertedText }` object, NOT a string — must extract `.insertedText` for the replacement text
+  - Protected segment skipping in replace: apply replacements in reverse offset order to preserve positions for earlier replacements
 ---
