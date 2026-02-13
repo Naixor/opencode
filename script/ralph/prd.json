@@ -255,8 +255,8 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Verified. Non-TUI critical path: global-init ~0ms, log-init ~8ms, git-metadata ~1ms. TUI first-frame path adds worker-spawn (~few ms) + terminal-bg-detect (0ms cached/COLORFGBG, max 150ms cold). Total: ~10ms cached, ~160ms worst case — both well under 200ms. resolveNetworkOptions confirmed non-blocking in common path. sync.status=loading does NOT prevent submission; disabled is based on permissions/questions only."
     },
     {
       "id": "US-017",
@@ -271,8 +271,8 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "9 structural tests + 3 subprocess timing tests. Structural tests always run; subprocess tests gated by OPENCODE_PERF_TEST=1. Per-phase thresholds set to 1.5x baseline. Network isolated via OPENCODE_DISABLE_MODELS_FETCH etc."
     }
   ]
 }

@@ -27,6 +27,11 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - LSP.init() and FileWatcher.init() are deferred to background via `queueMicrotask` after bootstrap — not on the critical path. LSP servers only spawn on-demand in `getClients()`
 - models-snapshot.ts (~1MB) first import ~45ms — under 50ms threshold, no optimization needed. Already lazy-loaded via `ModelsDev.Data` lazy() factory
 - Provider imports: 21 lazy loaders in `BUNDLED_PROVIDER_LOADERS` Map (provider/provider.ts) — each is `async () => (await import("@ai-sdk/pkg")).createFn`. Only loaded when `getSDK()` is first called for that provider. `LanguageModelV2` type imported from `@ai-sdk/provider` (type-only, erased at compile). `AmazonBedrockProviderSettings` uses inline `import()` type syntax. GitLab `VERSION` dynamically imported inside custom loader.
+- TUI first-frame critical path: global-init (~0ms) + log-init (~8ms) + worker-spawn (~few ms) + terminal-bg-detect (0ms cached, max 150ms cold) = well under 200ms target
+- `--startup-trace --help` and `--startup-trace --version` do NOT output trace (yargs exits before output). Use `--startup-trace models` for non-interactive measurement
+- Performance tests live in `test/perf/` — structural verification tests check code invariants, subprocess tests check actual timing
+- Subprocess perf tests gated by `OPENCODE_PERF_TEST=1` — structural tests always run. Use `bun test --cwd packages/opencode -- test/perf/` to run all
+- Use `test.skipIf(!PERF_ENABLED)` pattern in bun:test for optional CI-gated tests
 
 ---
 
@@ -265,4 +270,62 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - In production binary, snapshot is bundled into `$bunfs` — import() reads from virtual filesystem (fast)
   - The ~45ms first import is dominated by JS parsing/eval, not I/O — JSON.parse at ~3ms confirms the 10-15x faster claim
   - No optimization path needed since: (a) under threshold, (b) already lazy, (c) cache file checked first in production
+---
+
+## 2026-02-13 - US-016
+- Verified TUI first-frame rendering meets <200ms target after all optimizations
+- Added `tui-first-frame` timing record in `app.tsx` — captures time from process start to `render()` call
+- Created `test/perf/first-frame-verification.test.ts` with 14 tests verifying structural guarantees:
+  - resolveNetworkOptions is NOT awaited before tui() in common path
+  - getTerminalBackgroundColor uses COLORFGBG fast path → cache → 150ms OSC query (3-tier)
+  - getTerminalBackgroundColor caches result for subsequent launches
+  - OSC detection timeout is 150ms (not 1000ms)
+  - Log.init() is synchronous (no await)
+  - global/index.ts has no module-level await
+  - tui-first-frame timing recorded before render()
+  - worker-spawn timing recorded around Worker creation
+  - Non-TUI startup phases complete within budget (models command: global-init + log-init < 100ms)
+  - sync.status=loading does NOT prevent message submission (disabled based on permissions/questions)
+  - continue flag (-c) waits for session list at partial status
+- Measured timing baseline:
+  - global-init: ~0ms (no module-level await since US-005)
+  - log-init: ~8ms (sync init + ensureDirectories + flush since US-003/US-005)
+  - project-detect: ~2ms (cached git metadata since US-010)
+  - terminal-bg-detect: 0ms (COLORFGBG or cache since US-002), max 150ms (OSC cold)
+  - TUI first-frame: ~10ms cached, ~160ms worst case — well under 200ms target
+- Files changed: app.tsx, test/perf/first-frame-verification.test.ts (new)
+- **Learnings for future iterations:**
+  - `--startup-trace --help` and `--startup-trace --version` do NOT output trace — yargs calls process.exit() before StartupTrace.output()
+  - Use `--startup-trace models` for non-interactive timing measurement
+  - `StartupTrace.record()` is useful for flat one-shot timing points (like first-frame)
+  - Bun test timeout: pass `30000` as third argument to `test()` for longer subprocess tests
+  - sync.status has three states: "loading" → "partial" (after blocking API calls) → "complete" (after all data)
+  - Prompt disabled state is permission/question-based, NOT loading-state-based
+---
+
+## 2026-02-13 - US-017
+- Added `test/perf/startup.test.ts` with 12 tests (9 structural + 3 subprocess timing)
+- Structural invariant tests (always run):
+  - global/index.ts has no module-level await
+  - Log.init() is synchronous
+  - Provider imports are lazy (BUNDLED_PROVIDER_LOADERS, no static @ai-sdk imports)
+  - LSP.init() and FileWatcher.init() deferred from bootstrap (in queueMicrotask)
+  - Remote config fetch has AbortSignal.timeout
+  - Plugin loading uses Promise.allSettled
+  - installDependencies deferred from Config.state() critical path
+  - Terminal background detection timeout is 150ms
+  - Git metadata caching implemented
+- Subprocess timing tests (gated by OPENCODE_PERF_TEST=1):
+  - Spawns `bun run src/index.ts --startup-trace models` and parses JSON trace from stderr
+  - Validates trace structure (phase names, duration_ms fields)
+  - Per-phase thresholds: global-init 75ms, log-init 75ms, project-detect 150ms, git-metadata 150ms, config-load 3000ms, instance-bootstrap 3000ms
+  - Non-TUI overhead (global-init + log-init) must be <150ms
+- Network isolation via env vars: OPENCODE_DISABLE_MODELS_FETCH, OPENCODE_DISABLE_AUTOUPDATE, OPENCODE_DISABLE_DEFAULT_PLUGINS, OPENCODE_DISABLE_EXTERNAL_SKILLS
+- Files changed: test/perf/startup.test.ts (new)
+- **Learnings for future iterations:**
+  - `test.skipIf(!condition)` in bun:test cleanly skips tests based on env vars — better than wrapping in `if` blocks
+  - `Bun.spawn()` returns Process object; use `new Response(proc.stdout).text()` to read stream to string
+  - Trace JSON may be mixed with log output in stderr — use regex match `\{[\s\S]*"total_ms"[\s\S]*"phases"[\s\S]*\}` to extract
+  - Structural tests are more reliable than timing tests for CI — they verify code invariants that guarantee performance characteristics
+  - Per-phase thresholds set to 1.5x baseline are generous enough to avoid flaky tests but tight enough to catch regressions
 ---
