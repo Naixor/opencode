@@ -1,0 +1,12 @@
+Manage persistent tasks that survive across sessions. Tasks are stored as JSON files in .opencode/tasks/.
+
+Operations:
+- create: Create a new task with subject, description, owner, dependencies
+- get: Retrieve a task by ID
+- list: List all tasks, optionally filtered by status or ready state
+- update: Update task fields including status transitions
+- delete: Remove a task
+
+Task IDs use T-{uuid} format. Status transitions: pending -> in_progress -> completed/failed/cancelled.
+
+Dependencies: Use blockedBy to specify task IDs that must complete before this task is ready. Use the ready filter to find tasks with all dependencies satisfied.

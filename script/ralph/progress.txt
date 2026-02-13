@@ -47,6 +47,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - BashScanner only detects paths from known FILE_ACCESS_COMMANDS as the first token of a pipeline segment — supplement with direct path extraction for tools that embed paths in non-standard formats
 - `SecurityAudit.SecurityEvent` interface: `{ role, operation, path, allowed, reason? }` — does NOT have `type` or `tool` fields
 - Security config schema top-level: `{ version, rules: [...] }` — NOT nested under `files.rules`
+- File-based persistent storage: use `.opencode/<feature>/` for project-local persistent data, `Lock.read()`/`Lock.write()` with namespaced keys for atomic operations
+- Status transition enforcement: define `VALID_TRANSITIONS` lookup table, check before applying status changes
 
 ---
 
@@ -714,4 +716,40 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - `SecurityAudit.SecurityEvent` interface requires: `{ role, operation, path, allowed, reason? }` — NOT `{ type, tool }` fields
   - Security config schema (`SecuritySchema.SecurityConfig`) has `rules` at top level, NOT nested under `files.rules` — test setup must use `{ version: "1.0", rules: [...] }`
   - `Bun.spawn(["which", "tmux"])` is a reliable cross-platform way to check tool availability
+---
+
+## 2026-02-14 - US-026
+- Implemented persistent task storage system with file-based storage in `.opencode/tasks/`
+  - Created `packages/opencode/src/session/persistent-task.ts` with `PersistentTask` namespace
+  - Task CRUD operations: `create`, `get`, `list`, `ready`, `update`, `remove`
+  - Task IDs use `T-{uuid}` format via `crypto.randomUUID()`
+  - Fields: id, subject, description, status, blockedBy, blocks, owner, metadata, activeForm, createdAt, updatedAt
+  - File-level locking via `Lock.read()`/`Lock.write()` for atomic operations
+  - Status transitions enforced: pending -> in_progress -> completed/failed/cancelled
+  - `ready()` filter: returns pending tasks where all blockedBy dependencies are completed
+  - Bus events for task lifecycle: Created, Updated, Deleted
+- Created `packages/opencode/src/tool/persistent-task-tool.ts` with `PersistentTaskTool`
+  - Tool ID: `persistent_task` — operations: create, get, list, update, delete
+  - List supports filters: all, ready, pending, in_progress, completed, failed, cancelled
+  - Registered in ToolRegistry (always available, not behind experimental flag)
+- Existing TaskTool (agent spawning) completely unchanged and still working
+- 23 unit tests all passing, 112 agent tests pass, 148 hook tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/persistent-task.ts` (new)
+  - `packages/opencode/src/tool/persistent-task-tool.ts` (new)
+  - `packages/opencode/src/tool/persistent-task.txt` (new)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered PersistentTaskTool)
+  - `packages/opencode/test/session/persistent-task.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-026 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - File-based task storage in `.opencode/tasks/` uses `Instance.directory` to locate the project root — tasks are per-project, not global
+  - `Lock` namespace provides read/write locks keyed by string — use `lockKey(id)` pattern to namespace lock keys per feature
+  - `crypto.randomUUID()` is available globally in Bun runtime — no import needed
+  - Status transition enforcement via lookup table: `VALID_TRANSITIONS[currentStatus].includes(newStatus)` prevents invalid state changes
+  - The `ready()` filter checks all `blockedBy` IDs against the full task list status map — O(n) for building the map, O(d) per task for dependency check
+  - `PersistentTaskTool` is separate from the existing `TaskTool` (agent spawning) — they serve different purposes and coexist
+  - `Bun.file().exists()` is async and works well for file existence checks in the task storage layer
+  - `fs.readdir()` with `.catch(() => [])` gracefully handles missing task directory on first access
 ---
