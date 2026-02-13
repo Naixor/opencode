@@ -20,6 +20,8 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - `Auth.all()` and `global()` run in parallel at start of `Config.state()` — independent data sources
 - `loadCommand/loadAgent/loadMode/loadPlugin` run via `Promise.all()` per directory — different glob patterns, independent subdirectories
 - Git rev-parse results cached in `.git/opencode-metadata` (JSON) with `.git/HEAD` mtime invalidation — skips subprocess spawns on warm launch
+- InstanceBootstrap parallelization: Group A (Share, ShareNext, Snapshot, Truncate) serial; Group B (Plugin, LSP, Format, Security) + Group C (FileWatcher, File, Vcs) concurrent via nested Promise.all
+- Plugin.trigger() is ONLY called at session runtime (18 sites across 8 files) — NOT during bootstrap init functions
 
 ---
 
@@ -169,4 +171,20 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - `Bun.file().json()` returns `Promise<any>` — need explicit type annotation on `.then()` callback parameter
   - Fire-and-forget cache writes use `void Bun.file().write().catch(() => undefined)` pattern — same as existing .git/opencode write
   - The cache eliminates 2 subprocess spawns on warm launch — significant on systems where process creation is expensive
+---
+
+## 2026-02-13 - US-011
+- Parallelized InstanceBootstrap initialization chain into concurrent groups
+- Pre-validation confirmed: Plugin.trigger() is NOT called during bootstrap — all 18 call sites are in session runtime code (prompt.ts, llm.ts, processor.ts, bash.ts, pty/index.ts, agent.ts, permission/index.ts, compaction.ts)
+- Group A (serial, zero-cost): Share.init(), ShareNext.init(), Snapshot.init(), Truncate.init() — kept serial
+- Group B (parallel via Promise.all): Plugin.init(), LSP.init(), Format.init(), SecurityConfig.loadSecurityConfig() — run concurrently
+- Group C (parallel via Promise.all, concurrent with B): FileWatcher.init(), File.init(), Vcs.init() — run concurrently with Group B
+- All groups B and C run via nested Promise.all() for maximum concurrency
+- Files changed: bootstrap.ts
+- **Learnings for future iterations:**
+  - All init functions in bootstrap are pure setup (register event listeners, initialize state, schedule tasks) — none call Plugin.trigger()
+  - Plugin.trigger() is only called in session/runtime modules: prompt.ts (10 calls), llm.ts (2), processor.ts (1), bash.ts (1), pty/index.ts (1), agent.ts (1), permission/index.ts (1), compaction.ts (1)
+  - ShareNext.init() was added after the PRD — treated same as Share.init() (Group A, serial)
+  - The `measure()` helper records per-phase timing to StartupTrace — works correctly with parallel execution since each call records independently
+  - Phase order in the `phases` array reflects declaration order (Group A first, then B, then C) not execution order — timing values are still accurate
 ---

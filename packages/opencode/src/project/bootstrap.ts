@@ -53,17 +53,28 @@ export namespace Bootstrap {
 
     const phases: Phase[] = []
 
-    phases.push(await measure("plugin", () => Plugin.init()))
+    // Group A: serial, zero-cost initialization
     phases.push(await measure("share", () => Share.init()))
     phases.push(await measure("share-next", () => ShareNext.init()))
-    phases.push(await measure("format", () => Format.init()))
-    phases.push(await measure("lsp", () => LSP.init()))
-    phases.push(await measure("file-watcher", () => FileWatcher.init()))
-    phases.push(await measure("file", () => File.init()))
-    phases.push(await measure("vcs", () => Vcs.init()))
     phases.push(await measure("snapshot", () => Snapshot.init()))
     phases.push(await measure("truncate", () => Truncate.init()))
-    phases.push(await measure("security", () => SecurityConfig.loadSecurityConfig(Instance.directory)))
+
+    // Group B (Plugin, LSP, Format, Security) and Group C (FileWatcher, File, Vcs) run concurrently
+    // Plugin.trigger() is not called during bootstrap — safe to parallelize all init functions
+    const [groupB, groupC] = await Promise.all([
+      Promise.all([
+        measure("plugin", () => Plugin.init()),
+        measure("lsp", () => LSP.init()),
+        measure("format", () => Format.init()),
+        measure("security", () => SecurityConfig.loadSecurityConfig(Instance.directory)),
+      ]),
+      Promise.all([
+        measure("file-watcher", () => FileWatcher.init()),
+        measure("file", () => File.init()),
+        measure("vcs", () => Vcs.init()),
+      ]),
+    ])
+    phases.push(...groupB, ...groupC)
 
     const total = Math.round(performance.now() - start)
     state().timing = { total, phases }
