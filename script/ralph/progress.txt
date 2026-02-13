@@ -9,6 +9,20 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - appendImplicitRules() in config.ts auto-protects .opencode-security.json and .opencode-security-audit.log
 - getMcpPolicy() falls back to 'enforced' when rules/segments exist but no mcp block — only returns 'trusted' when no security config at all
 - @ast-grep/napi must be installed (bun install) for ast_grep.ts to typecheck — it's in package.json but node_modules may be stale
+- LSP.diagnostics() accepts optional { filePath, severity } — backward compatible (no params = all diagnostics)
+- Both ty and pyright LSP servers now coexist — user config's `lsp` section can disable either
+---
+
+## 2026-02-13 - US-006
+- What was implemented: Removed OPENCODE_EXPERIMENTAL_LSP_TY flag; added filePath/severity params to LSP.diagnostics()
+- Files changed:
+  - packages/opencode/src/flag/flag.ts — removed OPENCODE_EXPERIMENTAL_LSP_TY definition
+  - packages/opencode/src/lsp/index.ts — removed Flag import and ty/pyright conditional logic; added optional params to diagnostics()
+  - packages/opencode/src/lsp/server.ts — removed flag gate from Ty.spawn()
+- **Learnings for future iterations:**
+  - OPENCODE_EXPERIMENTAL_LSP_TOOL was never implemented — the LspTool was already unconditionally available
+  - The diagnostics operation was already in the LspTool discriminated union; severity filtering was at tool layer, not library
+  - pathToFileURL is used to match diagnostic keys which may be file:// URIs
 ---
 
 ## 2026-02-13 - US-004 & US-005

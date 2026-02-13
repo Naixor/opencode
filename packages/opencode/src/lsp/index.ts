@@ -9,8 +9,6 @@ import z from "zod"
 import { Config } from "../config/config"
 import { spawn } from "child_process"
 import { Instance } from "../project/instance"
-import { Flag } from "@/flag/flag"
-
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
 
@@ -79,17 +77,6 @@ export namespace LSP {
 
       for (const server of Object.values(LSPServer)) {
         servers[server.id] = server
-      }
-
-      if (Flag.OPENCODE_EXPERIMENTAL_LSP_TY) {
-        if (servers["pyright"]) {
-          log.info("LSP server pyright is disabled because OPENCODE_EXPERIMENTAL_LSP_TY is enabled")
-          delete servers["pyright"]
-        }
-      } else {
-        if (servers["ty"]) {
-          delete servers["ty"]
-        }
       }
 
       for (const [name, item] of Object.entries(cfg.lsp ?? {})) {
@@ -282,13 +269,19 @@ export namespace LSP {
     })
   }
 
-  export async function diagnostics() {
+  export async function diagnostics(options?: {
+    filePath?: string
+    severity?: "error" | "warning" | "information" | "hint"
+  }) {
+    const severityMap: Record<string, number> = { error: 1, warning: 2, information: 3, hint: 4 }
     const results: Record<string, LSPClient.Diagnostic[]> = {}
     for (const result of await runAll(async (client) => client.diagnostics)) {
-      for (const [path, diagnostics] of result.entries()) {
-        const arr = results[path] || []
-        arr.push(...diagnostics)
-        results[path] = arr
+      for (const [p, diags] of result.entries()) {
+        if (options?.filePath && p !== options.filePath && p !== pathToFileURL(options.filePath).href) continue
+        const filtered = options?.severity ? diags.filter((d) => d.severity === severityMap[options.severity!]) : diags
+        const arr = results[p] || []
+        arr.push(...filtered)
+        results[p] = arr
       }
     }
     return results

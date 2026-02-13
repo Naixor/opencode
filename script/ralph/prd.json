@@ -105,8 +105,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Removed OPENCODE_EXPERIMENTAL_LSP_TY flag from flag.ts, lsp/index.ts, lsp/server.ts. OPENCODE_EXPERIMENTAL_LSP_TOOL was already absent. diagnostics operation already existed. Added filePath and severity params to LSP.diagnostics()."
     },
     {
       "id": "US-007",
