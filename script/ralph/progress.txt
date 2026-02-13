@@ -25,6 +25,7 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - Bun compile dynamic import: static string `import("@ai-sdk/anthropic")` WORKS; variable `import(pkg)` FAILS. Use `Map<string, () => Promise<any>>` registry pattern with arrow functions containing static string imports
 - Build uses `Bun.build()` with `compile` option (not CLI `--compile`); bunfig autoload is disabled in production build (`autoloadBunfig: false`)
 - LSP.init() and FileWatcher.init() are deferred to background via `queueMicrotask` after bootstrap — not on the critical path. LSP servers only spawn on-demand in `getClients()`
+- models-snapshot.ts (~1MB) first import ~45ms — under 50ms threshold, no optimization needed. Already lazy-loaded via `ModelsDev.Data` lazy() factory
 - Provider imports: 21 lazy loaders in `BUNDLED_PROVIDER_LOADERS` Map (provider/provider.ts) — each is `async () => (await import("@ai-sdk/pkg")).createFn`. Only loaded when `getSDK()` is first called for that provider. `LanguageModelV2` type imported from `@ai-sdk/provider` (type-only, erased at compile). `AmazonBedrockProviderSettings` uses inline `import()` type syntax. GitLab `VERSION` dynamically imported inside custom loader.
 
 ---
@@ -245,4 +246,23 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - The /bootstrap API endpoint only returns timing data — doesn't depend on LSP or FileWatcher being initialized
   - Bus subscriber for Command.Event.Executed (project initialization tracking) doesn't depend on LSP/FileWatcher
   - Vcs.init() subscribes to FileWatcher.Event.Updated but doesn't require FileWatcher to be initialized first — it just registers a listener
+---
+
+## 2026-02-13 - US-015
+- Evaluated models-snapshot.ts runtime import duration — NO optimization needed
+- Benchmark results (1054 KB file, 88 providers):
+  - First dynamic import: ~45ms (< 50ms threshold)
+  - Subsequent imports: ~12ms (module cache)
+  - JSON.parse equivalent: ~3ms
+  - Bun.file().json(): ~4ms
+- `ModelsDev.Data` already uses `lazy()` — only imported on first access, not during startup
+- Load order: file cache → snapshot import → live fetch. In production, cache file is typically populated by refresh() background fetch
+- No code changes required — documented finding only
+- **Learnings for future iterations:**
+  - models-snapshot.ts is ~1MB generated file (in .gitignore) — only exists in production builds
+  - `lazy()` from `@/util/lazy` creates a memoized async factory — result cached after first call, `.reset()` clears cache
+  - `ModelsDev.refresh()` runs at module level (fire-and-forget) and then every 60min — populates `models.json` cache file
+  - In production binary, snapshot is bundled into `$bunfs` — import() reads from virtual filesystem (fast)
+  - The ~45ms first import is dominated by JS parsing/eval, not I/O — JSON.parse at ~3ms confirms the 10-15x faster claim
+  - No optimization path needed since: (a) under threshold, (b) already lazy, (c) cache file checked first in production
 ---
