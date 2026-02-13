@@ -15,6 +15,7 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - Pre-existing 6 security test failures in `write-edit-bypass.test.ts`, `audit-log.test.ts`, `inheritance.test.ts`, `config.test.ts`, `mcp-policy.test.ts` — not related to cold-start work
 - TUI thread (`thread.ts`) now starts TUI with RPC immediately; resolveNetworkOptions runs in background. HTTP server only started if CLI flags or config require it
 - Remote wellknown config fetched with 3s timeout, cached to `Global.Path.cache/wellknown/` with 5-min TTL (stale-while-revalidate)
+- Plugin loading (`plugin/index.ts`) uses `Promise.allSettled()` for both internal and external plugins; `BunProc.install()` has Lock serialization + 10s timeout
 
 ---
 
@@ -105,4 +106,20 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - `AbortSignal.timeout(ms)` creates a signal that auto-aborts after timeout — cleaner than manual AbortController
   - Cache file format: `{ timestamp: number, data: any }` — timestamp used for TTL comparison
   - The `load()` function in config.ts does env var substitution and schema validation — must pass JSON string, not object
+---
+
+## 2026-02-13 - US-007
+- Parallelized plugin loading in `Plugin.state()` — both internal and external plugins now load via `Promise.allSettled()`
+- Internal plugins (CodexAuthPlugin, CopilotAuthPlugin) loaded in parallel
+- External plugins: install + import + init all run in parallel per-plugin
+- 10-second timeout on `BunProc.install()` via `Promise.race()` to prevent slow npm registry from blocking
+- Single plugin failure logged as error but doesn't affect other plugins or startup
+- Verified `PluginInput` is read-only (client, project, worktree, directory, serverUrl, $, hasBuiltIn) — safe to share
+- Files changed: plugin/index.ts
+- **Learnings for future iterations:**
+  - `PluginInput` type is defined in `packages/plugin/src/index.ts` — all fields are read-only primitives/objects
+  - `BunProc.install()` uses a `Lock.write("bun-install")` — parallel installs will serialize on the lock, which is correct behavior (prevents concurrent bun add)
+  - External plugins that return empty string from install (builtin failure) return `[]` hooks — handled by spreading into hooks array
+  - `Promise.allSettled()` ensures one plugin timeout/failure doesn't reject the entire batch
+  - `Promise.race()` with `setTimeout` for timeout doesn't cancel the underlying install — the lock may still be held. This is acceptable since the timeout only affects the caller
 ---
