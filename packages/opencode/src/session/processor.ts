@@ -10,6 +10,8 @@ import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { Plugin } from "@/plugin"
 import type { Provider } from "@/provider/provider"
+import { SecurityConfig } from "@/security/config"
+import { SecurityUtil } from "@/security/util"
 import { LLM } from "./llm"
 import { Config } from "@/config/config"
 import { SessionCompaction } from "./compaction"
@@ -305,6 +307,8 @@ export namespace SessionProcessor {
                 case "text-end":
                   if (currentText) {
                     currentText.text = currentText.text.trimEnd()
+                    const secConfig = SecurityConfig.getSecurityConfig()
+                    const redactedText = SecurityUtil.scanAndRedact(currentText.text, secConfig)
                     const textOutput = await Plugin.trigger(
                       "experimental.text.complete",
                       {
@@ -312,7 +316,7 @@ export namespace SessionProcessor {
                         messageID: input.assistantMessage.id,
                         partID: currentText.id,
                       },
-                      { text: currentText.text },
+                      { text: redactedText },
                     )
                     currentText.text = textOutput.text
                     currentText.time = {

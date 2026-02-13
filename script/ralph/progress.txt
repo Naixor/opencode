@@ -13,6 +13,17 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - Both ty and pyright LSP servers now coexist — user config's `lsp` section can disable either
 ---
 
+## 2026-02-13 - US-014
+- What was implemented: Added scanAndRedact to text.complete and task tool.execute.after plugin hooks
+- Files changed:
+  - packages/opencode/src/session/processor.ts — import SecurityConfig/SecurityUtil, redact text before passing to experimental.text.complete hook
+  - packages/opencode/src/session/prompt.ts — import SecurityUtil, redact task result title/output before tool.execute.after hook
+- **Learnings for future iterations:**
+  - SecurityUtil.scanAndRedact is the simplest way to redact — single function call, handles no-rules short-circuit
+  - For object results (task tool), need to spread and redact individual string fields
+  - system.transform was already handled in llm.ts and agent.ts
+---
+
 ## 2026-02-13 - US-011
 - What was implemented: Integrated CommentChecker.check() into edit.ts, write.ts, and apply_patch.ts
 - Files changed:

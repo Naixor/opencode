@@ -49,6 +49,7 @@ import { Truncate } from "@/tool/truncation"
 import { SecurityConfig } from "@/security/config"
 import { SecurityAccess } from "@/security/access"
 import { SecurityAudit } from "@/security/audit"
+import { SecurityUtil } from "@/security/util"
 import { LLMScanner } from "@/security/llm-scanner"
 import { SecurityRedact } from "@/security/redact"
 import { Todo } from "./todo"
@@ -461,6 +462,14 @@ export namespace SessionPrompt {
           log.error("subtask execution failed", { error, agent: task.agent, description: task.description })
           return undefined
         })
+        const secConfig = SecurityConfig.getSecurityConfig()
+        const redactedResult = result
+          ? {
+              ...result,
+              title: SecurityUtil.scanAndRedact(result.title, secConfig),
+              output: SecurityUtil.scanAndRedact(result.output, secConfig),
+            }
+          : result
         await Plugin.trigger(
           "tool.execute.after",
           {
@@ -468,7 +477,7 @@ export namespace SessionPrompt {
             sessionID,
             callID: part.id,
           },
-          result,
+          redactedResult,
         )
         assistantMessage.finish = "tool-calls"
         assistantMessage.time.completed = Date.now()
