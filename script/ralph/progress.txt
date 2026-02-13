@@ -16,6 +16,7 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - TUI thread (`thread.ts`) now starts TUI with RPC immediately; resolveNetworkOptions runs in background. HTTP server only started if CLI flags or config require it
 - Remote wellknown config fetched with 3s timeout, cached to `Global.Path.cache/wellknown/` with 5-min TTL (stale-while-revalidate)
 - Plugin loading (`plugin/index.ts`) uses `Promise.allSettled()` for both internal and external plugins; `BunProc.install()` has Lock serialization + 10s timeout
+- `installDependencies()` runs in background after `Config.state()` returns — `Instance.dispose()` triggers config reload on completion
 
 ---
 
@@ -122,4 +123,18 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - External plugins that return empty string from install (builtin failure) return `[]` hooks — handled by spreading into hooks array
   - `Promise.allSettled()` ensures one plugin timeout/failure doesn't reject the entire batch
   - `Promise.race()` with `setTimeout` for timeout doesn't cancel the underlying install — the lock may still be held. This is acceptable since the timeout only affects the caller
+---
+
+## 2026-02-13 - US-008
+- Deferred `installDependencies()` out of `Config.state()` critical path — config now returns immediately
+- Directories needing install are collected during scan, then installed in background via `Promise.all()`
+- On background install completion, `Instance.dispose()` triggers config reload to pick up newly installed plugins
+- Added 30-second per-directory timeout via `Promise.race()` to prevent slow npm registry from blocking
+- `needsInstall()` check (Option B) already exists — checks `node_modules/@opencode-ai/plugin` existence and version match
+- Files changed: config.ts
+- **Learnings for future iterations:**
+  - `Instance.dispose()` resets lazy state — next `Config.state()` call re-runs the full config loading pipeline
+  - Background `Promise.all()` with `Promise.race()` timeout pattern: timeout rejects the race but doesn't cancel the underlying install (bun process continues)
+  - The directory scan loop still runs `needsInstall()` synchronously (fast check: `existsSync` + `Bun.file().json()`) — only the actual `installDependencies()` is deferred
+  - Plugin/command/agent loading from directories proceeds regardless of install status — existing `node_modules` content is used if available
 ---
