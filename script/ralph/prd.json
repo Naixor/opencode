@@ -195,8 +195,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Spike complete. Static string import() and Map-based registry pattern WORK in Bun compile. Variable-computed import() FAILS. Use Map<string, () => Promise<SDK>> registry for US-013."
     },
     {
       "id": "US-013",

@@ -22,6 +22,9 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - Git rev-parse results cached in `.git/opencode-metadata` (JSON) with `.git/HEAD` mtime invalidation — skips subprocess spawns on warm launch
 - InstanceBootstrap parallelization: Group A (Share, ShareNext, Snapshot, Truncate) serial; Group B (Plugin, LSP, Format, Security) + Group C (FileWatcher, File, Vcs) concurrent via nested Promise.all
 - Plugin.trigger() is ONLY called at session runtime (18 sites across 8 files) — NOT during bootstrap init functions
+- Bun compile dynamic import: static string `import("@ai-sdk/anthropic")` WORKS; variable `import(pkg)` FAILS. Use `Map<string, () => Promise<any>>` registry pattern with arrow functions containing static string imports
+- Build uses `Bun.build()` with `compile` option (not CLI `--compile`); bunfig autoload is disabled in production build (`autoloadBunfig: false`)
+- Provider imports: 21 static imports in `provider/provider.ts` lines 18-39, map in `BUNDLED_PROVIDERS` lines 58-81. Existing dynamic imports at lines 223 (AWS SDK) and 483-484 (Cloudflare AI Gateway)
 
 ---
 
@@ -187,4 +190,23 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - ShareNext.init() was added after the PRD — treated same as Share.init() (Group A, serial)
   - The `measure()` helper records per-phase timing to StartupTrace — works correctly with parallel execution since each call records independently
   - Phase order in the `phases` array reflects declaration order (Group A first, then B, then C) not execution order — timing values are still accurate
+---
+
+## 2026-02-13 - US-012
+- Created `packages/opencode/script/test-dynamic-import-spike.ts` — comprehensive spike testing 4 dynamic import patterns
+- Tested in both interpreted mode (`bun run`) and compiled mode (`bun build --compile`)
+- Results:
+  - Static string `import("@ai-sdk/anthropic")`: WORKS in both modes (bundler resolves literal string)
+  - Map registry `() => import("@ai-sdk/anthropic")`: WORKS in both modes (bundler analyzes arrow function body)
+  - Computed variable `import(pkg)`: WORKS in interpreted, FAILS in compiled (bundler can't resolve non-literal specifiers)
+  - Import caching (second import of same module): WORKS in both modes (~0ms on subsequent imports)
+- Files changed: packages/opencode/script/test-dynamic-import-spike.ts (new)
+- **Learnings for future iterations:**
+  - Bun compile bundles ALL import() calls with static string literals into the binary — they resolve from `/$bunfs/root/` virtual filesystem
+  - Variable-computed import paths get `Cannot find module ... from '/$bunfs/root/spike-test'` — no node_modules at runtime
+  - The production build in `script/build.ts` uses `Bun.build()` with `compile` option and `autoloadBunfig: false` — same bundling behavior as `bun build --compile`
+  - For US-013: use `Map<string, () => Promise<SDK>>` registry pattern where each value is `() => import("@ai-sdk/pkg")` with literal string
+  - Import caching means no need for manual cache — the JS module system already caches after first import()
+  - Running spike from `script/` dir (monorepo root) fails because AI SDK deps are in `packages/opencode/node_modules` — must run from packages/opencode or compile from there
+  - Compiled binary with `--compile` picks up bunfig.toml in cwd — compile from /tmp or use `autoloadBunfig: false` to avoid preload issues
 ---
