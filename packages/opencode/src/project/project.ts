@@ -13,6 +13,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { existsSync } from "fs"
+import { StartupTrace } from "@/util/startup-trace"
 
 export namespace Project {
   const log = Log.create({ service: "project" })
@@ -53,7 +54,7 @@ export namespace Project {
   export async function fromDirectory(directory: string) {
     log.info("fromDirectory", { directory })
 
-    const { id, sandbox, worktree, vcs } = await iife(async () => {
+    const { id, sandbox, worktree, vcs } = await StartupTrace.measure("git-metadata", () => iife(async () => {
       const matches = Filesystem.up({ targets: [".git"], start: directory })
       const git = await matches.next().then((x) => x.value)
       await matches.return()
@@ -173,7 +174,7 @@ export namespace Project {
         sandbox: "/",
         vcs: Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS),
       }
-    })
+    }))
 
     let existing = await Storage.read<Info>(["project", id]).catch(() => undefined)
     if (!existing) {

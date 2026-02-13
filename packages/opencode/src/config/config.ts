@@ -29,6 +29,7 @@ import { Bus } from "@/bus"
 import { GlobalBus } from "@/bus/global"
 import { Event } from "../server/event"
 import { PackageRegistry } from "@/bun/registry"
+import { StartupTrace } from "@/util/startup-trace"
 
 export namespace Config {
   const log = Log.create({ service: "config" })
@@ -61,6 +62,7 @@ export namespace Config {
   }
 
   export const state = Instance.state(async () => {
+    StartupTrace.begin("config-load")
     const auth = await Auth.all()
 
     // Config loading order (low -> high precedence): https://opencode.ai/docs/config#precedence-order
@@ -72,28 +74,30 @@ export namespace Config {
     // 6) Inline config (OPENCODE_CONFIG_CONTENT)
     // Managed config directory is enterprise-only and always overrides everything above.
     let result: Info = {}
-    for (const [key, value] of Object.entries(auth)) {
-      if (value.type === "wellknown") {
-        process.env[value.key] = value.token
-        log.debug("fetching remote config", { url: `${key}/.well-known/opencode` })
-        const response = await fetch(`${key}/.well-known/opencode`)
-        if (!response.ok) {
-          throw new Error(`failed to fetch remote config from ${key}: ${response.status}`)
+    await StartupTrace.measure("remote-fetch", async () => {
+      for (const [key, value] of Object.entries(auth)) {
+        if (value.type === "wellknown") {
+          process.env[value.key] = value.token
+          log.debug("fetching remote config", { url: `${key}/.well-known/opencode` })
+          const response = await fetch(`${key}/.well-known/opencode`)
+          if (!response.ok) {
+            throw new Error(`failed to fetch remote config from ${key}: ${response.status}`)
+          }
+          const wellknown = (await response.json()) as any
+          const remoteConfig = wellknown.config ?? {}
+          // Add $schema to prevent load() from trying to write back to a non-existent file
+          if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
+          result = mergeConfigConcatArrays(
+            result,
+            await load(JSON.stringify(remoteConfig), `${key}/.well-known/opencode`),
+          )
+          log.debug("loaded remote config from well-known", { url: key })
         }
-        const wellknown = (await response.json()) as any
-        const remoteConfig = wellknown.config ?? {}
-        // Add $schema to prevent load() from trying to write back to a non-existent file
-        if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
-        result = mergeConfigConcatArrays(
-          result,
-          await load(JSON.stringify(remoteConfig), `${key}/.well-known/opencode`),
-        )
-        log.debug("loaded remote config from well-known", { url: key })
       }
-    }
+    })
 
     // Global user config overrides remote config.
-    result = mergeConfigConcatArrays(result, await global())
+    result = mergeConfigConcatArrays(result, await StartupTrace.measure("global-config", () => global()))
 
     // Custom config path overrides global config.
     if (Flag.OPENCODE_CONFIG) {
@@ -102,69 +106,75 @@ export namespace Config {
     }
 
     // Project config overrides global and remote config.
-    if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-      for (const file of ["opencode.jsonc", "opencode.json"]) {
-        const found = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
-        for (const resolved of found.toReversed()) {
-          result = mergeConfigConcatArrays(result, await loadFile(resolved))
+    await StartupTrace.measure("project-config", async () => {
+      if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+        for (const file of ["opencode.jsonc", "opencode.json"]) {
+          const found = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
+          for (const resolved of found.toReversed()) {
+            result = mergeConfigConcatArrays(result, await loadFile(resolved))
+          }
         }
       }
-    }
+    })
 
     result.agent = result.agent || {}
     result.mode = result.mode || {}
     result.plugin = result.plugin || []
 
-    const directories = [
-      Global.Path.config,
-      // Only scan project .opencode/ directories when project discovery is enabled
-      ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
-        ? await Array.fromAsync(
-            Filesystem.up({
-              targets: [".opencode"],
-              start: Instance.directory,
-              stop: Instance.worktree,
-            }),
-          )
-        : []),
-      // Always scan ~/.opencode/ (user home directory)
-      ...(await Array.fromAsync(
-        Filesystem.up({
-          targets: [".opencode"],
-          start: Global.Path.home,
-          stop: Global.Path.home,
-        }),
-      )),
-    ]
+    const directories = await StartupTrace.measure("directory-scan", async () => {
+      const dirs = [
+        Global.Path.config,
+        // Only scan project .opencode/ directories when project discovery is enabled
+        ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
+          ? await Array.fromAsync(
+              Filesystem.up({
+                targets: [".opencode"],
+                start: Instance.directory,
+                stop: Instance.worktree,
+              }),
+            )
+          : []),
+        // Always scan ~/.opencode/ (user home directory)
+        ...(await Array.fromAsync(
+          Filesystem.up({
+            targets: [".opencode"],
+            start: Global.Path.home,
+            stop: Global.Path.home,
+          }),
+        )),
+      ]
 
-    // .opencode directory config overrides (project and global) config sources.
-    if (Flag.OPENCODE_CONFIG_DIR) {
-      directories.push(Flag.OPENCODE_CONFIG_DIR)
-      log.debug("loading config from OPENCODE_CONFIG_DIR", { path: Flag.OPENCODE_CONFIG_DIR })
-    }
+      // .opencode directory config overrides (project and global) config sources.
+      if (Flag.OPENCODE_CONFIG_DIR) {
+        dirs.push(Flag.OPENCODE_CONFIG_DIR)
+        log.debug("loading config from OPENCODE_CONFIG_DIR", { path: Flag.OPENCODE_CONFIG_DIR })
+      }
 
-    for (const dir of unique(directories)) {
-      if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-        for (const file of ["opencode.jsonc", "opencode.json"]) {
-          log.debug(`loading config from ${path.join(dir, file)}`)
-          result = mergeConfigConcatArrays(result, await loadFile(path.join(dir, file)))
-          // to satisfy the type checker
-          result.agent ??= {}
-          result.mode ??= {}
-          result.plugin ??= []
+      for (const dir of unique(dirs)) {
+        if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
+          for (const file of ["opencode.jsonc", "opencode.json"]) {
+            log.debug(`loading config from ${path.join(dir, file)}`)
+            result = mergeConfigConcatArrays(result, await loadFile(path.join(dir, file)))
+            // to satisfy the type checker
+            result.agent ??= {}
+            result.mode ??= {}
+            result.plugin ??= []
+          }
         }
+
+        const shouldInstall = await needsInstall(dir)
+        if (shouldInstall) {
+          await installDependencies(dir)
+        }
+
+        result.command = mergeDeep(result.command ?? {}, await loadCommand(dir))
+        result.agent = mergeDeep(result.agent ?? {}, await loadAgent(dir))
+        result.agent = mergeDeep(result.agent ?? {}, await loadMode(dir))
+        result.plugin!.push(...(await loadPlugin(dir)))
       }
 
-      const shouldInstall = await needsInstall(dir)
-      if (shouldInstall) {
-        await installDependencies(dir)
-      }
-
-      result.command = mergeDeep(result.command ?? {}, await loadCommand(dir))
-      result.agent = mergeDeep(result.agent, await loadAgent(dir))
-      result.agent = mergeDeep(result.agent, await loadMode(dir))
-      result.plugin.push(...(await loadPlugin(dir)))
-    }
+      return dirs
+    })
 
     // Inline config content overrides all non-managed config sources.
     if (Flag.OPENCODE_CONFIG_CONTENT) {
@@ -229,6 +239,7 @@ export namespace Config {
 
     result.plugin = deduplicatePlugins(result.plugin ?? [])
 
+    StartupTrace.end("config-load")
     return {
       config: result,
       directories,

@@ -14,6 +14,7 @@ import { ShareNext } from "@/share/share-next"
 import { Snapshot } from "../snapshot"
 import { Truncate } from "../tool/truncation"
 import { SecurityConfig } from "../security/config"
+import { StartupTrace } from "@/util/startup-trace"
 import z from "zod"
 
 export namespace Bootstrap {
@@ -41,10 +42,12 @@ export namespace Bootstrap {
     const start = performance.now()
     await fn()
     const duration = Math.round(performance.now() - start)
+    StartupTrace.record(name, duration)
     return { name, duration }
   }
 
   export async function run() {
+    StartupTrace.begin("instance-bootstrap")
     const start = performance.now()
     Log.Default.info("bootstrapping", { directory: Instance.directory })
 
@@ -66,6 +69,7 @@ export namespace Bootstrap {
     state().timing = { total, phases }
 
     Log.Default.info("bootstrap complete", { total, phases })
+    StartupTrace.end("instance-bootstrap")
 
     Bus.subscribe(Command.Event.Executed, async (payload) => {
       if (payload.properties.name === Command.Default.INIT) {

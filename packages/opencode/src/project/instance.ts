@@ -5,6 +5,7 @@ import { State } from "./state"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { Filesystem } from "@/util/filesystem"
+import { StartupTrace } from "@/util/startup-trace"
 
 interface Context {
   directory: string
@@ -24,7 +25,9 @@ export const Instance = {
     if (!existing) {
       Log.Default.info("creating instance", { directory: input.directory })
       existing = iife(async () => {
-        const { project, sandbox } = await Project.fromDirectory(input.directory)
+        const { project, sandbox } = await StartupTrace.measure("project-detect", () =>
+          Project.fromDirectory(input.directory),
+        )
         const ctx = {
           directory: input.directory,
           worktree: sandbox,

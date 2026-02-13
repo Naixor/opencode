@@ -9,6 +9,7 @@ import { Log } from "@/util/log"
 import { withNetworkOptions, resolveNetworkOptions } from "@/cli/network"
 import type { Event } from "@opencode-ai/sdk/v2"
 import type { EventSource } from "./context/sdk"
+import { StartupTrace } from "@/util/startup-trace"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -90,6 +91,7 @@ export const TuiThreadCommand = cmd({
       return
     }
 
+    StartupTrace.begin("worker-spawn")
     const worker = new Worker(workerPath, {
       env: Object.fromEntries(
         Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
@@ -99,6 +101,7 @@ export const TuiThreadCommand = cmd({
       Log.Default.error(e)
     }
     const client = Rpc.client<typeof rpc>(worker)
+    StartupTrace.end("worker-spawn")
     process.on("uncaughtException", (e) => {
       Log.Default.error(e)
     })
@@ -116,7 +119,7 @@ export const TuiThreadCommand = cmd({
     })
 
     // Check if server should be started (port or hostname explicitly set in CLI or config)
-    const networkOpts = await resolveNetworkOptions(args)
+    const networkOpts = await StartupTrace.measure("resolve-network-options", () => resolveNetworkOptions(args))
     const shouldStartServer =
       process.argv.includes("--port") ||
       process.argv.includes("--hostname") ||
@@ -131,7 +134,7 @@ export const TuiThreadCommand = cmd({
 
     if (shouldStartServer) {
       // Start HTTP server for external access
-      const server = await client.call("server", networkOpts)
+      const server = await StartupTrace.measure("server-init", () => client.call("server", networkOpts))
       url = server.url
     } else {
       // Use direct RPC communication (no HTTP)

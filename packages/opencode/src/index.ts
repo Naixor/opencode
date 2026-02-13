@@ -1,3 +1,8 @@
+import { StartupTrace } from "./util/startup-trace"
+
+if (process.argv.includes("--startup-trace")) StartupTrace.enable()
+StartupTrace.begin("global-init")
+
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 import { RunCommand } from "./cli/cmd/run"
@@ -29,6 +34,8 @@ import { SessionCommand } from "./cli/cmd/session"
 import { SecurityCommand } from "./cli/cmd/security"
 import { PluginCommand } from "./cli/cmd/plugin"
 
+StartupTrace.end("global-init")
+
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
     e: e instanceof Error ? e.message : e,
@@ -58,16 +65,22 @@ const cli = yargs(hideBin(process.argv))
     type: "string",
     choices: ["DEBUG", "INFO", "WARN", "ERROR"],
   })
+  .option("startup-trace", {
+    describe: "output per-phase startup timing to stderr in JSON format",
+    type: "boolean",
+  })
   .middleware(async (opts) => {
-    await Log.init({
-      print: process.argv.includes("--print-logs"),
-      dev: Installation.isLocal(),
-      level: (() => {
-        if (opts.logLevel) return opts.logLevel as Log.Level
-        if (Installation.isLocal()) return "DEBUG"
-        return "INFO"
-      })(),
-    })
+    await StartupTrace.measure("log-init", () =>
+      Log.init({
+        print: process.argv.includes("--print-logs"),
+        dev: Installation.isLocal(),
+        level: (() => {
+          if (opts.logLevel) return opts.logLevel as Log.Level
+          if (Installation.isLocal()) return "DEBUG"
+          return "INFO"
+        })(),
+      }),
+    )
 
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
@@ -117,6 +130,7 @@ const cli = yargs(hideBin(process.argv))
 
 try {
   await cli.parse()
+  StartupTrace.output()
 } catch (e) {
   let data: Record<string, any> = {}
   if (e instanceof NamedError) {
