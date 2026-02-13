@@ -1140,6 +1140,35 @@ export namespace Config {
         )
         .optional()
         .describe("Hook configuration: enable or disable individual hooks by name"),
+      background_task: z
+        .object({
+          defaultConcurrency: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Maximum concurrent background tasks (default: 3)"),
+          providerConcurrency: z
+            .record(z.string(), z.number().int().positive())
+            .optional()
+            .describe("Per-provider concurrency limits"),
+          modelConcurrency: z
+            .record(z.string(), z.number().int().positive())
+            .optional()
+            .describe("Per-model concurrency limits"),
+          staleTimeoutMs: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Timeout in ms for stale task detection (default: 180000)"),
+          persist_on_exit: z
+            .boolean()
+            .optional()
+            .describe("Keep background tasks running on session exit (default: false)"),
+        })
+        .optional()
+        .describe("Background task manager configuration"),
       experimental: z
         .object({
           disable_paste_summary: z.boolean().optional(),
