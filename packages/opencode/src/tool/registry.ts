@@ -43,6 +43,7 @@ import { ApplyPatchTool } from "./apply_patch"
 import { AstGrepSearchTool, AstGrepReplaceTool } from "./ast-grep"
 import { DelegateTaskTool, BackgroundOutputTool, BackgroundCancelTool } from "./delegate-task"
 import { LookAtTool } from "./look-at"
+import { SkillMcpTool } from "./skill-mcp"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -133,6 +134,7 @@ export namespace ToolRegistry {
       WebSearchTool,
       CodeSearchTool,
       SkillTool,
+      SkillMcpTool,
       ApplyPatchTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL
         ? [LspTool, LspGotoDefinitionTool, LspFindReferencesTool, LspSymbolsTool, LspHoverTool, LspImplementationTool, LspDiagnosticsTool, LspPrepareRenameTool, LspRenameTool, LspCallHierarchyTool]

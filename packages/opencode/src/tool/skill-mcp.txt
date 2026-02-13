@@ -1,0 +1,13 @@
+Invoke a Model Context Protocol (MCP) tool, resource, or prompt from within skill context.
+
+Use this tool to interact with connected MCP servers. You must specify exactly ONE of: tool_name, resource_name, or prompt_name.
+
+Parameters:
+- mcp_name: The MCP server name (as configured in opencode.jsonc)
+- tool_name: Name of the MCP tool to invoke (mutually exclusive with resource_name and prompt_name)
+- resource_name: URI of the MCP resource to read (mutually exclusive with tool_name and prompt_name)
+- prompt_name: Name of the MCP prompt to execute (mutually exclusive with tool_name and resource_name)
+- arguments: Arguments to pass to the tool, resource, or prompt (JSON string or object)
+
+Available MCP servers and their capabilities are listed below.
+{mcp_info}
