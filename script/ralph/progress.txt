@@ -129,3 +129,25 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - `Bun.file().exists()` is async and works with absolute paths; test fixtures should use `fs.writeFileSync()` to create test files before checking existence
   - The `withInstance` helper can pass `tmpPath` to test functions that need to create files on disk (e.g., for write-existing-file-guard)
 ---
+
+## 2026-02-14 - US-006
+- Implemented 3 agent enforcement hooks in `packages/opencode/src/session/hooks/agent-enforcement.ts`
+  - `stop-continuation-guard` (SessionLifecycleChain, priority 190): detects explicit user stop signal (`data.userStop=true`) on `agent.stopped` event, records stop signal per session to prevent todo-continuation-enforcer from triggering
+  - `todo-continuation-enforcer` (SessionLifecycleChain, priority 200): on `agent.stopped` event, checks for incomplete todos via `Todo.get()`, injects continuation prompt with count and list of incomplete tasks. Respects stop signals from stop-continuation-guard
+  - `subagent-question-blocker` (PreToolChain, priority 100): blocks `question` tool calls when `_isSubagent=true` in args, sets `_blocked` and `_blockedMessage` on args
+- Each hook individually toggleable via config
+- Priority ordering ensures stop-continuation-guard (190) runs before todo-continuation-enforcer (200)
+- 13 unit tests all passing, 1437 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/hooks/agent-enforcement.ts` (new)
+  - `packages/opencode/test/session/hooks/agent-enforcement.test.ts` (new)
+  - `script/ralph/prd.json` (modified - US-006 passes: true)
+  - `script/ralph/progress.txt` (modified - appended progress)
+- **Learnings for future iterations:**
+  - `Todo.get(sessionID)` returns todos stored via `Storage.read()` — works within Instance.provide context; returns empty array if no todos exist for session
+  - `Todo.update()` writes todos to storage AND publishes `Todo.Event.Updated` bus event — useful for testing todo-dependent hooks
+  - Stop signal pattern: use a per-session Map to communicate between hooks in the same chain execution; stop-continuation-guard (priority 190) sets the signal, todo-continuation-enforcer (priority 200) reads it
+  - Subagent detection via `_isSubagent` arg flag allows callers to mark subagent context; alternative approach would be looking up Agent.Info.mode but that requires async agent resolution
+  - The `withInstance` helper for these tests doesn't need `tmpPath` since all state is session-based (via Storage), not file-based
+---
