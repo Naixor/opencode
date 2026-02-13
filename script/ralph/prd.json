@@ -353,7 +353,7 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-012 optional agent infrastructure"
     },
     {

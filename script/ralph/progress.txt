@@ -336,3 +336,29 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Adding optional agents only requires: 1) prompt .txt file, 2) definition in optional/index.ts, 3) config schema field — no changes to agent.ts needed
   - The optional agent infrastructure from US-012 handles all the wiring: config resolution, per-agent overrides, Sisyphus delegation table integration
 ---
+
+## 2026-02-14 - US-014
+- Implemented 3 opt-in agents: Momus, Multimodal-Looker, Sisyphus-Junior using the optional agent infrastructure from US-012
+  - Momus: read-only code review agent, denies write/edit/task/delegate_task, allows read/grep/glob/lsp
+  - Multimodal-Looker: vision-focused agent, only allows read tool (all others denied via `"*": "deny"`)
+  - Sisyphus-Junior: lightweight delegation agent, denies only task tool (prevents recursion), allows everything else including edit/write/question
+- Each agent has a dedicated prompt file in `packages/opencode/src/agent/prompt/`
+- All 3 registered in `OptionalAgents.definitions` in `packages/opencode/src/agent/optional/index.ts`
+- Added `momus`, `multimodal-looker`, `sisyphus-junior` to Config schema explicit agent fields
+- Disabled by default; enabled via `agent.<name>.enabled: true` in opencode.jsonc
+- Enabled agents automatically appear in Sisyphus delegation table via `buildAgentsTable()`
+- 5 new unit tests all passing, 78 total agent tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/agent/prompt/momus.txt` (new)
+  - `packages/opencode/src/agent/prompt/multimodal-looker.txt` (new)
+  - `packages/opencode/src/agent/prompt/sisyphus-junior.txt` (new)
+  - `packages/opencode/src/agent/optional/index.ts` (modified — added momus, multimodal-looker, sisyphus-junior definitions)
+  - `packages/opencode/src/config/config.ts` (modified — added momus, multimodal-looker, sisyphus-junior to agent config schema)
+  - `packages/opencode/test/agent/optional-agents-batch3.test.ts` (new)
+- **Learnings for future iterations:**
+  - Multimodal-Looker is the most restrictive agent — only `read` tool is allowed via the `"*": "deny"` + `read: "allow"` pattern
+  - Sisyphus-Junior uses a different permission pattern from read-only agents — it denies only specific tools (`task`) rather than using `"*": "deny"`, to preserve full implementation capabilities minus recursion
+  - The 3-step process for adding optional agents is now well-established: 1) prompt .txt file, 2) definition in optional/index.ts, 3) config schema field in config.ts
+  - Agent names with hyphens require quoted keys in both the definitions record and config schema
+---

@@ -11,6 +11,9 @@ import PROMPT_PROMETHEUS from "../prompt/prometheus.txt"
 import PROMPT_ATLAS from "../prompt/atlas.txt"
 import PROMPT_LIBRARIAN from "../prompt/librarian.txt"
 import PROMPT_METIS from "../prompt/metis.txt"
+import PROMPT_MOMUS from "../prompt/momus.txt"
+import PROMPT_MULTIMODAL_LOOKER from "../prompt/multimodal-looker.txt"
+import PROMPT_SISYPHUS_JUNIOR from "../prompt/sisyphus-junior.txt"
 
 export namespace OptionalAgents {
   interface OptionalAgentDef {
@@ -101,6 +104,65 @@ export namespace OptionalAgents {
             external_directory: {
               [Truncate.GLOB]: "allow",
             },
+          }),
+          user,
+        ),
+    },
+    momus: {
+      name: "momus",
+      description: "Code review agent focused on quality, correctness, and best practices. Read-only.",
+      mode: "subagent",
+      prompt: PROMPT_MOMUS,
+      permission: (defaults, user) =>
+        PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            bash: "allow",
+            read: "allow",
+            lsp: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+    },
+    "multimodal-looker": {
+      name: "multimodal-looker",
+      description: "Visual analysis agent for images, screenshots, diagrams, and PDFs. Read-only.",
+      mode: "subagent",
+      prompt: PROMPT_MULTIMODAL_LOOKER,
+      permission: (defaults, user) =>
+        PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            read: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+    },
+    "sisyphus-junior": {
+      name: "sisyphus-junior",
+      description: "Lightweight delegation agent for focused task execution. No sub-task spawning.",
+      mode: "subagent",
+      prompt: PROMPT_SISYPHUS_JUNIOR,
+      permission: (defaults, user) =>
+        PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            task: "deny",
+            question: "allow",
           }),
           user,
         ),

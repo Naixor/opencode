@@ -1037,6 +1037,9 @@ export namespace Config {
           atlas: Agent.optional(),
           librarian: Agent.optional(),
           metis: Agent.optional(),
+          momus: Agent.optional(),
+          "multimodal-looker": Agent.optional(),
+          "sisyphus-junior": Agent.optional(),
           // specialized
           title: Agent.optional(),
           summary: Agent.optional(),
