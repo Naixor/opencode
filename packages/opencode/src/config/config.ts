@@ -119,7 +119,9 @@ export namespace Config {
 
   export const state = Instance.state(async () => {
     StartupTrace.begin("config-load")
-    const auth = await Auth.all()
+
+    // Run Auth.all() and global() in parallel — they are independent
+    const [auth, globalConfig] = await Promise.all([Auth.all(), StartupTrace.measure("global-config", () => global())])
 
     // Config loading order (low -> high precedence): https://opencode.ai/docs/config#precedence-order
     // 1) Remote .well-known/opencode (org defaults)
@@ -165,7 +167,7 @@ export namespace Config {
     })
 
     // Global user config overrides remote config.
-    result = mergeConfigConcatArrays(result, await StartupTrace.measure("global-config", () => global()))
+    result = mergeConfigConcatArrays(result, globalConfig)
 
     // Custom config path overrides global config.
     if (Flag.OPENCODE_CONFIG) {
@@ -176,11 +178,17 @@ export namespace Config {
     // Project config overrides global and remote config.
     await StartupTrace.measure("project-config", async () => {
       if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-        for (const file of ["opencode.jsonc", "opencode.json"]) {
-          const found = await Filesystem.findUp(file, Instance.directory, Instance.worktree)
-          for (const resolved of found.toReversed()) {
-            result = mergeConfigConcatArrays(result, await loadFile(resolved))
-          }
+        // Parallelize findUp for both file types — they scan the same directory tree independently
+        const [jsoncFiles, jsonFiles] = await Promise.all([
+          Filesystem.findUp("opencode.jsonc", Instance.directory, Instance.worktree),
+          Filesystem.findUp("opencode.json", Instance.directory, Instance.worktree),
+        ])
+        // Merge in same order as original: all jsonc (farthest first), then all json (farthest first)
+        for (const resolved of jsoncFiles.toReversed()) {
+          result = mergeConfigConcatArrays(result, await loadFile(resolved))
+        }
+        for (const resolved of jsonFiles.toReversed()) {
+          result = mergeConfigConcatArrays(result, await loadFile(resolved))
         }
       }
     })
@@ -236,10 +244,16 @@ export namespace Config {
           pendingInstalls.push(dir)
         }
 
-        result.command = mergeDeep(result.command ?? {}, await loadCommand(dir))
-        result.agent = mergeDeep(result.agent ?? {}, await loadAgent(dir))
-        result.agent = mergeDeep(result.agent ?? {}, await loadMode(dir))
-        result.plugin!.push(...(await loadPlugin(dir)))
+        const [commands, agents, modes, plugins] = await Promise.all([
+          loadCommand(dir),
+          loadAgent(dir),
+          loadMode(dir),
+          loadPlugin(dir),
+        ])
+        result.command = mergeDeep(result.command ?? {}, commands)
+        result.agent = mergeDeep(result.agent ?? {}, agents)
+        result.agent = mergeDeep(result.agent ?? {}, modes)
+        result.plugin!.push(...plugins)
       }
 
       // Defer dependency installation to background — don't block Config.state() from returning
