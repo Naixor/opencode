@@ -24,6 +24,7 @@ test("returns default native agents when no config", async () => {
       expect(names).toContain("general")
       expect(names).toContain("explore")
       expect(names).toContain("omo-explore")
+      expect(names).toContain("oracle")
       expect(names).toContain("compaction")
       expect(names).toContain("title")
       expect(names).toContain("summary")
