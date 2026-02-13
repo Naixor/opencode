@@ -44,6 +44,9 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - For programmatic LLM calls from tools: `generateText({ model: await Provider.getLanguage(model), messages, system })` from "ai" package
 - MCP tool keys use `sanitizedServer_sanitizedTool` format; resources/prompts use `sanitizedServer:sanitizedName` (colon separator). Sanitize with `.replace(/[^a-zA-Z0-9_-]/g, "_")`
 - AI SDK `Tool.execute` is optional — cast through `unknown` when calling MCP tool execute directly: `(tool.execute as unknown as Function)(args, opts)`
+- BashScanner only detects paths from known FILE_ACCESS_COMMANDS as the first token of a pipeline segment — supplement with direct path extraction for tools that embed paths in non-standard formats
+- `SecurityAudit.SecurityEvent` interface: `{ role, operation, path, allowed, reason? }` — does NOT have `type` or `tool` fields
+- Security config schema top-level: `{ version, rules: [...] }` — NOT nested under `files.rules`
 
 ---
 
@@ -683,4 +686,32 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - For mocking the MCP module in tests, mock `../../src/mcp/index` (not `../../src/mcp`) to match the actual import path
   - Don't use `setupSecurityConfig`/`teardownSecurityConfig` helpers when mocking `SecurityConfig` directly — the helpers rely on the real `SecurityConfig.resetConfig()` function
   - `CallToolResult` from MCP has `.content` array with `{ type, text }` entries and optional `.isError` boolean — format accordingly
+---
+
+## 2026-02-14 - US-025
+- Implemented `interactive_bash` tool for tmux session management in `packages/opencode/src/tool/interactive-bash.ts`
+  - `interactive_bash` tool: executes tmux subcommands for session/window/pane management
+  - Parameter: `tmux_command` (string) — the tmux subcommand and arguments
+  - Blocked subcommands: `send-keys`, `send`, `type`, `paste-buffer` — prevents shell injection bypass
+  - Case-insensitive subcommand blocking (lowercased before comparison)
+  - File path security scanning: BashScanner + direct extraction of path-like tokens from tmux arguments
+  - SecurityAccess.checkAccess(path, 'read', 'agent') for all detected file paths
+  - SecurityAudit.logSecurityEvent() for denied operations
+  - tmux availability check via `which tmux` before execution
+- Gated behind `OPENCODE_EXPERIMENTAL_INTERACTIVE_BASH` flag (or `OPENCODE_EXPERIMENTAL`)
+- Created tool description file `interactive-bash.txt`
+- Registered in `registry.ts` behind experimental flag
+- 11 unit tests all passing, typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/interactive-bash.ts` (new)
+  - `packages/opencode/src/tool/interactive-bash.txt` (new)
+  - `packages/opencode/src/flag/flag.ts` (modified — added OPENCODE_EXPERIMENTAL_INTERACTIVE_BASH)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered InteractiveBashTool)
+  - `packages/opencode/test/tool/interactive-bash.test.ts` (new)
+- **Learnings for future iterations:**
+  - BashScanner only detects file paths from known FILE_ACCESS_COMMANDS (cat, grep, find, etc.) as the first token of a pipeline segment — `tmux new-window cat /path` won't detect `/path` via BashScanner because `tmux` is the first token
+  - For tools that embed file paths in non-standard command formats (like tmux), supplement BashScanner with direct path extraction from arguments (look for tokens containing `/`)
+  - `SecurityAudit.SecurityEvent` interface requires: `{ role, operation, path, allowed, reason? }` — NOT `{ type, tool }` fields
+  - Security config schema (`SecuritySchema.SecurityConfig`) has `rules` at top level, NOT nested under `files.rules` — test setup must use `{ version: "1.0", rules: [...] }`
+  - `Bun.spawn(["which", "tmux"])` is a reliable cross-platform way to check tool availability
 ---

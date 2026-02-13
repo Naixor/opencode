@@ -44,6 +44,7 @@ import { AstGrepSearchTool, AstGrepReplaceTool } from "./ast-grep"
 import { DelegateTaskTool, BackgroundOutputTool, BackgroundCancelTool } from "./delegate-task"
 import { LookAtTool } from "./look-at"
 import { SkillMcpTool } from "./skill-mcp"
+import { InteractiveBashTool } from "./interactive-bash"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -142,6 +143,7 @@ export namespace ToolRegistry {
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_AST_GREP ? [AstGrepSearchTool, AstGrepReplaceTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_LOOK_AT ? [LookAtTool] : []),
+      ...(Flag.OPENCODE_EXPERIMENTAL_INTERACTIVE_BASH ? [InteractiveBashTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),
       ...custom,
     ]

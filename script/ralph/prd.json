@@ -636,8 +636,8 @@
         "Typecheck passes"
       ],
       "priority": 25,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "BashScanner + direct path extraction from tmux arguments for file path security scanning"
     },
     {
       "id": "US-026",

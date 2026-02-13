@@ -1,0 +1,11 @@
+Manage tmux sessions for parallel terminal panes. Execute tmux commands to create, manage, and inspect terminal sessions.
+
+BLOCKED subcommands (for security): send-keys, send, type, paste-buffer. These are blocked to prevent shell injection bypass.
+
+Allowed operations include: list-sessions, list-windows, list-panes, new-session, new-window, split-window, select-window, select-pane, kill-session, kill-window, kill-pane, resize-pane, display-message, capture-pane, show-options, has-session, rename-session, rename-window, swap-pane, swap-window, and other non-input tmux subcommands.
+
+Example usage:
+- List sessions: `list-sessions`
+- Create session: `new-session -s mywork -d`
+- Split pane: `split-window -h`
+- Capture pane output: `capture-pane -p -t mywork`
