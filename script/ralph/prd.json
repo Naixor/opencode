@@ -141,8 +141,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already implemented — look_at.ts with Tool.define, file_path/goal/image_data params, security checks, image+PDF support, registered in registry"
     },
     {
       "id": "US-009",
@@ -158,8 +158,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already implemented — instruction.ts discovers README.md alongside AGENTS.md/CLAUDE.md with experimental.readme_injection config (default true)"
     },
     {
       "id": "US-010",
@@ -176,8 +176,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already implemented — prompt.ts post-turn check reads Todo list, injects continuation messages, respects max retries (default 3), skips plan mode"
     },
     {
       "id": "US-011",
@@ -214,8 +214,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already implemented — recovery.ts with dual-layer heartbeat storage, stale heartbeat detection, gitignore management"
     },
     {
       "id": "US-013",
@@ -232,8 +232,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already implemented — ToolRegistry.fromPlugin() wraps execute() with pre-execution path scanning and post-execution content redaction, with short-circuit for no rules"
     },
     {
       "id": "US-014",

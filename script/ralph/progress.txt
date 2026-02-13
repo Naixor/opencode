@@ -13,6 +13,21 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - Both ty and pyright LSP servers now coexist — user config's `lsp` section can disable either
 ---
 
+## 2026-02-13 - US-008, US-009, US-010, US-012, US-013
+- What was implemented: Verified all five stories already implemented in commit 5f4dca313
+- Files already in place:
+  - US-008: packages/opencode/src/tool/look_at.ts — LookAtTool with security, image+PDF support
+  - US-009: packages/opencode/src/session/instruction.ts — README.md discovery with experimental.readme_injection
+  - US-010: packages/opencode/src/session/prompt.ts — Todo continuation enforcer with max retries, plan-mode skip
+  - US-012: packages/opencode/src/session/recovery.ts — Heartbeat storage, stale detection
+  - US-013: packages/opencode/src/tool/registry.ts — ToolRegistry.fromPlugin() with pre/post security wrapping
+- **Learnings for future iterations:**
+  - look_at returns attachments array for multimodal — framework handles model capability checks
+  - Todo continuation uses a Map (continuationCounts) keyed by sessionID — not persisted across process restarts
+  - PluginAudit is in plugin/audit.ts but no CLI command yet (US-016)
+  - Comment checker exists in tool/comment_checker.ts but not integrated into write tools (US-011)
+---
+
 ## 2026-02-13 - US-007
 - What was implemented: Verified prepareRename and rename already implemented (commit 5f4dca313)
 - Files changed: None
