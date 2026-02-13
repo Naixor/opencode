@@ -1190,6 +1190,13 @@ export namespace Config {
         .array(z.string())
         .optional()
         .describe("List of built-in MCP server names to disable even when their API key is available"),
+      notification: z
+        .object({
+          enabled: z.boolean().optional().describe("Enable or disable notifications (default: true)"),
+          sound: z.boolean().optional().describe("Enable or disable notification sounds (default: true)"),
+        })
+        .optional()
+        .describe("Notification settings for task completion events"),
       experimental: z
         .object({
           disable_paste_summary: z.boolean().optional(),
