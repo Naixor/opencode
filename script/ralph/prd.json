@@ -165,7 +165,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-001. Split from original US-005 (enforcement hooks)"
     },
     {
