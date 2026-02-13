@@ -11,6 +11,23 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - @ast-grep/napi must be installed (bun install) for ast_grep.ts to typecheck — it's in package.json but node_modules may be stale
 - LSP.diagnostics() accepts optional { filePath, severity } — backward compatible (no params = all diagnostics)
 - Both ty and pyright LSP servers now coexist — user config's `lsp` section can disable either
+- Tool.define() returns Info with .id and .init() — access parameters via init() not directly
+---
+
+## 2026-02-13 - US-017
+- What was implemented: Created test files for core feature integrations (Track A)
+- Files changed:
+  - test/tool/ast_grep.test.ts — tests findInFiles and parse+replace across JS/TS
+  - test/tool/look_at.test.ts — tests tool id, format support, unsupported format rejection
+  - test/tool/lsp.test.ts — tests diagnostics/prepareRename/rename parameter schemas via LspTool.init()
+  - test/session/readme_injection.test.ts — tests README.md discovery and config toggle
+  - test/session/todo_continuation.test.ts — tests incomplete detection, max retry, plan mode skip, config parsing
+  - test/session/recovery.test.ts — tests heartbeat format, stale detection, path structure, roundtrip
+- **Learnings for future iterations:**
+  - Tool.define() returns { id, init } — to access parameters, call init() first
+  - TypeScript literal narrowing requires explicit union types for config option tests
+  - bun:test uses expect().toBe() etc. — same as jest
+  - Instance.provide() + tmpdir() pattern required for tools that access Instance.directory
 ---
 
 ## 2026-02-13 - US-016
