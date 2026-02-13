@@ -1034,6 +1034,9 @@ export namespace Config {
           // optional (opt-in)
           hephaestus: Agent.optional(),
           prometheus: Agent.optional(),
+          atlas: Agent.optional(),
+          librarian: Agent.optional(),
+          metis: Agent.optional(),
           // specialized
           title: Agent.optional(),
           summary: Agent.optional(),

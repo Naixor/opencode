@@ -8,6 +8,9 @@ import path from "path"
 
 import PROMPT_HEPHAESTUS from "../prompt/hephaestus.txt"
 import PROMPT_PROMETHEUS from "../prompt/prometheus.txt"
+import PROMPT_ATLAS from "../prompt/atlas.txt"
+import PROMPT_LIBRARIAN from "../prompt/librarian.txt"
+import PROMPT_METIS from "../prompt/metis.txt"
 
 export namespace OptionalAgents {
   interface OptionalAgentDef {
@@ -31,6 +34,73 @@ export namespace OptionalAgents {
           defaults,
           PermissionNext.fromConfig({
             question: "allow",
+          }),
+          user,
+        ),
+    },
+    atlas: {
+      name: "atlas",
+      description: "Analysis-focused agent for deep codebase investigation and structural understanding.",
+      mode: "subagent",
+      prompt: PROMPT_ATLAS,
+      permission: (defaults, user) =>
+        PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            task: "deny",
+            delegate_task: "deny",
+          }),
+          user,
+        ),
+    },
+    librarian: {
+      name: "librarian",
+      description: "Documentation and knowledge retrieval agent. Read-only codebase exploration.",
+      mode: "subagent",
+      prompt: PROMPT_LIBRARIAN,
+      permission: (defaults, user) =>
+        PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            bash: "allow",
+            read: "allow",
+            lsp: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
+          }),
+          user,
+        ),
+    },
+    metis: {
+      name: "metis",
+      description: "Strategic analysis agent for evaluating trade-offs and planning approaches. Read-only.",
+      mode: "subagent",
+      prompt: PROMPT_METIS,
+      permission: (defaults, user) =>
+        PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            grep: "allow",
+            glob: "allow",
+            list: "allow",
+            bash: "allow",
+            read: "allow",
+            lsp: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            codesearch: "allow",
+            external_directory: {
+              [Truncate.GLOB]: "allow",
+            },
           }),
           user,
         ),

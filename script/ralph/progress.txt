@@ -310,3 +310,29 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - `prompt_append` is read from `options.prompt_append` since it's an unknown field that gets swept into options by the transform
   - The per-agent override logic for optional agents is separate from the main loop — first resolve the optional agents, then apply config overrides like model/temperature/prompt_append
 ---
+
+## 2026-02-14 - US-013
+- Implemented 3 opt-in agents: Atlas, Librarian, Metis using the optional agent infrastructure from US-012
+  - Atlas: analysis-focused agent, denies task/delegate_task but allows edit/read/grep/glob (not fully read-only)
+  - Librarian: read-only documentation/knowledge retrieval agent, denies write/edit/task/delegate_task
+  - Metis: read-only strategic analysis agent, denies write/edit/task/delegate_task
+- Each agent has a dedicated prompt file in `packages/opencode/src/agent/prompt/`
+- All 3 registered in `OptionalAgents.definitions` in `packages/opencode/src/agent/optional/index.ts`
+- Added `atlas`, `librarian`, `metis` to Config schema explicit agent fields
+- Disabled by default; enabled via `agent.<name>.enabled: true` in opencode.jsonc
+- Enabled agents automatically appear in Sisyphus delegation table via `buildAgentsTable()`
+- 5 new unit tests all passing, 73 total agent tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/agent/prompt/atlas.txt` (new)
+  - `packages/opencode/src/agent/prompt/librarian.txt` (new)
+  - `packages/opencode/src/agent/prompt/metis.txt` (new)
+  - `packages/opencode/src/agent/optional/index.ts` (modified — added atlas, librarian, metis definitions)
+  - `packages/opencode/src/config/config.ts` (modified — added atlas, librarian, metis to agent config schema)
+  - `packages/opencode/test/agent/optional-agents-batch2.test.ts` (new)
+- **Learnings for future iterations:**
+  - Atlas has a different permission pattern from Librarian/Metis — it denies only specific tools (task, delegate_task) rather than using the `"*": "deny"` read-only pattern
+  - Read-only agents (Librarian, Metis) follow the same `"*": "deny"` + explicit allows pattern as omo-explore and oracle
+  - Adding optional agents only requires: 1) prompt .txt file, 2) definition in optional/index.ts, 3) config schema field — no changes to agent.ts needed
+  - The optional agent infrastructure from US-012 handles all the wiring: config resolution, per-agent overrides, Sisyphus delegation table integration
+---
