@@ -26,6 +26,7 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Optional (opt-in) agents: defined in `packages/opencode/src/agent/optional/index.ts`, enabled via `agent.<name>.enabled: true` in config. `replaces` field allows swapping existing agent slots (e.g., prometheus -> plan)
 - BackgroundManager: `packages/opencode/src/agent/background/manager.ts` — task queuing, concurrency control, stale detection, security config sharing. Config section: `background_task` in opencode.jsonc
 - `Instance.provide()` does NOT call `Instance.dispose()` — tests verifying dispose behavior must call `Instance.dispose()` explicitly inside the `fn` callback
+- Categories system: `Categories.resolve()` merges defaults with user config; `Categories.lookup(name, categories)` for retrieval. Category model format: `provider/model`, split on first `/`
 
 ---
 
@@ -389,4 +390,31 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - The dequeue pattern: after any task completion/failure/cancellation, call `dequeue()` to start next eligible task from the queue
   - Provider and model concurrency limits are checked independently — a task blocked by provider limit can still be blocked by model limit
   - `Object.freeze()` on the security config ensures immutability; the frozen reference is shared across all background tasks via `getSecurityConfig()`
+---
+
+## 2026-02-14 - US-016
+- Implemented task category system for delegated work routing
+  - Created `packages/opencode/src/agent/background/categories.ts` with `Categories` namespace
+  - 8 default categories: visual-engineering, ultrabrain, deep, artistry, quick, writing, unspecified-low, unspecified-high
+  - Each category has: description (required), model (optional), prompt_append (optional)
+  - `Categories.resolve()` merges defaults with user-configured categories from opencode.jsonc
+  - `Categories.lookup()` for name-based category retrieval
+  - `Categories.buildDelegationTable()` generates markdown table for Sisyphus prompt
+- Updated Sisyphus dynamic prompt builder to use Categories module instead of ad-hoc config access
+- Added `categories` field to Config.Info schema (Zod validated record of CategoryConfig)
+- Integrated category-based model resolution in task tool: `category` parameter resolves to model from category config, overriding agent/message defaults
+- 11 unit tests all passing, 112 agent tests pass, 96 config tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/agent/background/categories.ts` (new)
+  - `packages/opencode/src/agent/sisyphus.ts` (modified — use Categories module)
+  - `packages/opencode/src/config/config.ts` (modified — added categories schema)
+  - `packages/opencode/src/tool/task.ts` (modified — added category parameter and model resolution)
+  - `packages/opencode/test/agent/background/categories.test.ts` (new)
+- **Learnings for future iterations:**
+  - Categories use a merge-with-defaults pattern: `{ ...DEFAULTS, ...userCategories }` — user categories override defaults by key, new keys are added
+  - The Sisyphus `buildCategoriesSection()` was already stubbed out (from US-009) with safe config access — US-016 replaced it with the proper Categories module
+  - Category model format is `provider/model` (e.g., `anthropic/claude-haiku`) — split on first `/` to extract providerID and modelID
+  - The task tool's model resolution priority: category model > agent model > current message model
+  - Config schema uses `.strict()` on the top-level `Info` object — new fields must be explicitly added to the schema, not just passed through
 ---

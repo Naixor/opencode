@@ -407,7 +407,7 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "AD-10: Category system visible to all agents, usable only with delegate_task permission"
     },
     {
