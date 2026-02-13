@@ -31,6 +31,10 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - `Ripgrep.files()` supports: cwd, glob, hidden, follow, maxDepth, noIgnore, signal — all mapped to ripgrep CLI flags
 - Grep tool uses `Bun.spawn` directly with ripgrep args (not `Ripgrep.search()`). New ripgrep parameters are mapped in the tool, not the abstraction
 - Ripgrep `--field-match-separator=|` only affects match lines; context lines use `-` separator — parser must handle both formats
+- Tool.define execute return type: all branches must include same metadata fields — TypeScript narrows union types and mismatched optional fields cause errors
+- Security rule schema: `deniedOperations: ["read"]` NOT `operations: { read: "deny" }` — use `SecuritySchema.Rule` format with `deniedOperations` array
+- Tool descriptions: one `.txt` file per tool, imported as text via Bun loader: `import DESC from "./tool-name.txt"`
+- LSP result URIs: two formats to handle — `{ uri, range }` (definitions) and `{ location: { uri, range } }` (references/symbols). Use `fileURLToPath()` to convert `file://` URIs for SecurityAccess
 
 ---
 
@@ -476,4 +480,39 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - The grep tool uses `Bun.spawn` directly with ripgrep args rather than `Ripgrep.search()` — new params are mapped directly in the tool, not the Ripgrep abstraction
   - `maxCount` serves dual purpose: passed to ripgrep as `--max-count` (per-file limit) AND used as the output result truncation limit
   - Return type consistency: all return paths must include the same metadata fields (e.g., `hasPartialResults`) to satisfy TypeScript's type narrowing
+---
+
+## 2026-02-14 - US-019
+- Split LSP tool into 5 focused navigation tools: `lsp_goto_definition`, `lsp_find_references`, `lsp_symbols`, `lsp_hover`, `lsp_implementation`
+  - `lsp_goto_definition`: file, line, character -> definition locations formatted as file:line:col
+  - `lsp_find_references`: file, line, character + includeDeclaration (default true) + limit (default 100) -> reference locations with truncation messages
+  - `lsp_symbols`: file, scope (document|workspace) + query + limit (default 50) -> symbol names with kinds and locations
+  - `lsp_hover`: file, line, character -> hover information (documentation, types)
+  - `lsp_implementation`: file, line, character -> implementation locations
+- All tools use `SecurityAccess.checkAccess(filePath, 'read', 'agent')` to filter results containing protected file paths
+- `filterByAccess` helper handles both `uri` and `location.uri` LSP result formats
+- `formatLocation` helper converts LSP URIs to relative file:line:col format
+- Original `lsp` tool preserved unchanged alongside new focused tools
+- All new tools registered in ToolRegistry behind `OPENCODE_EXPERIMENTAL_LSP_TOOL` flag
+- Each tool description in a separate `.txt` file following existing convention
+- 30 unit tests all passing, 1597 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/lsp-tools.ts` (new)
+  - `packages/opencode/src/tool/lsp-goto-definition.txt` (new)
+  - `packages/opencode/src/tool/lsp-find-references.txt` (new)
+  - `packages/opencode/src/tool/lsp-symbols.txt` (new)
+  - `packages/opencode/src/tool/lsp-hover.txt` (new)
+  - `packages/opencode/src/tool/lsp-implementation.txt` (new)
+  - `packages/opencode/src/tool/registry.ts` (modified — added new tool imports and registration)
+  - `packages/opencode/test/tool/lsp-tools.test.ts` (new)
+- **Learnings for future iterations:**
+  - TypeScript's type narrowing requires all return branches of a Tool.define execute function to have consistent metadata shapes — include all fields (even with 0/undefined) in all branches
+  - SecurityAccess rule schema uses `deniedOperations: ["read"]` and `allowedRoles: []`, NOT `operations: { read: "deny" }` — use correct SecuritySchema.Rule format
+  - For security test setup, use `setupSecurityConfig()` helper from `test/security/access_control_cases/helpers.ts` which writes `.opencode-security.json` to disk and calls `loadSecurityConfig(dir)`
+  - macOS path canonicalization: use `fs.realpathSync(tmp.path)` when creating absolute rule patterns in tests — `/var/folders/` vs `/private/var/folders/` mismatch causes rules to not match
+  - LSP result filtering needs to handle two URI formats: direct `{ uri, range }` (definitions) and nested `{ location: { uri, range } }` (references/symbols)
+  - `fileURLToPath` from `url` module converts `file://` URIs back to file paths for SecurityAccess checks
+  - Tool descriptions as separate `.txt` files are imported via Bun's text loader — one file per tool
+  - Tools with no LSP server available (file type not supported) throw "No LSP server available for this file type" — test with unusual extensions
 ---

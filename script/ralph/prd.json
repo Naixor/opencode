@@ -483,7 +483,7 @@
         "Typecheck passes"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "Part 1 of LSP split. Part 2 (US-020) adds diagnostic/rename tools."
     },
     {

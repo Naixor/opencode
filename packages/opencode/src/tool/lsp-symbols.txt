@@ -1,0 +1,13 @@
+Search for code symbols (functions, classes, variables, etc.) using Language Server Protocol (LSP).
+
+Supports two scopes:
+- document: Get all symbols in a specific file
+- workspace: Search for symbols across the entire workspace by name
+
+Parameters:
+- filePath: The file to search in (required for document scope, used for server selection in workspace scope)
+- scope: Either 'document' (file symbols) or 'workspace' (cross-project search)
+- query: Search query for workspace scope (filters symbol names). Ignored for document scope
+- limit: Maximum number of results to return (default 50)
+
+Returns symbol names, kinds, and locations. If no LSP server is available, an error is returned.
