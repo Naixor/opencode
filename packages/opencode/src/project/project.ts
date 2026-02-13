@@ -120,23 +120,43 @@ export namespace Project {
           }
         }
 
-        // Run both git rev-parse commands in parallel — they are independent read operations
-        const [topResult, commonDirResult] = await Promise.all([
-          $`git rev-parse --show-toplevel`
-            .quiet()
-            .nothrow()
-            .cwd(sandbox)
-            .text()
-            .then((x) => path.resolve(sandbox, x.trim()))
-            .catch(() => undefined),
-          $`git rev-parse --git-common-dir`
-            .quiet()
-            .nothrow()
-            .cwd(sandbox)
-            .text()
-            .then((x) => x.trim())
-            .catch(() => undefined),
-        ])
+        // Cache git rev-parse results in .git/opencode-metadata with .git/HEAD mtime invalidation
+        const metadataPath = path.join(git, "opencode-metadata")
+        const headPath = path.join(git, "HEAD")
+        const headMtime = await fs.stat(headPath).then((s) => s.mtimeMs).catch(() => 0)
+
+        const cached = await Bun.file(metadataPath)
+          .json()
+          .then((data: { headMtime: number; toplevel: string; commonDir: string }) =>
+            data.headMtime === headMtime ? data : undefined,
+          )
+          .catch(() => undefined)
+
+        const [topResult, commonDirResult] = cached
+          ? [cached.toplevel, cached.commonDir]
+          : await Promise.all([
+              $`git rev-parse --show-toplevel`
+                .quiet()
+                .nothrow()
+                .cwd(sandbox)
+                .text()
+                .then((x) => path.resolve(sandbox, x.trim()))
+                .catch(() => undefined),
+              $`git rev-parse --git-common-dir`
+                .quiet()
+                .nothrow()
+                .cwd(sandbox)
+                .text()
+                .then((x) => x.trim())
+                .catch(() => undefined),
+            ])
+
+        // Write cache on miss for next launch
+        if (!cached && topResult) {
+          void Bun.file(metadataPath)
+            .write(JSON.stringify({ headMtime, toplevel: topResult, commonDir: commonDirResult }))
+            .catch(() => undefined)
+        }
 
         if (!topResult) {
           return {

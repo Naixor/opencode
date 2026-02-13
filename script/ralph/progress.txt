@@ -19,6 +19,7 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - `installDependencies()` runs in background after `Config.state()` returns — `Instance.dispose()` triggers config reload on completion
 - `Auth.all()` and `global()` run in parallel at start of `Config.state()` — independent data sources
 - `loadCommand/loadAgent/loadMode/loadPlugin` run via `Promise.all()` per directory — different glob patterns, independent subdirectories
+- Git rev-parse results cached in `.git/opencode-metadata` (JSON) with `.git/HEAD` mtime invalidation — skips subprocess spawns on warm launch
 
 ---
 
@@ -153,4 +154,19 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - The `global()` result must be merged AFTER remote-fetch results to preserve precedence order (global overrides remote)
   - `Filesystem.findUp` returns files ordered nearest-first — `toReversed()` makes farthest-first for correct low→high merge
   - Original merge order for project config: all jsonc (farthest first), then all json (farthest first) — json at project dir level has highest precedence
+---
+
+## 2026-02-13 - US-010
+- Parallelized git rev-parse calls were already in place (Promise.all for --show-toplevel and --git-common-dir)
+- git rev-list --max-parents=0 --all already only runs on cache miss (existing .git/opencode id file check)
+- Added .git/opencode-metadata cache for git rev-parse results with .git/HEAD mtime-based invalidation
+- On cache hit (HEAD unchanged): skip both git subprocess spawns entirely — read JSON instead
+- On cache miss: run parallel git rev-parse commands and write cache file for next launch (fire-and-forget)
+- Files changed: project.ts
+- **Learnings for future iterations:**
+  - `.git/opencode` stores the root commit ID (project identifier) — separate from `.git/opencode-metadata` which caches rev-parse results
+  - `.git/HEAD` mtime changes on checkout, commit, rebase, etc. — reliable invalidation signal for toplevel/commonDir
+  - `Bun.file().json()` returns `Promise<any>` — need explicit type annotation on `.then()` callback parameter
+  - Fire-and-forget cache writes use `void Bun.file().write().catch(() => undefined)` pattern — same as existing .git/opencode write
+  - The cache eliminates 2 subprocess spawns on warm launch — significant on systems where process creation is expensive
 ---
