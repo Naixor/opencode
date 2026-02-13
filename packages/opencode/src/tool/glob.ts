@@ -7,7 +7,7 @@ import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
 import { SecurityAccess } from "../security/access"
 import { SecurityConfig } from "../security/config"
-import { SecuritySchema } from "../security/schema"
+import { SecurityUtil } from "../security/util"
 import { Log } from "../util/log"
 
 const securityLog = Log.create({ service: "security-glob" })
@@ -64,7 +64,7 @@ export const GlobTool = Tool.define("glob", {
 
     // Security access control: filter out protected files
     const config = SecurityConfig.getSecurityConfig()
-    const currentRole = getDefaultRole(config)
+    const currentRole = SecurityUtil.getDefaultRole(config)
     const originalCount = files.length
 
     const allowedFiles = files.filter((f) => {
@@ -101,17 +101,3 @@ export const GlobTool = Tool.define("glob", {
   },
 })
 
-/**
- * Get the default role from security config.
- * Returns the lowest level role, or "viewer" if no roles defined.
- * Note: This is a placeholder until US-027 implements proper role detection.
- */
-function getDefaultRole(config: SecuritySchema.SecurityConfig): string {
-  const roles = config.roles ?? []
-  if (roles.length === 0) {
-    return "viewer"
-  }
-  // Find the role with the lowest level (least privileges)
-  const lowestRole = roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0])
-  return lowestRole.name
-}

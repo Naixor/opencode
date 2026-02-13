@@ -22,6 +22,7 @@ import { SecurityAccess } from "../security/access"
 import { SecurityConfig } from "../security/config"
 import { SecuritySchema } from "../security/schema"
 import { SecurityAudit } from "../security/audit"
+import { SecurityUtil } from "../security/util"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -89,7 +90,7 @@ export const BashTool = Tool.define("bash", async () => {
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
       // Security access control: scan command for protected file accesses
       const securityConfig = SecurityConfig.getSecurityConfig()
-      const currentRole = getDefaultRole(securityConfig)
+      const currentRole = SecurityUtil.getDefaultRole(securityConfig)
       const scannedPaths = BashScanner.scanBashCommand(params.command, cwd)
 
       if (scannedPaths.length > 0) {
@@ -325,16 +326,3 @@ export const BashTool = Tool.define("bash", async () => {
   }
 })
 
-/**
- * Get the default role from security config.
- * Returns the lowest level role, or "viewer" if no roles defined.
- * Note: This is a placeholder until US-027 implements proper role detection.
- */
-function getDefaultRole(config: SecuritySchema.SecurityConfig): string {
-  const roles = config.roles ?? []
-  if (roles.length === 0) {
-    return "viewer"
-  }
-  const lowestRole = roles.reduce((prev, curr) => (curr.level < prev.level ? curr : prev), roles[0])
-  return lowestRole.name
-}
