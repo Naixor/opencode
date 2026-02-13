@@ -1,0 +1,10 @@
+Get hover information for a symbol using Language Server Protocol (LSP).
+
+Given a file path and position (line + character), returns documentation, type information, and other hover details for the symbol at that position. Useful for understanding types, reading docstrings, and checking function signatures.
+
+Parameters:
+- filePath: The absolute or relative path to the file
+- line: The line number (1-based, as shown in editors)
+- character: The character offset (1-based, as shown in editors)
+
+Returns hover content (documentation, type info) for the symbol. If no LSP server is available, an error is returned.

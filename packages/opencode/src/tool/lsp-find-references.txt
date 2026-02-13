@@ -1,0 +1,12 @@
+Find all references to a symbol using Language Server Protocol (LSP).
+
+Given a file path and position (line + character), returns all locations where the symbol at that position is referenced across the codebase.
+
+Parameters:
+- filePath: The absolute or relative path to the file
+- line: The line number (1-based, as shown in editors)
+- character: The character offset (1-based, as shown in editors)
+- includeDeclaration: Whether to include the declaration itself in results (default true)
+- limit: Maximum number of results to return (default 100)
+
+Returns file:line:col locations of all references. Results are limited to prevent overwhelming output. If no LSP server is available, an error is returned.

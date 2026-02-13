@@ -1,0 +1,10 @@
+Find implementations of an interface or abstract method using Language Server Protocol (LSP).
+
+Given a file path and position (line + character), returns the location(s) where the interface or abstract method at that position is implemented. Useful for navigating from interfaces to concrete implementations.
+
+Parameters:
+- filePath: The absolute or relative path to the file
+- line: The line number (1-based, as shown in editors)
+- character: The character offset (1-based, as shown in editors)
+
+Returns file:line:col locations of all implementations. If no LSP server is available, an error is returned.

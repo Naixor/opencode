@@ -25,6 +25,13 @@ import { CodeSearchTool } from "./codesearch"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
+import {
+  LspGotoDefinitionTool,
+  LspFindReferencesTool,
+  LspSymbolsTool,
+  LspHoverTool,
+  LspImplementationTool,
+} from "./lsp-tools"
 import { Truncate } from "./truncation"
 
 import { ApplyPatchTool } from "./apply_patch"
@@ -122,7 +129,9 @@ export namespace ToolRegistry {
       CodeSearchTool,
       SkillTool,
       ApplyPatchTool,
-      ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
+      ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL
+        ? [LspTool, LspGotoDefinitionTool, LspFindReferencesTool, LspSymbolsTool, LspHoverTool, LspImplementationTool]
+        : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
       ...custom,

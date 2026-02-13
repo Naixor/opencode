@@ -1,0 +1,10 @@
+Find where a symbol is defined using Language Server Protocol (LSP).
+
+Given a file path and position (line + character), returns the location(s) where the symbol at that position is defined. Useful for navigating to function definitions, class declarations, variable assignments, etc.
+
+Parameters:
+- filePath: The absolute or relative path to the file
+- line: The line number (1-based, as shown in editors)
+- character: The character offset (1-based, as shown in editors)
+
+Returns file:line:col locations of the definition(s). If no LSP server is available for the file type, an error is returned.
