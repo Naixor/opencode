@@ -21,6 +21,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Agents are registered in a `Record<string, Info>` in `Instance.state()` — insertion order determines `defaultAgent()` fallback (first primary non-hidden agent wins)
 - Agent prompts are `.txt` files imported via Bun's text loader: `import PROMPT from "./prompt/file.txt"`
 - Config schema agent section has explicit fields for known agents + `.catchall(Agent)` — add new native agents to explicit fields
+- New subagent agents automatically appear in Sisyphus delegation table via dynamic `buildAgentsTable()` — no manual update needed
+- Search-only agents use `"*": "deny"` then explicit `"allow"` for each permitted tool
 
 ---
 
@@ -227,4 +229,28 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Categories config field doesn't exist yet (US-030) — access via `(cfg as Record<string, unknown>).categories` for forward compatibility
   - The `Agent.list()` sort uses the default agent name for sorting — update this when changing the default agent
   - Config schema's agent object has explicit fields for known agents plus `.catchall()` — new native agents should be added to the explicit fields
+---
+
+## 2026-02-14 - US-010
+- Implemented omo-explore agent as a Sisyphus sub-agent for advanced codebase exploration
+  - Created `packages/opencode/src/agent/prompt/omo-explore.txt` with parallel execution strategy and tool priority (LSP > ast_grep > grep > glob > git)
+  - Registered `omo-explore` in agent registry in `agent.ts` as subagent mode with search-only permissions
+  - Tool restrictions: DENIED write, edit, task, delegate_task; ALLOWED grep, glob, read, lsp, ast_grep_search, bash, webfetch, websearch, codesearch
+  - Added `omo-explore` to config schema explicit fields in `config.ts`
+  - Sisyphus delegation table automatically picks up omo-explore via dynamic `buildAgentsTable()` filter on mode=subagent
+  - Original explore agent completely unchanged (same prompt, same tools, same permissions)
+- Updated existing `agent.test.ts` to include `omo-explore` in default agents list assertion
+- 8 new unit tests all passing, 1483 total tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/agent/prompt/omo-explore.txt` (new)
+  - `packages/opencode/src/agent/agent.ts` (modified - added omo-explore import and registration)
+  - `packages/opencode/src/config/config.ts` (modified - added omo-explore to agent config schema)
+  - `packages/opencode/test/agent/omo-explore.test.ts` (new)
+  - `packages/opencode/test/agent/agent.test.ts` (modified - added omo-explore to default agents assertion)
+- **Learnings for future iterations:**
+  - New subagent agents are automatically included in Sisyphus delegation table — `buildAgentsTable()` dynamically filters agents with `mode === "subagent" || mode === "all"`
+  - Agent names with hyphens (e.g., "omo-explore") work as record keys in JS and as config keys in JSONC — use quoted string keys in Zod schema definitions
+  - The `"*": "deny"` permission rule denies all tools by default; subsequent explicit `"allow"` rules override for specific tools — this is the pattern for search-only agents
+  - Agent registration doesn't require a separate module file — simpler agents can be defined inline in `agent.ts` alongside existing agents
 ---

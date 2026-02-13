@@ -259,7 +259,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "AD-7: Separate omo-explore agent, original explore untouched"
     },
     {
