@@ -120,15 +120,25 @@ export namespace Project {
           }
         }
 
-        const top = await $`git rev-parse --show-toplevel`
-          .quiet()
-          .nothrow()
-          .cwd(sandbox)
-          .text()
-          .then((x) => path.resolve(sandbox, x.trim()))
-          .catch(() => undefined)
+        // Run both git rev-parse commands in parallel — they are independent read operations
+        const [topResult, commonDirResult] = await Promise.all([
+          $`git rev-parse --show-toplevel`
+            .quiet()
+            .nothrow()
+            .cwd(sandbox)
+            .text()
+            .then((x) => path.resolve(sandbox, x.trim()))
+            .catch(() => undefined),
+          $`git rev-parse --git-common-dir`
+            .quiet()
+            .nothrow()
+            .cwd(sandbox)
+            .text()
+            .then((x) => x.trim())
+            .catch(() => undefined),
+        ])
 
-        if (!top) {
+        if (!topResult) {
           return {
             id,
             sandbox,
@@ -137,28 +147,14 @@ export namespace Project {
           }
         }
 
-        sandbox = top
+        sandbox = topResult
 
-        const worktree = await $`git rev-parse --git-common-dir`
-          .quiet()
-          .nothrow()
-          .cwd(sandbox)
-          .text()
-          .then((x) => {
-            const dirname = path.dirname(x.trim())
-            if (dirname === ".") return sandbox
-            return dirname
-          })
-          .catch(() => undefined)
-
-        if (!worktree) {
-          return {
-            id,
-            sandbox,
-            worktree: sandbox,
-            vcs: Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS),
-          }
-        }
+        const worktree = (() => {
+          if (!commonDirResult) return sandbox
+          const dirname = path.dirname(commonDirResult)
+          if (dirname === ".") return sandbox
+          return dirname
+        })()
 
         return {
           id,
