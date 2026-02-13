@@ -209,6 +209,7 @@ export namespace Ripgrep {
     hidden?: boolean
     follow?: boolean
     maxDepth?: number
+    noIgnore?: boolean
     signal?: AbortSignal
   }) {
     input.signal?.throwIfAborted()
@@ -216,6 +217,7 @@ export namespace Ripgrep {
     const args = [await filepath(), "--files", "--glob=!.git/*"]
     if (input.follow) args.push("--follow")
     if (input.hidden !== false) args.push("--hidden")
+    if (input.noIgnore) args.push("--no-ignore")
     if (input.maxDepth !== undefined) args.push(`--max-depth=${input.maxDepth}`)
     if (input.glob) {
       for (const g of input.glob) {

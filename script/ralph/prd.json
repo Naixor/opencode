@@ -432,8 +432,8 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Note: ripgrep's --glob override means noIgnore is effectively always true when glob patterns are used. hidden=false uses post-filtering since ripgrep positive globs override --hidden."
     },
     {
       "id": "US-018",

@@ -27,6 +27,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - BackgroundManager: `packages/opencode/src/agent/background/manager.ts` — task queuing, concurrency control, stale detection, security config sharing. Config section: `background_task` in opencode.jsonc
 - `Instance.provide()` does NOT call `Instance.dispose()` — tests verifying dispose behavior must call `Instance.dispose()` explicitly inside the `fn` callback
 - Categories system: `Categories.resolve()` merges defaults with user config; `Categories.lookup(name, categories)` for retrieval. Category model format: `provider/model`, split on first `/`
+- Ripgrep positive `--glob` patterns override both `--hidden` and `.gitignore` filtering — use post-filtering when these controls are needed with glob patterns
+- `Ripgrep.files()` supports: cwd, glob, hidden, follow, maxDepth, noIgnore, signal — all mapped to ripgrep CLI flags
 
 ---
 
@@ -417,4 +419,29 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Category model format is `provider/model` (e.g., `anthropic/claude-haiku`) — split on first `/` to extract providerID and modelID
   - The task tool's model resolution priority: category model > agent model > current message model
   - Config schema uses `.strict()` on the top-level `Info` object — new fields must be explicitly added to the schema, not just passed through
+---
+
+## 2026-02-14 - US-017
+- Enhanced Glob tool with 4 new optional parameters: maxDepth, hidden, follow, noIgnore
+  - `maxDepth` (number): limits directory search depth, passed to Ripgrep.files()
+  - `hidden` (boolean): controls dotfile inclusion. Post-filtering applied since ripgrep positive `--glob` overrides `--hidden`
+  - `follow` (boolean): follows symbolic links via ripgrep `--follow`
+  - `noIgnore` (boolean): includes gitignored files via ripgrep `--no-ignore`
+- Added `noIgnore` parameter support to `Ripgrep.files()` in ripgrep.ts
+- Added explicit 60s timeout with `AbortController` + `AbortSignal.any()` for combined abort
+- Timeout uses try/catch to detect timeout-specific aborts vs user-initiated aborts
+- Backward compatible: calling with only pattern+path matches previous behavior
+- 10 unit tests all passing, 1552 total tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/glob.ts` (modified — added parameters, timeout, hidden post-filtering)
+  - `packages/opencode/src/file/ripgrep.ts` (modified — added noIgnore parameter to files())
+  - `packages/opencode/test/tool/glob.test.ts` (new)
+- **Learnings for future iterations:**
+  - Ripgrep's positive `--glob` patterns (include patterns) override both `--hidden` and `.gitignore` filtering — this is by design in ripgrep
+  - When `hidden=false` is needed with glob patterns, post-filtering (checking path segments for `.` prefix) is required instead of relying on ripgrep's `--hidden` flag
+  - `AbortSignal.any([signal1, signal2])` combines multiple abort signals — useful for combining user abort with timeout abort
+  - The timeout controller's `.signal.aborted` check distinguishes timeout aborts from user-initiated aborts in the catch block
+  - Tool parameters with `z.number().int().positive().optional()` give clean Zod validation for integer-only positive values
+  - The `Ripgrep.files()` async generator already supports hidden, follow, maxDepth — they just weren't being passed by the glob tool
 ---
