@@ -21,6 +21,20 @@ export namespace Plugin {
   // Built-in plugins that are directly imported (not installed from npm)
   const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin]
 
+  const INSTALL_TIMEOUT_MS = 10_000
+
+  async function installWithTimeout(pkg: string, version: string): Promise<string> {
+    return Promise.race([
+      BunProc.install(pkg, version),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`install timed out after ${INSTALL_TIMEOUT_MS}ms for ${pkg}@${version}`)),
+          INSTALL_TIMEOUT_MS,
+        ),
+      ),
+    ])
+  }
+
   const state = Instance.state(async () => {
     const client = createOpencodeClient({
       baseUrl: "http://localhost:4096",
@@ -29,6 +43,7 @@ export namespace Plugin {
     })
     const config = await Config.get()
     const hooks: Hooks[] = []
+    // PluginInput is read-only — safe to share across parallel plugin loads
     const input: PluginInput = {
       client,
       project: Instance.project,
@@ -39,10 +54,21 @@ export namespace Plugin {
       hasBuiltIn: BuiltIn.has,
     }
 
-    for (const plugin of INTERNAL_PLUGINS) {
-      log.info("loading internal plugin", { name: plugin.name })
-      const init = await plugin(input)
-      hooks.push(init)
+    // Load internal plugins in parallel
+    const internalResults = await Promise.allSettled(
+      INTERNAL_PLUGINS.map(async (plugin) => {
+        log.info("loading internal plugin", { name: plugin.name })
+        return plugin(input)
+      }),
+    )
+    for (const result of internalResults) {
+      if (result.status === "fulfilled") {
+        hooks.push(result.value)
+        continue
+      }
+      log.error("internal plugin failed", {
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      })
     }
 
     const plugins = [...(config.plugin ?? [])]
@@ -50,45 +76,59 @@ export namespace Plugin {
       plugins.push(...BUILTIN)
     }
 
-    for (let plugin of plugins) {
-      // ignore old codex plugin since it is supported first party now
-      if (plugin.includes("opencode-openai-codex-auth") || plugin.includes("opencode-copilot-auth")) continue
-      log.info("loading plugin", { path: plugin })
-      if (!plugin.startsWith("file://")) {
-        const lastAtIndex = plugin.lastIndexOf("@")
-        const pkg = lastAtIndex > 0 ? plugin.substring(0, lastAtIndex) : plugin
-        const version = lastAtIndex > 0 ? plugin.substring(lastAtIndex + 1) : "latest"
-        const builtin = BUILTIN.some((x) => x.startsWith(pkg + "@"))
-        plugin = await BunProc.install(pkg, version).catch((err) => {
-          if (!builtin) throw err
+    // Load external plugins in parallel (install + import + init)
+    const externalResults = await Promise.allSettled(
+      plugins
+        .filter((p) => !p.includes("opencode-openai-codex-auth") && !p.includes("opencode-copilot-auth"))
+        .map(async (plugin) => {
+          log.info("loading plugin", { path: plugin })
+          let resolved = plugin
+          if (!plugin.startsWith("file://")) {
+            const lastAtIndex = plugin.lastIndexOf("@")
+            const pkg = lastAtIndex > 0 ? plugin.substring(0, lastAtIndex) : plugin
+            const version = lastAtIndex > 0 ? plugin.substring(lastAtIndex + 1) : "latest"
+            const builtin = BUILTIN.some((x) => x.startsWith(pkg + "@"))
+            resolved = await installWithTimeout(pkg, version).catch((err) => {
+              if (!builtin) throw err
 
-          const message = err instanceof Error ? err.message : String(err)
-          log.error("failed to install builtin plugin", {
-            pkg,
-            version,
-            error: message,
-          })
-          Bus.publish(Session.Event.Error, {
-            error: new NamedError.Unknown({
-              message: `Failed to install built-in plugin ${pkg}@${version}: ${message}`,
-            }).toObject(),
-          })
+              const message = err instanceof Error ? err.message : String(err)
+              log.error("failed to install builtin plugin", {
+                pkg,
+                version,
+                error: message,
+              })
+              Bus.publish(Session.Event.Error, {
+                error: new NamedError.Unknown({
+                  message: `Failed to install built-in plugin ${pkg}@${version}: ${message}`,
+                }).toObject(),
+              })
 
-          return ""
-        })
-        if (!plugin) continue
+              return ""
+            })
+            if (!resolved) return []
+          }
+          const mod = await import(resolved)
+          // Prevent duplicate initialization when plugins export the same function
+          // as both a named export and default export (e.g., `export const X` and `export default X`).
+          const seen = new Set<PluginInstance>()
+          const pluginHooks: Hooks[] = []
+          for (const [_name, fn] of Object.entries<PluginInstance>(mod)) {
+            if (seen.has(fn)) continue
+            seen.add(fn)
+            pluginHooks.push(await fn(input))
+          }
+          return pluginHooks
+        }),
+    )
+
+    for (const result of externalResults) {
+      if (result.status === "fulfilled") {
+        hooks.push(...result.value)
+        continue
       }
-      const mod = await import(plugin)
-      // Prevent duplicate initialization when plugins export the same function
-      // as both a named export and default export (e.g., `export const X` and `export default X`).
-      // Object.entries(mod) would return both entries pointing to the same function reference.
-      const seen = new Set<PluginInstance>()
-      for (const [_name, fn] of Object.entries<PluginInstance>(mod)) {
-        if (seen.has(fn)) continue
-        seen.add(fn)
-        const init = await fn(input)
-        hooks.push(init)
-      }
+      log.error("plugin loading failed", {
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      })
     }
 
     return {
