@@ -10,6 +10,17 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - getMcpPolicy() falls back to 'enforced' when rules/segments exist but no mcp block — only returns 'trusted' when no security config at all
 ---
 
+## 2026-02-13 - US-003
+- What was implemented: Verified all acceptance criteria already met by existing implementation (commit 5f4dca313)
+- Files changed: None (already committed)
+  - packages/opencode/src/plugin/builtin.ts — BuiltIn namespace with Set<string> and has() function
+  - packages/opencode/src/plugin/index.ts — imports BuiltIn, wires hasBuiltIn: BuiltIn.has to PluginInput
+  - packages/plugin/src/index.ts — PluginInput type includes hasBuiltIn: (feature: string) => boolean
+- **Learnings for future iterations:**
+  - BuiltIn.has is wired directly as a function reference, not wrapped — clean pattern for namespace exports
+  - Feature IDs use kebab-case (e.g., "ast-grep", "lsp-rename")
+---
+
 ## 2026-02-13 - US-002
 - What was implemented: Verified all acceptance criteria already met by existing implementation (commit 5f4dca313)
 - Files changed: None (already committed)

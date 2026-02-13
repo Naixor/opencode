@@ -48,8 +48,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Already implemented in commit 5f4dca313 — builtin.ts has BuiltIn namespace with Set and has(), plugin/index.ts wires hasBuiltIn: BuiltIn.has, plugin SDK has hasBuiltIn in PluginInput type"
     },
     {
       "id": "US-004",
