@@ -3,6 +3,7 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 
 ## Codebase Patterns
 - Use `Instance.state()` with synchronous initializer for per-instance state that needs synchronous access (like Bus does); use async initializer only when lazy async loading is needed
+- Built-in MCP servers: defined in `packages/opencode/src/mcp/builtin.ts`, auto-enabled by API key env vars, disabled via `disabled_mcps` config. User configs override built-in via spread order
 - Hook chain uses priority-based ordering: lower priority number = runs earlier (security hooks ~10-50, transform ~100-200, output ~300-500)
 - Config schema extends `Config.Info` in `packages/opencode/src/config/config.ts` with Zod validators
 - Plugin.trigger() pattern: `Plugin.trigger(hookName, input, output)` where output is mutated in-place
@@ -783,4 +784,41 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - `Skill.extractInstruction()` uses simple regex with `[\s\S]*?` (non-greedy) to match content between XML tags — only returns the first match if multiple blocks exist
   - MCP info building for skills reuses the same sanitization pattern as skill-mcp.ts: `name.replace(/[^a-zA-Z0-9_-]/g, "_")` for server names
   - For test mocking of MCP and SecurityConfig modules, use mutable objects (not const) so test can modify state between tests via `resetMcpMocks()`
+---
+
+## 2026-02-14 - US-028
+- Implemented built-in MCP server integration with auto-enable on API key
+  - Created `packages/opencode/src/mcp/builtin.ts` with `BuiltinMcp` namespace
+  - 3 built-in MCP servers: websearch (Exa), context7 (documentation), grep_app (GitHub code search)
+  - Each server has: name, description, envVar, config factory function
+  - `BuiltinMcp.resolve()`: merges built-in configs with user config, respects disabled_mcps and security policy
+  - `BuiltinMcp.getDisabledMessage()`: returns clear message with required env var name when agent tries disabled MCP
+  - `BuiltinMcp.isBuiltin()` / `BuiltinMcp.getRequiredEnvVar()`: introspection helpers
+- Auto-enable logic: API key from explicit param > process.env[envVar] > not enabled
+- Built-in configs use `type: "remote"` with `oauth: false` (API key auth via headers)
+- User-configured servers always take priority over built-in (spread order: `{ ...builtinConfigs, ...userConfig }`)
+- Integration points:
+  - `MCP` state initialization: merged built-in configs before creating clients
+  - `MCP.status()`: includes built-in servers in status listing
+  - `SkillMcpTool`: enhanced "unknown server" error to show built-in MCP hint with required env var
+- Added `disabled_mcps` field to `Config.Info` schema (string array, optional)
+- SecurityConfig.getMcpPolicy() integration: blocked servers excluded from resolve()
+- Enforced servers still returned (monitoring applied downstream)
+- 18 unit tests all passing, 134 related tests pass, typecheck passes
+- Files changed:
+  - `packages/opencode/src/mcp/builtin.ts` (new)
+  - `packages/opencode/src/mcp/index.ts` (modified — integrated BuiltinMcp.resolve in state init and status)
+  - `packages/opencode/src/config/config.ts` (modified — added disabled_mcps schema field)
+  - `packages/opencode/src/tool/skill-mcp.ts` (modified — enhanced unknown server error with built-in hint)
+  - `packages/opencode/test/mcp/builtin-mcp.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-028 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - Built-in MCP servers use a factory pattern: `config: (apiKey) => Config.Mcp` — the API key is injected at resolve time, not at definition time
+  - `BuiltinMcp.resolve()` takes explicit `apiKeys` param for testing without polluting `process.env`
+  - User MCP configs override built-in by being spread second: `{ ...builtinConfigs, ...userConfig }` — user always wins
+  - `disabled_mcps` is a simple string array in Config.Info, checked as a Set in resolve() for O(1) lookup
+  - The `MCP.status()` function must also call `BuiltinMcp.resolve()` to include built-in servers in the status listing, since state init only runs once
+  - Built-in configs use `oauth: false` to disable OAuth auto-detection — these servers use API key auth via headers
+  - Mock pattern for SecurityConfig in MCP tests: use mutable `let mockMcpPolicy` variable that test cases reassign before calling resolve()
 ---

@@ -1186,6 +1186,10 @@ export namespace Config {
         )
         .optional()
         .describe("Task categories for delegated work routing — user categories merge with/override defaults"),
+      disabled_mcps: z
+        .array(z.string())
+        .optional()
+        .describe("List of built-in MCP server names to disable even when their API key is available"),
       experimental: z
         .object({
           disable_paste_summary: z.boolean().optional(),
