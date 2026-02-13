@@ -205,7 +205,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-001. Split from original US-006 (LLM parameter hooks)"
     },
     {

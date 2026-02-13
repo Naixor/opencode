@@ -17,6 +17,7 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Per-session caching pattern: use Maps keyed by `ctx.sessionID`, expose `resetCaches()` for test isolation
 - `SessionStatus.list()` returns `Record<string, Info>` with only non-idle sessions; idle sessions are deleted from state on `SessionStatus.set(id, { type: "idle" })`
 - For test observability of fire-and-forget operations (e.g., notifications), use internal log arrays + getter/reset exports instead of mocking `Bun.spawn`
+- `PreLLMContext.providerOptions` is the channel for hooks to set provider-specific LLM parameters (thinking, effort, etc.) — guard on model name to avoid incompatible settings
 
 ---
 
@@ -173,4 +174,25 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Platform notifications use `Bun.spawn()` with `stdout: "ignore", stderr: "ignore"` to fire-and-forget; `.exited.catch(() => {})` prevents unhandled promise rejections
   - The notification log pattern (internal array tracking sent notifications) provides test observability without mocking `Bun.spawn` — track `{ platform, title, message }` entries
   - Failure counter pattern: per-session Map<agent, count> allows tracking per-agent failures independently; success events reset only the specific agent's counter
+---
+
+## 2026-02-14 - US-008
+- Implemented 2 LLM parameter hooks in `packages/opencode/src/session/hooks/llm-parameters.ts`
+  - `think-mode` (PreLLMChain, priority 50): sets Claude thinking parameter based on variant. 'max' -> budgetTokens: 32000, 'quick' -> thinking disabled, other variants -> default 16000. Only applies to Claude models
+  - `anthropic-effort` (PreLLMChain, priority 60): sets Anthropic effort level based on variant. 'max' -> 'high', 'quick' -> 'low', other variants -> 'medium'. Only applies to Claude models
+- Added `providerOptions` field to `PreLLMContext` schema (z.record(z.string(), z.any()).optional()) for hooks to set provider-specific LLM parameters
+- Both hooks individually toggleable via config
+- 13 unit tests all passing, 1465 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/session/hooks/llm-parameters.ts` (new)
+  - `packages/opencode/src/session/hooks/index.ts` (modified - added providerOptions to PreLLMContext)
+  - `packages/opencode/test/session/hooks/llm-parameters.test.ts` (new)
+  - `script/ralph/prd.json` (modified - US-008 passes: true)
+  - `script/ralph/progress.txt` (modified - appended progress)
+- **Learnings for future iterations:**
+  - `PreLLMContext.providerOptions` is the channel for hooks to communicate provider-specific LLM parameters (thinking budget, effort level, etc.) downstream
+  - LLM parameter hooks should guard on model name (e.g., `ctx.model.includes("claude")`) to avoid setting provider-specific options for incompatible models
+  - The `variant` field flows through: user message -> keyword-detector hook -> think-mode/anthropic-effort hooks, creating a clean pipeline for mode-based parameter control
+  - Think-mode and anthropic-effort hooks share the same `providerOptions` object via `ctx.providerOptions = ctx.providerOptions ?? {}` pattern — order matters (priority 50 before 60)
 ---

@@ -18,6 +18,7 @@ export namespace HookChain {
     model: z.string(),
     variant: z.string().optional(),
     messages: z.array(z.any()),
+    providerOptions: z.record(z.string(), z.any()).optional(),
   })
   export type PreLLMContext = z.infer<typeof PreLLMContext>
 
