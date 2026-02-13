@@ -24,6 +24,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - New subagent agents automatically appear in Sisyphus delegation table via dynamic `buildAgentsTable()` — no manual update needed
 - Search-only agents use `"*": "deny"` then explicit `"allow"` for each permitted tool
 - Optional (opt-in) agents: defined in `packages/opencode/src/agent/optional/index.ts`, enabled via `agent.<name>.enabled: true` in config. `replaces` field allows swapping existing agent slots (e.g., prometheus -> plan)
+- BackgroundManager: `packages/opencode/src/agent/background/manager.ts` — task queuing, concurrency control, stale detection, security config sharing. Config section: `background_task` in opencode.jsonc
+- `Instance.provide()` does NOT call `Instance.dispose()` — tests verifying dispose behavior must call `Instance.dispose()` explicitly inside the `fn` callback
 
 ---
 
@@ -361,4 +363,30 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Sisyphus-Junior uses a different permission pattern from read-only agents — it denies only specific tools (`task`) rather than using `"*": "deny"`, to preserve full implementation capabilities minus recursion
   - The 3-step process for adding optional agents is now well-established: 1) prompt .txt file, 2) definition in optional/index.ts, 3) config schema field in config.ts
   - Agent names with hyphens require quoted keys in both the definitions record and config schema
+---
+
+## 2026-02-14 - US-015
+- Implemented BackgroundManager in `packages/opencode/src/agent/background/manager.ts`
+  - Task lifecycle: Create -> Queue -> Concurrency Check -> Execute -> Monitor -> Notify -> Cleanup
+  - Concurrency config: defaultConcurrency (default 3), providerConcurrency, modelConcurrency
+  - Stale timeout detection (default 180000ms / 3 min) with auto cleanup via `cleanupStaleTasks()`
+  - Event callbacks: onSubagentSessionCreated(sessionID), onShutdown(), onExecute(task)
+  - Default: cancel all background tasks on session exit. Config persist_on_exit=true allows tasks to continue
+  - Background tasks share parent SecurityConfig by reference (frozen, immutable via Object.freeze)
+  - Task status transitions: pending -> running -> completed/failed/cancelled
+  - Bus events for task lifecycle: Created, Started, Completed, Failed, Cancelled
+- Added `background_task` config section to Config.Info in config.ts with Zod schema
+- 23 unit tests all passing, 101 total agent tests pass, 148 hook tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/agent/background/manager.ts` (new)
+  - `packages/opencode/src/config/config.ts` (modified - added background_task schema)
+  - `packages/opencode/test/agent/background/manager.test.ts` (new)
+- **Learnings for future iterations:**
+  - `Instance.state()` dispose handler is the right place for cleanup on exit — it runs when `Instance.dispose()` is called
+  - `Instance.provide()` does NOT call dispose automatically — tests that verify dispose behavior must call `Instance.dispose()` explicitly inside the `fn` callback
+  - `randomUUIDv7()` from Bun provides monotonically increasing UUIDs — good for task IDs that need ordering
+  - The dequeue pattern: after any task completion/failure/cancellation, call `dequeue()` to start next eligible task from the queue
+  - Provider and model concurrency limits are checked independently — a task blocked by provider limit can still be blocked by model limit
+  - `Object.freeze()` on the security config ensures immutability; the frozen reference is shared across all background tasks via `getSecurityConfig()`
 ---

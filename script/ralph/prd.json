@@ -382,7 +382,7 @@
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "AD-9: Background task lifecycle configurable"
     },
     {
