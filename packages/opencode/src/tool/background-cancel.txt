@@ -1,0 +1,3 @@
+Cancel a running or pending background task.
+
+Stops a background task and marks it as cancelled. Works on tasks in 'pending' or 'running' status.

@@ -1,0 +1,3 @@
+Retrieve the status and output of a background task.
+
+Returns the current status (pending, running, completed, failed, cancelled) and any available output from a previously launched background task.

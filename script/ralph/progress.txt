@@ -31,6 +31,7 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - `Ripgrep.files()` supports: cwd, glob, hidden, follow, maxDepth, noIgnore, signal — all mapped to ripgrep CLI flags
 - Grep tool uses `Bun.spawn` directly with ripgrep args (not `Ripgrep.search()`). New ripgrep parameters are mapped in the tool, not the abstraction
 - Ripgrep `--field-match-separator=|` only affects match lines; context lines use `-` separator — parser must handle both formats
+- Tool.define execute with multiple return branches: use explicit return type annotation `Promise<{ title: string; metadata: { [key: string]: unknown }; output: string }>` to avoid union narrowing errors
 - Tool.define execute return type: all branches must include same metadata fields — TypeScript narrows union types and mismatched optional fields cause errors
 - Security rule schema: `deniedOperations: ["read"]` NOT `operations: { read: "deny" }` — use `SecuritySchema.Rule` format with `deniedOperations` array
 - Tool descriptions: one `.txt` file per tool, imported as text via Bun loader: `import DESC from "./tool-name.txt"`
@@ -583,4 +584,37 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - `SgNode.range()` returns `{ start: Pos, end: Pos }` where `Pos` has `line`, `column`, AND `index` (byte offset) — use `.index` for precise position checking
   - `SgNode.replace()` returns an `Edit { startPos, endPos, insertedText }` object, NOT a string — must extract `.insertedText` for the replacement text
   - Protected segment skipping in replace: apply replacements in reverse offset order to preserve positions for earlier replacements
+---
+
+## 2026-02-14 - US-022
+- Implemented 3 new tools for delegate-task with background execution
+  - `delegate_task`: delegates tasks to specialized agents with category routing, background execution, skill injection, session continuation, and sub-agent recursion prevention
+  - `background_output`: retrieves status and output of background tasks (pending/running/completed/failed/cancelled)
+  - `background_cancel`: cancels running or pending background tasks
+- Key features:
+  - `run_in_background=true` returns task_id immediately; `=false` waits for completion (sync mode mirrors existing task tool)
+  - Category resolution via `Categories.resolve()` + `Categories.lookup()` for model routing (e.g., 'quick' -> cheap model)
+  - `subagent_type` for explicit agent selection; cannot be used with `category` (mutual exclusion enforced)
+  - `load_skills` parameter injects skill content into sub-agent prompt via `<skill_content>` XML blocks
+  - `session_id` for session continuation (resume existing sub-session)
+  - Sub-agents denied `delegate_task` permission to prevent recursion (via `ctx.extra.isSubagent` check + permission rule)
+  - SecurityConfig shared by reference via BackgroundManager (frozen, immutable)
+- Tool description files: `delegate-task.txt`, `background-output.txt`, `background-cancel.txt`
+- All 3 tools registered in ToolRegistry alongside existing task tool
+- 29 unit tests all passing, 1674 total tests pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/delegate-task.ts` (new)
+  - `packages/opencode/src/tool/delegate-task.txt` (new)
+  - `packages/opencode/src/tool/background-output.txt` (new)
+  - `packages/opencode/src/tool/background-cancel.txt` (new)
+  - `packages/opencode/src/tool/registry.ts` (modified — registered 3 new tools)
+  - `packages/opencode/test/tool/delegate-task.test.ts` (new)
+- **Learnings for future iterations:**
+  - Tool.define execute return type must be explicitly annotated with `Promise<{ title: string; metadata: MetadataType; output: string }>` when multiple return branches have different metadata shapes — TypeScript narrows union types and mismatched optional fields cause errors
+  - Use `{ [key: string]: unknown }` as the metadata type for tools with diverse return shapes to avoid union type narrowing issues
+  - The `ctx.extra?.isSubagent` pattern allows callers to mark sub-agent context for recursion prevention — complements the permission-level deny on `delegate_task` tool
+  - Background execution pattern: create BackgroundManager task, resolve prompt parts, then fire-and-forget via `executeInBackground().catch()` — failures handled by `BackgroundManager.fail()`
+  - `delegate_task` disables itself (`delegate_task: false`) in the tools map when calling `SessionPrompt.prompt()` to prevent the sub-agent from calling it, in addition to the permission-level deny
+  - The existing `task` tool remains unchanged — `delegate_task` is an enhanced alternative with category routing and background execution
 ---

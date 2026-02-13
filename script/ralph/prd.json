@@ -568,7 +568,7 @@
         "Typecheck passes"
       ],
       "priority": 22,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-015 (BackgroundManager) and US-016 (categories)"
     },
     {

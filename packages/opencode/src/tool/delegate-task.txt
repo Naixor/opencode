@@ -1,0 +1,25 @@
+Delegate a task to a specialized agent with optional category-based model routing and background execution.
+
+The delegate_task tool launches a sub-agent to handle a task. You can run tasks synchronously (waiting for completion) or asynchronously in the background.
+
+Available agent types:
+{agents}
+
+Task Categories (for model routing):
+{categories}
+
+Parameters:
+- description: A short (3-5 words) description of the task
+- prompt: The detailed task for the agent to perform
+- run_in_background: If true, returns task_id immediately without waiting. Use background_output to check status later
+- category: Optional task category for model routing (e.g., 'quick', 'deep', 'ultrabrain'). Cannot be used with subagent_type
+- subagent_type: Optional agent type to use. Cannot be used with category
+- session_id: Optional existing session to continue
+- load_skills: Optional array of skill names to inject into sub-agent context
+
+Usage notes:
+- Use run_in_background=true for long-running tasks that don't block your workflow
+- Categories route to appropriate models (e.g., 'quick' uses fast/cheap models)
+- Specify subagent_type for a specific agent, or category for automatic model selection
+- Sub-agents cannot call delegate_task (prevents recursion)
+- Use load_skills to give the sub-agent access to specific skill content
