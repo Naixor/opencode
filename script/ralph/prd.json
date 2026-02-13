@@ -799,8 +799,8 @@
         "Typecheck passes"
       ],
       "priority": 31,
-      "passes": false,
-      "notes": "Cross-cutting security verification for all new components"
+      "passes": true,
+      "notes": "Cross-cutting security verification for all new components. Integration tests in test/security/integration/. Mock-dependent tests (look-at, skill-mcp) verified in their respective unit test files to avoid Bun mock.module contamination."
     },
     {
       "id": "US-032",

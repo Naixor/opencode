@@ -2,6 +2,7 @@
 Started: Sat 14 Feb 2026 02:05:22 CST
 
 ## Codebase Patterns
+- **Bun mock.module contamination**: `mock.module()` is process-wide in Bun — mocking any module in one test file affects ALL other test files in the same `bun test` run. Integration tests using real SecurityConfig must be isolated from unit tests that mock `security/config`
 - Use `Instance.state()` with synchronous initializer for per-instance state that needs synchronous access (like Bus does); use async initializer only when lazy async loading is needed
 - Built-in MCP servers: defined in `packages/opencode/src/mcp/builtin.ts`, auto-enabled by API key env vars, disabled via `disabled_mcps` config. User configs override built-in via spread order
 - Hook chain uses priority-based ordering: lower priority number = runs earlier (security hooks ~10-50, transform ~100-200, output ~300-500)
@@ -892,4 +893,32 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Config schema uses `.strict()` on the top-level Info object — all new fields must be explicitly added to the schema
   - Agent config's `.catchall(z.any())` transform sweeps unknown fields into `options` — so `enabled`, `prompt_append`, etc. end up in `agent.<name>.options.<field>` after parsing
   - Zod validation errors include issue path and expected/received types — test via `Config.InvalidError.isInstance(err)` and `err.data.issues`
+---
+
+## 2026-02-14 - US-031
+- Created comprehensive security integration tests in `packages/opencode/test/security/integration/`
+  - 5 test files covering all new OMO components:
+    - `ast-grep-security.test.ts`: SecurityAccess file protection + SecuritySegments marker protection for ast_grep_search and ast_grep_replace (3 tests)
+    - `delegate-task-security.test.ts`: BackgroundManager SecurityConfig sharing — Object.is reference equality, Object.isFrozen immutability, mutation TypeError, rules preservation (4 tests)
+    - `interactive-bash-security.test.ts`: BashScanner + SecurityAccess integration for tmux commands with protected file paths (1 test)
+    - `context-injection-security.test.ts`: AGENTS.md segment redaction + protected rule file skipping during context injection hooks (2 tests)
+    - `output-truncator-security.test.ts`: [REDACTED: Security Protected] marker preservation during output truncation (1 test)
+  - look_at and skill_mcp security tests already fully verified in their respective unit test files (test/tool/look-at.test.ts, test/tool/skill-mcp.test.ts) — not duplicated here due to Bun mock.module contamination issues
+- All 11 integration tests pass, typecheck passes
+- Files changed:
+  - `packages/opencode/test/security/integration/ast-grep-security.test.ts` (new)
+  - `packages/opencode/test/security/integration/delegate-task-security.test.ts` (new)
+  - `packages/opencode/test/security/integration/interactive-bash-security.test.ts` (new)
+  - `packages/opencode/test/security/integration/context-injection-security.test.ts` (new)
+  - `packages/opencode/test/security/integration/output-truncator-security.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-031 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - Bun's `mock.module()` is process-wide and cannot be scoped to a single test file — mocking `security/config` or `security/audit` in ANY test file contaminates ALL other test files in the same `bun test` run
+  - Tests that use the real SecurityConfig/SecurityAudit MUST NOT be run in the same `bun test` invocation as tests that mock these modules
+  - The `setupSecurityConfig()`/`teardownSecurityConfig()` helpers from `test/security/access_control_cases/helpers.ts` import SecurityConfig via `@/security/config` path alias — these break when `security/config` is mocked from any other file
+  - Solution: use `SecurityConfig.loadSecurityConfig(dir)` and `SecurityConfig.resetConfig()` directly in integration tests instead of using helpers
+  - Integration test files should avoid `mock.module` entirely — use real module implementations for end-to-end verification
+  - `tmpdir()` fixture already resolves realpath internally (important for macOS `/var/folders` vs `/private/var/folders`)
+  - PostToolContext requires `agent` field — always include it in test context objects
 ---
