@@ -118,35 +118,41 @@ export const TuiThreadCommand = cmd({
       return piped ? piped + "\n" + args.prompt : args.prompt
     })
 
-    // Check if server should be started (port or hostname explicitly set in CLI or config)
-    const networkOpts = await StartupTrace.measure("resolve-network-options", () => resolveNetworkOptions(args))
-    const shouldStartServer =
-      process.argv.includes("--port") ||
-      process.argv.includes("--hostname") ||
-      process.argv.includes("--mdns") ||
-      networkOpts.mdns ||
-      networkOpts.port !== 0 ||
-      networkOpts.hostname !== "127.0.0.1"
+    // Check CLI args synchronously — if server flags are explicitly set, we know immediately
+    const cliWantsServer =
+      process.argv.includes("--port") || process.argv.includes("--hostname") || process.argv.includes("--mdns")
 
-    let url: string
-    let customFetch: typeof fetch | undefined
-    let events: EventSource | undefined
-
-    if (shouldStartServer) {
-      // Start HTTP server for external access
+    if (cliWantsServer) {
+      // CLI explicitly requests server — resolve network options and start server before TUI
+      const networkOpts = await StartupTrace.measure("resolve-network-options", () => resolveNetworkOptions(args))
       const server = await StartupTrace.measure("server-init", () => client.call("server", networkOpts))
-      url = server.url
-    } else {
-      // Use direct RPC communication (no HTTP)
-      url = "http://opencode.internal"
-      customFetch = createWorkerFetch(client)
-      events = createEventSource(client)
+      const tuiPromise = tui({
+        url: server.url,
+        args: {
+          continue: args.continue,
+          sessionID: args.session,
+          agent: args.agent,
+          model: args.model,
+          prompt,
+        },
+        onExit: async () => {
+          await client.call("shutdown", undefined)
+        },
+      })
+
+      setTimeout(() => {
+        client.call("checkUpgrade", { directory: cwd }).catch(() => {})
+      }, 1000)
+
+      await tuiPromise
+      return
     }
 
+    // Common case: start TUI immediately with direct RPC communication (no blocking on config)
     const tuiPromise = tui({
-      url,
-      fetch: customFetch,
-      events,
+      url: "http://opencode.internal",
+      fetch: createWorkerFetch(client),
+      events: createEventSource(client),
       args: {
         continue: args.continue,
         sessionID: args.session,
@@ -158,6 +164,17 @@ export const TuiThreadCommand = cmd({
         await client.call("shutdown", undefined)
       },
     })
+
+    // Resolve network options in background — check if config says server should start
+    StartupTrace.measure("resolve-network-options", () => resolveNetworkOptions(args))
+      .then((networkOpts) => {
+        const configWantsServer =
+          networkOpts.mdns || networkOpts.port !== 0 || networkOpts.hostname !== "127.0.0.1"
+        if (configWantsServer) {
+          return StartupTrace.measure("server-init", () => client.call("server", networkOpts))
+        }
+      })
+      .catch((e) => Log.Default.error("background network options resolution failed", { error: e }))
 
     setTimeout(() => {
       client.call("checkUpgrade", { directory: cwd }).catch(() => {})
