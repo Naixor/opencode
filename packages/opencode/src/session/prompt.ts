@@ -657,7 +657,7 @@ export namespace SessionPrompt {
       const secConfig = SecurityConfig.getSecurityConfig()
       const secHasRules = (secConfig.rules?.length ?? 0) > 0 || secConfig.segments !== undefined
       if (secHasRules) {
-        const redactedMessages = clone(sessionMessages)
+        const redactedMessages = structuredClone(sessionMessages)
         for (const msg of redactedMessages) {
           for (const part of msg.parts) {
             if (part.type === "text" && part.text) {

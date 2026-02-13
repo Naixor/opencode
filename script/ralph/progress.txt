@@ -13,6 +13,16 @@ Started: Fri 13 Feb 2026 15:15:57 CST
 - Both ty and pyright LSP servers now coexist — user config's `lsp` section can disable either
 ---
 
+## 2026-02-13 - US-015
+- What was implemented: Switched messages.transform clone from remeda clone() to structuredClone()
+- Files changed:
+  - packages/opencode/src/session/prompt.ts — use structuredClone() instead of clone() for messages.transform
+- **Learnings for future iterations:**
+  - Structural diff was already correct: only removals and additions are synced, content mods discarded
+  - structuredClone creates a truly independent deep copy (no shared references)
+  - remeda clone() still used elsewhere in prompt.ts (line 636 for sessionMessages)
+---
+
 ## 2026-02-13 - US-014
 - What was implemented: Added scanAndRedact to text.complete and task tool.execute.after plugin hooks
 - Files changed:
