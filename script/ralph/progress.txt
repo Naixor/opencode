@@ -29,6 +29,8 @@ Started: Sat 14 Feb 2026 02:05:22 CST
 - Categories system: `Categories.resolve()` merges defaults with user config; `Categories.lookup(name, categories)` for retrieval. Category model format: `provider/model`, split on first `/`
 - Ripgrep positive `--glob` patterns override both `--hidden` and `.gitignore` filtering — use post-filtering when these controls are needed with glob patterns
 - `Ripgrep.files()` supports: cwd, glob, hidden, follow, maxDepth, noIgnore, signal — all mapped to ripgrep CLI flags
+- Grep tool uses `Bun.spawn` directly with ripgrep args (not `Ripgrep.search()`). New ripgrep parameters are mapped in the tool, not the abstraction
+- Ripgrep `--field-match-separator=|` only affects match lines; context lines use `-` separator — parser must handle both formats
 
 ---
 
@@ -444,4 +446,34 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - The timeout controller's `.signal.aborted` check distinguishes timeout aborts from user-initiated aborts in the catch block
   - Tool parameters with `z.number().int().positive().optional()` give clean Zod validation for integer-only positive values
   - The `Ripgrep.files()` async generator already supports hidden, follow, maxDepth — they just weren't being passed by the glob tool
+---
+
+## 2026-02-14 - US-018
+- Enhanced Grep tool with 9 new optional parameters mapped to ripgrep CLI flags
+  - `context` (number): `--context=N` for surrounding lines before/after match
+  - `caseSensitive` (boolean): `--case-sensitive` (true) or `--ignore-case` (false), default smart case
+  - `wholeWord` (boolean): `--word-regexp` for whole word matching
+  - `fixedStrings` (boolean): `--fixed-strings` for literal string matching (not regex)
+  - `multiline` (boolean): `--multiline` for cross-line pattern matching
+  - `maxCount` (number): `--max-count=N` per-file limit, also used as output result limit (default 500)
+  - `maxColumns` (number): `--max-columns=N` to limit line width in output
+  - `exclude` (string): `--glob !pattern` for excluding files from search
+  - `fileType` (string): `--type` for restricting to specific file types (e.g., "ts", "py")
+- Improved exit code 2 handling: returns partial results with warning message and `hasPartialResults` metadata flag
+- Context line parsing: ripgrep uses `|` for match lines but `-` for context lines — parser handles both formats
+- Added `--` separator line skipping for context mode output
+- SecurityAccess filtering and segment redaction continue working with all new parameters
+- Backward compatible: all new parameters are optional with sensible defaults
+- 15 new unit tests all passing, 1567 existing tests still pass
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/src/tool/grep.ts` (modified — added parameters, ripgrep flag mapping, context line parsing)
+  - `packages/opencode/test/tool/grep-enhanced.test.ts` (new)
+- **Learnings for future iterations:**
+  - Ripgrep `--field-match-separator=|` only affects match lines, not context lines — context lines use `-` as separator (file-linenum-text)
+  - Context line regex parsing: `^(.+)-(\d+)-(.*)$` handles file paths with dashes by using greedy match for the path portion
+  - `--fixed-strings` and `--multiline` are mutually exclusive approaches to pattern handling — `fixedStrings` uses `-- pattern` (double-dash prevents pattern as flag) while `multiline` uses `--regexp`
+  - The grep tool uses `Bun.spawn` directly with ripgrep args rather than `Ripgrep.search()` — new params are mapped directly in the tool, not the Ripgrep abstraction
+  - `maxCount` serves dual purpose: passed to ripgrep as `--max-count` (per-file limit) AND used as the output result truncation limit
+  - Return type consistency: all return paths must include the same metadata fields (e.g., `hasPartialResults`) to satisfy TypeScript's type narrowing
 ---

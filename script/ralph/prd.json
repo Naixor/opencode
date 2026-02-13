@@ -460,8 +460,8 @@
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Context lines use different separator format (dash vs pipe) — parsing handles both. maxCount serves dual purpose: ripgrep per-file limit AND output result limit."
     },
     {
       "id": "US-019",
