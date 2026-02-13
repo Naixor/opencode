@@ -24,7 +24,7 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - Plugin.trigger() is ONLY called at session runtime (18 sites across 8 files) — NOT during bootstrap init functions
 - Bun compile dynamic import: static string `import("@ai-sdk/anthropic")` WORKS; variable `import(pkg)` FAILS. Use `Map<string, () => Promise<any>>` registry pattern with arrow functions containing static string imports
 - Build uses `Bun.build()` with `compile` option (not CLI `--compile`); bunfig autoload is disabled in production build (`autoloadBunfig: false`)
-- Provider imports: 21 static imports in `provider/provider.ts` lines 18-39, map in `BUNDLED_PROVIDERS` lines 58-81. Existing dynamic imports at lines 223 (AWS SDK) and 483-484 (Cloudflare AI Gateway)
+- Provider imports: 21 lazy loaders in `BUNDLED_PROVIDER_LOADERS` Map (provider/provider.ts) — each is `async () => (await import("@ai-sdk/pkg")).createFn`. Only loaded when `getSDK()` is first called for that provider. `LanguageModelV2` type imported from `@ai-sdk/provider` (type-only, erased at compile). `AmazonBedrockProviderSettings` uses inline `import()` type syntax. GitLab `VERSION` dynamically imported inside custom loader.
 
 ---
 
@@ -209,4 +209,21 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - Import caching means no need for manual cache — the JS module system already caches after first import()
   - Running spike from `script/` dir (monorepo root) fails because AI SDK deps are in `packages/opencode/node_modules` — must run from packages/opencode or compile from there
   - Compiled binary with `--compile` picks up bunfig.toml in cwd — compile from /tmp or use `autoloadBunfig: false` to avoid preload issues
+---
+
+## 2026-02-13 - US-013
+- Converted 21 static provider imports in `provider/provider.ts` to lazy dynamic `import()` via `BUNDLED_PROVIDER_LOADERS` Map
+- Each entry: `["@ai-sdk/pkg", async () => (await import("@ai-sdk/pkg")).createFn]` — static string literals for Bun compile compatibility
+- Updated `getSDK()` to `await` the loader before calling the create function
+- Moved `LanguageModelV2` type import from `@openrouter/ai-sdk-provider` to `@ai-sdk/provider` (type-only, no runtime cost)
+- Changed `AmazonBedrockProviderSettings` to inline `import()` type syntax in custom loader
+- Changed GitLab's `GITLAB_PROVIDER_VERSION` to dynamic `await import("@gitlab/gitlab-ai-provider")` inside the gitlab custom loader
+- Changed GitLab's `createGitLab` type reference to `typeof import("@gitlab/gitlab-ai-provider").createGitLab`
+- Files changed: provider/provider.ts
+- **Learnings for future iterations:**
+  - `LanguageModelV2` is NOT exported from `ai` package — it's `LanguageModel` there (which is `GlobalProviderModelId | LanguageModelV2`). Use `@ai-sdk/provider` for the raw `LanguageModelV2` type
+  - TypeScript `import type` and inline `import("pkg").Type` syntax are erased at compile time — no runtime module loading
+  - JS module system caches `import()` results natively — second `import("@ai-sdk/anthropic")` returns cached module (~0ms)
+  - The `BUNDLED_PROVIDER_LOADERS` Map uses `.get()` instead of bracket access — returns `undefined` for missing keys (same behavior as `BUNDLED_PROVIDERS[key]` when key not found)
+  - The `@ts-ignore` for `@ai-sdk/github-copilot` is preserved — it maps to the internal `./sdk/copilot` module via dynamic import
 ---
