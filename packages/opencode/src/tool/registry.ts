@@ -139,7 +139,8 @@ export namespace ToolRegistry {
         ? [LspTool, LspGotoDefinitionTool, LspFindReferencesTool, LspSymbolsTool, LspHoverTool, LspImplementationTool, LspDiagnosticsTool, LspPrepareRenameTool, LspRenameTool, LspCallHierarchyTool]
         : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
-      ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
+      ...(Flag.OPENCODE_EXPERIMENTAL_AST_GREP ? [AstGrepSearchTool, AstGrepReplaceTool] : []),
+      ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),
       ...custom,
     ]
   }

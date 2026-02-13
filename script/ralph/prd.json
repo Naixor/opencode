@@ -535,8 +535,8 @@
         "Typecheck passes"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": "AD-2: @ast-grep/napi as peer dependency"
+      "passes": true,
+      "notes": "AD-2: @ast-grep/napi as peer dependency. AstGrepLoader.load() injectable for testing. Mock replaces dynamic import in tests."
     },
     {
       "id": "US-022",
