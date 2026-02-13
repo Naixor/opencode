@@ -61,6 +61,62 @@ export namespace Config {
     return merged
   }
 
+  const WELLKNOWN_CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
+  function wellknownCacheDir() {
+    return path.join(Global.Path.cache, "wellknown")
+  }
+
+  function wellknownCachePath(url: string) {
+    const hash = Bun.hash.xxHash32(url).toString(16)
+    return path.join(wellknownCacheDir(), `${hash}.json`)
+  }
+
+  async function readWellknownCache(url: string): Promise<{ data: any; expired: boolean } | undefined> {
+    const cachePath = wellknownCachePath(url)
+    const file = Bun.file(cachePath)
+    const exists = await file.exists()
+    if (!exists) return undefined
+    const cached = await file.json().catch(() => undefined)
+    if (!cached) return undefined
+    const expired = Date.now() - (cached.timestamp ?? 0) > WELLKNOWN_CACHE_TTL_MS
+    return { data: cached.data, expired }
+  }
+
+  async function writeWellknownCache(url: string, data: any) {
+    await fs.mkdir(wellknownCacheDir(), { recursive: true }).catch(() => {})
+    await Bun.write(wellknownCachePath(url), JSON.stringify({ timestamp: Date.now(), data })).catch(() => {})
+  }
+
+  async function fetchWellknownRemote(url: string): Promise<any | undefined> {
+    const response = await fetch(url, { signal: AbortSignal.timeout(3000) }).catch((err) => {
+      log.warn("remote config fetch failed", { url, error: err instanceof Error ? err.message : String(err) })
+      return undefined
+    })
+    if (!response) return undefined
+    if (!response.ok) {
+      log.warn("remote config fetch failed", { url, status: response.status })
+      return undefined
+    }
+    return response.json().catch(() => undefined)
+  }
+
+  async function fetchWellknown(url: string): Promise<any | undefined> {
+    const cached = await readWellknownCache(url)
+    if (cached && !cached.expired) return cached.data
+    if (cached && cached.expired) {
+      // stale-while-revalidate: use stale data, refresh in background
+      fetchWellknownRemote(url).then((data) => {
+        if (data) writeWellknownCache(url, data)
+      }).catch(() => {})
+      return cached.data
+    }
+    // No cache — fetch with timeout
+    const data = await fetchWellknownRemote(url)
+    if (data) writeWellknownCache(url, data).catch(() => {})
+    return data
+  }
+
   export const state = Instance.state(async () => {
     StartupTrace.begin("config-load")
     const auth = await Auth.all()
@@ -75,23 +131,35 @@ export namespace Config {
     // Managed config directory is enterprise-only and always overrides everything above.
     let result: Info = {}
     await StartupTrace.measure("remote-fetch", async () => {
-      for (const [key, value] of Object.entries(auth)) {
-        if (value.type === "wellknown") {
+      const wellknownEntries = Object.entries(auth).filter(
+        (entry): entry is [string, { type: "wellknown"; key: string; token: string }] => entry[1].type === "wellknown",
+      )
+      if (!wellknownEntries.length) return
+
+      const results = await Promise.allSettled(
+        wellknownEntries.map(async ([key, value]) => {
           process.env[value.key] = value.token
-          log.debug("fetching remote config", { url: `${key}/.well-known/opencode` })
-          const response = await fetch(`${key}/.well-known/opencode`)
-          if (!response.ok) {
-            throw new Error(`failed to fetch remote config from ${key}: ${response.status}`)
+          const url = `${key}/.well-known/opencode`
+          log.debug("fetching remote config", { url })
+          const wellknown = await fetchWellknown(url)
+          if (!wellknown) {
+            log.warn("remote config unavailable, using empty config", { url })
+            return undefined
           }
-          const wellknown = (await response.json()) as any
           const remoteConfig = wellknown.config ?? {}
-          // Add $schema to prevent load() from trying to write back to a non-existent file
           if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
-          result = mergeConfigConcatArrays(
-            result,
-            await load(JSON.stringify(remoteConfig), `${key}/.well-known/opencode`),
-          )
+          const loaded = await load(JSON.stringify(remoteConfig), url)
           log.debug("loaded remote config from well-known", { url: key })
+          return loaded
+        }),
+      )
+
+      for (const entry of results) {
+        if (entry.status === "fulfilled" && entry.value) {
+          result = mergeConfigConcatArrays(result, entry.value)
+        }
+        if (entry.status === "rejected") {
+          log.warn("remote config fetch error", { error: entry.reason instanceof Error ? entry.reason.message : String(entry.reason) })
         }
       }
     })
