@@ -13,6 +13,7 @@ import type { Provider } from "@/provider/provider"
 import { LLM } from "./llm"
 import { Config } from "@/config/config"
 import { SessionCompaction } from "./compaction"
+import { HookChain } from "./hooks"
 import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
 
@@ -342,6 +343,13 @@ export namespace SessionProcessor {
               stack: JSON.stringify(e.stack),
             })
             const error = MessageV2.fromError(e, { providerID: input.model.providerID })
+            // Execute error recovery hooks
+            await HookChain.execute("session-lifecycle", {
+              sessionID: input.sessionID,
+              event: "session.error",
+              data: { error },
+              agent: input.model.providerID,
+            }).catch(() => {})
             const retry = SessionRetry.retryable(error)
             if (retry !== undefined) {
               attempt++
