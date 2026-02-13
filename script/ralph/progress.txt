@@ -14,6 +14,7 @@ Started: Fri 13 Feb 2026 18:47:44 CST
 - `packages/opencode/src/global/index.ts` — no module-level await; call `Global.ensureDirectories()` explicitly before `Log.flush()`
 - Pre-existing 6 security test failures in `write-edit-bypass.test.ts`, `audit-log.test.ts`, `inheritance.test.ts`, `config.test.ts`, `mcp-policy.test.ts` — not related to cold-start work
 - TUI thread (`thread.ts`) now starts TUI with RPC immediately; resolveNetworkOptions runs in background. HTTP server only started if CLI flags or config require it
+- Remote wellknown config fetched with 3s timeout, cached to `Global.Path.cache/wellknown/` with 5-min TTL (stale-while-revalidate)
 
 ---
 
@@ -87,4 +88,21 @@ Started: Fri 13 Feb 2026 18:47:44 CST
   - `Global.Path.*` reads are always available immediately — they're just `path.join()` results
   - The cache version check clears the entire cache directory when version mismatches — includes `readdir` + `rm` for each item
   - Test preload uses dynamic `await import()` for both `Log` and `Global` to ensure env vars are set before xdg-basedir reads them
+---
+
+## 2026-02-13 - US-006
+- Added timeout and graceful degradation for remote config fetching in `config.ts`
+- `AbortSignal.timeout(3000)` on all wellknown fetch() calls — 3-second hard timeout
+- On timeout/network error: degrade to empty config, log at warning level (no more crash on fetch failure)
+- Cache to `Global.Path.cache/wellknown/{xxHash32}.json` with 5-minute TTL
+- Stale-while-revalidate: expired cache used immediately, background async refresh
+- Converted serial `for` loop to `Promise.allSettled()` — multiple wellknown entries fetched in parallel
+- Type narrowing via filter type predicate for wellknown auth entries
+- Files changed: config.ts
+- **Learnings for future iterations:**
+  - `Object.entries(auth).filter(fn)` doesn't narrow union types — need explicit type predicate `(entry): entry is [string, WellknownType]`
+  - `Bun.hash.xxHash32()` returns a number — convert with `.toString(16)` for filename-safe hash
+  - `AbortSignal.timeout(ms)` creates a signal that auto-aborts after timeout — cleaner than manual AbortController
+  - Cache file format: `{ timestamp: number, data: any }` — timestamp used for TTL comparison
+  - The `load()` function in config.ts does env var substitution and schema validation — must pass JSON string, not object
 ---
