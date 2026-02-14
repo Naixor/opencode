@@ -2,7 +2,10 @@ import { minimatch } from "minimatch"
 import { SecuritySchema } from "./schema"
 import { SecurityConfig } from "./config"
 import { SecurityAudit } from "./audit"
+<<<<<<< HEAD
 import { getActiveSandbox } from "../sandbox"
+=======
+>>>>>>> 1a0f0d327 (feat: US-004 - Enforce allowlist in checkAccess with evaluation order and audit logging)
 import { Log } from "../util/log"
 import path from "path"
 import fs from "fs"
@@ -115,6 +118,7 @@ export namespace SecurityAccess {
   ): AccessResult {
     const config = SecurityConfig.getSecurityConfig()
 
+<<<<<<< HEAD
     if (!config.rules || config.rules.length === 0) {
       return { allowed: true }
     }
@@ -133,55 +137,110 @@ export namespace SecurityAccess {
     const roles = config.roles || []
     const roleLevel = getRoleLevel(role, roles)
 
+=======
+>>>>>>> 1a0f0d327 (feat: US-004 - Enforce allowlist in checkAccess with evaluation order and audit logging)
     // Resolve symbolic links before checking access
     const resolved = resolveSymlink(filePath)
     const pathToCheck = resolved?.realPath ?? filePath
     const isSymlink = resolved?.isSymlink ?? false
 
-    // If path is a symlink, check both the symlink path and the target path
-    // Access is denied if either the symlink itself or its target is protected
-    const pathsToCheck = isSymlink ? [filePath, pathToCheck] : [pathToCheck]
+    // 1. Check deny rules first — deny always wins
+    if (config.rules && config.rules.length > 0) {
+      const roles = config.roles || []
+      const roleLevel = getRoleLevel(role, roles)
 
-    for (const checkPath of pathsToCheck) {
-      const isTargetPath = isSymlink && checkPath === pathToCheck && checkPath !== filePath
+      // If path is a symlink, check both the symlink path and the target path
+      // Access is denied if either the symlink itself or its target is protected
+      const pathsToCheck = isSymlink ? [filePath, pathToCheck] : [pathToCheck]
 
-      // Get all applicable rules including inherited ones
-      const inheritedRules = getInheritanceChain(checkPath)
+      for (const checkPath of pathsToCheck) {
+        const isTargetPath = isSymlink && checkPath === pathToCheck && checkPath !== filePath
 
-      if (inheritedRules.length === 0) {
-        continue
+        // Get all applicable rules including inherited ones
+        const inheritedRules = getInheritanceChain(checkPath)
+
+        if (inheritedRules.length === 0) {
+          continue
+        }
+
+        // Check each applicable rule (both direct and inherited)
+        // Parent restrictions cannot be overridden by child rules, so we check all
+        for (const { rule, matchType, inheritedFrom } of inheritedRules) {
+          // Check if this operation is denied by this rule
+          if (!rule.deniedOperations.includes(operation)) {
+            continue
+          }
+
+          // Check if the user's role is allowed
+          if (isRoleAllowed(role, roleLevel, rule.allowedRoles, roles)) {
+            continue
+          }
+
+          const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
+          const symlinkInfo = isTargetPath ? " (symlink target is protected)" : ""
+
+          log.debug("access denied", {
+            path: filePath,
+            operation,
+            role,
+            rule: rule.pattern,
+            matchType,
+            inheritedFrom,
+            isSymlink,
+            targetPath: isTargetPath ? pathToCheck : undefined,
+          })
+
+          return {
+            allowed: false,
+            reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}${symlinkInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
+          }
+        }
       }
+    }
 
-      // Check each applicable rule (both direct and inherited)
-      // Parent restrictions cannot be overridden by child rules, so we check all
-      for (const { rule, matchType, inheritedFrom } of inheritedRules) {
-        // Check if this operation is denied by this rule
-        if (!rule.deniedOperations.includes(operation)) {
-          continue
-        }
+    // 2. Allowlist only applies to 'llm' operations
+    if (operation !== "llm") {
+      return { allowed: true }
+    }
 
-        // Check if the user's role is allowed
-        if (isRoleAllowed(role, roleLevel, rule.allowedRoles, roles)) {
-          continue
-        }
+    // 3. If no allowlist configured, all files are accessible
+    if (config.resolvedAllowlist.length === 0) {
+      return { allowed: true }
+    }
 
-        const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
-        const symlinkInfo = isTargetPath ? " (symlink target is protected)" : ""
+    // 4. Check file against every allowlist layer (AND across layers, OR within entries)
+    // Use resolved (real) path for allowlist matching
+    const normalizedPath = pathToCheck.replace(/\\/g, "/")
 
-        log.debug("access denied", {
+    for (const layer of config.resolvedAllowlist) {
+      const matched = layer.entries.some((entry) => {
+        const normalizedPattern = entry.pattern.replace(/\\/g, "/")
+        return matchPath(normalizedPath, normalizedPattern, entry.type)
+      })
+
+      if (!matched) {
+        const reason =
+          `Access denied: file '${filePath}' is not in the allowlist defined in '${layer.source}'. ` +
+          `Add a matching entry to the allowlist, e.g.: { "pattern": "${path.dirname(filePath).replace(/\\/g, "/")}/**", "type": "directory" }`
+
+        log.debug("access denied by allowlist", {
           path: filePath,
           operation,
           role,
-          rule: rule.pattern,
-          matchType,
-          inheritedFrom,
-          isSymlink,
-          targetPath: isTargetPath ? pathToCheck : undefined,
+          layer: layer.source,
+        })
+
+        SecurityAudit.logSecurityEvent({
+          path: filePath,
+          operation,
+          role,
+          allowed: false,
+          reason: `Allowlist denial: file not matched by layer '${layer.source}'`,
         })
 
         return {
           allowed: false,
-          reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}${symlinkInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
+          reason,
         }
       }
     }
