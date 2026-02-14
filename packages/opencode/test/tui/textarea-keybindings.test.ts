@@ -125,7 +125,8 @@ describe("useTextareaKeybindings structure", () => {
     // Simulate what useTextareaKeybindings produces:
     // 1. Hardcoded: { name: "return", action: "submit" }
     // 2. Hardcoded: { name: "return", meta: true, action: "newline" }
-    // 3. Config-driven bindings from TEXTAREA_ACTIONS.flatMap(mapTextareaKeybindings)
+    // 3. Hardcoded: { name: "linefeed", action: "newline" } (Ctrl+J in standard terminals)
+    // 4. Config-driven bindings from TEXTAREA_ACTIONS.flatMap(mapTextareaKeybindings)
 
     const keybinds: Record<string, Keybind.Info[]> = {
       input_submit: Keybind.parse("return"),
@@ -135,6 +136,7 @@ describe("useTextareaKeybindings structure", () => {
     const hardcoded: KeyBinding[] = [
       { name: "return", action: "submit" },
       { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
     ]
     const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
     const combined = [...hardcoded, ...configDriven]
@@ -142,6 +144,7 @@ describe("useTextareaKeybindings structure", () => {
     // Verify hardcoded entries are first
     expect(combined[0]).toEqual({ name: "return", action: "submit" })
     expect(combined[1]).toEqual({ name: "return", meta: true, action: "newline" })
+    expect(combined[2]).toEqual({ name: "linefeed", action: "newline" })
   })
 
   test("config-driven bindings are appended AFTER hardcoded entries", () => {
@@ -153,6 +156,7 @@ describe("useTextareaKeybindings structure", () => {
     const hardcoded: KeyBinding[] = [
       { name: "return", action: "submit" },
       { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
     ]
     const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
     const combined = [...hardcoded, ...configDriven]
@@ -161,7 +165,7 @@ describe("useTextareaKeybindings structure", () => {
     const firstConfigSubmitIndex = combined.findIndex(
       (b, i) => i >= hardcoded.length && b.action === "submit" && b.name === "return",
     )
-    expect(firstConfigSubmitIndex).toBeGreaterThan(1)
+    expect(firstConfigSubmitIndex).toBeGreaterThan(2)
 
     // This ordering ensures config overrides hardcoded via last-write-wins
     const configNewlines = configDriven.filter((b) => b.action === "newline")
@@ -177,6 +181,7 @@ describe("useTextareaKeybindings structure", () => {
     const hardcoded: KeyBinding[] = [
       { name: "return", action: "submit" },
       { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
     ]
     const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
     const combined = [...hardcoded, ...configDriven]
@@ -186,6 +191,9 @@ describe("useTextareaKeybindings structure", () => {
 
     // Should have hardcoded meta+return newline fallback
     expect(combined).toContainEqual({ name: "return", meta: true, action: "newline" })
+
+    // Should have hardcoded linefeed newline fallback (Ctrl+J in standard terminals)
+    expect(combined).toContainEqual({ name: "linefeed", action: "newline" })
 
     // Should have config-driven shift+return newline
     expect(combined).toContainEqual({
@@ -206,5 +214,35 @@ describe("useTextareaKeybindings structure", () => {
       super: undefined,
       action: "newline",
     })
+  })
+
+  test("linefeed hardcoded fallback ensures Ctrl+J works in standard terminals", () => {
+    // In standard terminals, Ctrl+J sends 0x0A which OpenTUI parses to { name: "linefeed" }
+    // The config binding ctrl+j maps to { name: "j", ctrl: true } which only works in Kitty terminals
+    // The hardcoded { name: "linefeed", action: "newline" } fallback bridges this gap
+
+    const keybinds: Record<string, Keybind.Info[]> = {
+      input_submit: Keybind.parse("return"),
+      input_newline: Keybind.parse("shift+return,ctrl+return,alt+return,ctrl+j"),
+    }
+
+    const hardcoded: KeyBinding[] = [
+      { name: "return", action: "submit" },
+      { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
+    ]
+    const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
+    const combined = [...hardcoded, ...configDriven]
+
+    // Simulate standard terminal: Ctrl+J produces { name: "linefeed" } (no ctrl flag)
+    // This should match the hardcoded linefeed binding
+    const linefeedBinding = combined.find((b) => b.name === "linefeed" && b.action === "newline")
+    expect(linefeedBinding).toBeDefined()
+    expect(linefeedBinding!.ctrl).toBeUndefined()
+
+    // Simulate Kitty terminal: Ctrl+J produces { name: "j", ctrl: true }
+    // This should match the config-driven ctrl+j binding
+    const ctrlJBinding = combined.find((b) => b.name === "j" && b.ctrl === true && b.action === "newline")
+    expect(ctrlJBinding).toBeDefined()
   })
 })

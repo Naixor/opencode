@@ -98,12 +98,21 @@ The full end-to-end flow has been verified:
 - Kitty, WezTerm, Ghostty, iTerm2 (CSI u): Shift+Enter works for newline
 - Standard terminals (Terminal.app, etc.): Shift+Enter = Enter (terminal limitation), use Alt+Enter or Ctrl+J instead
 
-## Recommendations
+## Ctrl+J Fix (US-004)
 
-1. **Add `linefeed` as a keybinding alias or additional newline binding** to fix Ctrl+J in standard terminals. Either:
-   - Add a key alias in OpenTUI: `{ linefeed: "j" }` (with implied ctrl) - requires OpenTUI change
-   - OR add `linefeed` (without modifiers) as an additional newline keybinding in the config defaults or as a hardcoded fallback
+**Problem**: In standard terminals, Ctrl+J sends `\n` (0x0A) which OpenTUI parses to `{ name: "linefeed" }`. The config binding `ctrl+j` maps to `{ name: "j", ctrl: true }` — these don't match.
 
-2. **Document the terminal compatibility** clearly for users, explaining which terminals support which shortcuts.
+**Fix**: Added a hardcoded fallback `{ name: "linefeed", action: "newline" }` in `useTextareaKeybindings()`. This sits alongside the existing `{ name: "return", meta: true, action: "newline" }` fallback. Now Ctrl+J works in both terminal types:
+- **Kitty terminals**: Ctrl+J → `{ name: "j", ctrl: true }` → matches config-driven binding
+- **Standard terminals**: Ctrl+J → `{ name: "linefeed" }` → matches hardcoded fallback
 
-3. **Consider adding a hardcoded `linefeed` → `newline` mapping** in `useTextareaKeybindings()` as a fallback, similar to the existing `{ name: "return", meta: true, action: "newline" }` fallback.
+**No conflicts**: `linefeed` is not used as a binding name anywhere else in the TUI.
+
+### Updated Terminal Newline Shortcut Compatibility
+
+| Shortcut | Kitty Terminals | Standard Terminals |
+|----------|----------------|-------------------|
+| Shift+Enter | Works | Does not work (same as Enter) |
+| Ctrl+Enter | Works | Does not work (same as Enter) |
+| Alt+Enter | Works | Works |
+| Ctrl+J | Works (config) | Works (hardcoded fallback) |
