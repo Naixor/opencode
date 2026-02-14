@@ -19,64 +19,21 @@ export namespace SecurityConfig {
   let configLoaded = false
 
   export async function loadSecurityConfig(projectRoot: string): Promise<SecuritySchema.ResolvedSecurityConfig> {
-    const configPath = path.join(projectRoot, SECURITY_CONFIG_FILE)
+    const configs = await findSecurityConfigs(projectRoot)
 
-    const file = Bun.file(configPath)
-    const exists = await file.exists()
-
-    if (!exists) {
-      log.debug("security config not found, using empty config", { path: configPath })
+    if (configs.length === 0) {
+      log.debug("no security configs found, using empty config", { projectRoot })
       currentConfig = emptyConfig
       configLoaded = true
       return currentConfig
     }
 
-    const text = await file.text().catch((err) => {
-      log.warn("failed to read security config file", { path: configPath, error: err })
-      return undefined
+    log.info("security configs loaded", {
+      count: configs.length,
+      paths: configs.map((c) => c.path),
     })
 
-    if (!text) {
-      currentConfig = emptyConfig
-      configLoaded = true
-      return currentConfig
-    }
-
-    const parsed = await Promise.resolve()
-      .then(() => JSON.parse(text))
-      .catch((err) => {
-        log.warn("security config is not valid JSON", { path: configPath, error: err })
-        return undefined
-      })
-
-    if (!parsed) {
-      currentConfig = emptyConfig
-      configLoaded = true
-      return currentConfig
-    }
-
-    const validated = SecuritySchema.securityConfigSchema.safeParse(parsed)
-
-    if (!validated.success) {
-      log.warn("malformed security config, using empty config", {
-        path: configPath,
-        issues: validated.error.issues,
-      })
-      currentConfig = emptyConfig
-      configLoaded = true
-      return currentConfig
-    }
-
-    const resolvedAllowlist: SecuritySchema.AllowlistLayer[] = validated.data.allowlist
-      ? [{ source: configPath, entries: validated.data.allowlist }]
-      : []
-
-    if (validated.data.allowlist && validated.data.allowlist.length === 0) {
-      log.warn("Empty allowlist configured — all LLM operations will be denied. No files are accessible to the LLM.")
-    }
-
-    log.info("security config loaded", { path: configPath })
-    currentConfig = { ...validated.data, resolvedAllowlist }
+    currentConfig = mergeSecurityConfigs(configs)
     configLoaded = true
     return currentConfig
   }
