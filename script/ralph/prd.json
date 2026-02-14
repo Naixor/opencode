@@ -844,7 +844,7 @@
         "Typecheck passes"
       ],
       "priority": 33,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-032 diff tool"
     },
     {
@@ -868,8 +868,8 @@
         "Typecheck passes"
       ],
       "priority": 34,
-      "passes": false,
-      "notes": "End-to-end security integration tests. Run after all tools/agents implemented."
+      "passes": true,
+      "notes": "End-to-end security integration tests. 7 files in test/security/integration/: ast-grep, delegate-task, interactive-bash, context-injection, output-truncator, background-agent, security-audit. look_at and skill_mcp tests in their respective unit files due to mock.module contamination."
     },
     {
       "id": "US-035",

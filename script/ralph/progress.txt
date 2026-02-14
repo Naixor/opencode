@@ -954,3 +954,49 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - CI workflow uses `gh pr create` with heredoc body for markdown formatting
   - `fs.mkdtempSync` + `fs.rmSync` for temp directory lifecycle in tests — cleanup in each test to avoid leaks
 ---
+
+## 2026-02-14 - US-033
+- Created OMO baseline tracking file at `packages/opencode/.omo-baseline.json`
+  - Records version (0.0.0 — pre-first-comparison), date, and maps of all internalized components
+  - 11 tools (glob, grep, lsp, ast-grep, delegate-task, background-task, look-at, skill-mcp, interactive-bash, task, skill)
+  - 26 hooks (all error recovery, output management, context injection, detection, enforcement, lifecycle, LLM parameter hooks)
+  - 11 agents (3 internalized: sisyphus, omo-explore, oracle; 8 optional: hephaestus, prometheus, atlas, librarian, metis, momus, multimodal-looker, sisyphus-junior)
+- Diff tool (US-032) already reads and updates this file via `readBaseline()` / `writeBaseline()` functions
+- 13 new unit tests covering all acceptance criteria:
+  - Schema validation: file exists, parses correctly, all status values valid
+  - Diff tool reads: readBaseline works on actual file, generateDiff uses baseline for categorization
+  - Diff tool updates: writeBaseline updates version, preserves component mappings
+  - Missing fields: defaults applied for missing tools/hooks/agents/version
+- Typecheck passes, all 47 script tests pass (34 existing + 13 new)
+- Files changed:
+  - `packages/opencode/.omo-baseline.json` (new)
+  - `packages/opencode/test/script/omo-baseline.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-033 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - The baseline file serves as the "ground truth" for which OMO version was internalized — the diff tool compares new OMO releases against it
+  - Agent status values differ from tool/hook: agents use "internalized" | "optional" | "skipped" (optional = enabled via config), while tools/hooks use "internalized" | "skipped" | "partial"
+  - The `parseBaseline()` function handles all validation since the script can't import Zod (workspace-only dep) — tests validate structure via parseBaseline + manual assertions
+  - Baseline version starts at "0.0.0" to indicate no upstream comparison has been done yet — `--update-baseline` flag sets the version to the compared OMO npm version
+---
+
+## 2026-02-14 - US-034
+- Created 2 new integration test files for end-to-end security verification across all new OMO components:
+  - `background-agent-security.test.ts` (2 tests): Verifies background agents receive frozen SecurityConfig with preserved rules, and that mutation attempts throw TypeError (escalation prevention)
+  - `security-audit-integration.test.ts` (5 tests): Verifies SecurityAudit log entries are written for denied operations across ast_grep_search, ast_grep_replace, interactive_bash, and multiple simultaneous denials. Validates audit entry schema fields (timestamp, role, operation, path, result)
+- All 18 integration tests across 7 files pass (11 existing + 7 new)
+- Pre-existing tests (US-031): ast-grep-security (3), delegate-task-security (4), interactive-bash-security (1), context-injection-security (2), output-truncator-security (1)
+- look_at and skill_mcp security tests verified in their respective unit test files to avoid Bun mock.module contamination
+- Typecheck passes
+- Files changed:
+  - `packages/opencode/test/security/integration/background-agent-security.test.ts` (new)
+  - `packages/opencode/test/security/integration/security-audit-integration.test.ts` (new)
+  - `script/ralph/prd.json` (modified — US-034 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - `SecurityAccess.checkAccess()` returns `AccessResult` object `{ allowed: boolean }`, NOT a plain boolean — always access `.allowed` property
+  - SecurityAudit log entries are written asynchronously via `fs.appendFile` — tests need a small wait (200ms) before reading the log file
+  - Custom audit log path is configured via `.opencode-security.json` `logging` section with all fields required: `{ path, level, maxSizeMB, retentionDays }`
+  - Integration tests that verify audit logging should set a custom log path in a temp directory to avoid writing to the project's default `.opencode-security-audit.log`
+  - The `readAuditLog()` helper pattern (read file, split lines, JSON.parse each) works reliably for verifying audit entries in integration tests
+---
