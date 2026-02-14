@@ -1,0 +1,8 @@
+# Ralph Progress Log
+Started: Fri 14 Feb 2026
+
+## Codebase Patterns
+- **OpenTUI KeyBinding matching**: Exact modifier matching using binding key format `name:ctrl:shift:meta:super`. Each unique key combo maps to exactly one action. Merge strategy is last-write-wins.
+- **Textarea keybindings**: Hardcoded fallbacks in `textarea-keybindings.ts` (lines 68-69), config-driven bindings appended after via `mapTextareaKeybindings`. Config defaults in `config.ts`: `input_submit="return"`, `input_newline="shift+return,ctrl+return,alt+return,ctrl+j"`.
+- **Terminal Shift+Enter limitation**: Many terminals send identical escape sequences for Enter and Shift+Enter. Only modern terminals (Kitty, WezTerm, iTerm2 CSI u mode) distinguish them. Ctrl+J (ASCII 0x0A) is universally reliable.
+- **Keybind config system**: `packages/opencode/src/config/config.ts` defines Zod schema with defaults. `packages/opencode/src/cli/cmd/tui/context/keybind.tsx` provides keybind context. `packages/opencode/src/util/keybind.ts` handles parsing and matching.

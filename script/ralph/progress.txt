@@ -9,7 +9,7 @@ Started: Sat Feb 14 11:28:47 CST 2026
 - In standard terminals, Ctrl+J (0x0A) parses to `{ name: "linefeed" }`, NOT `{ name: "j", ctrl: true }` - the linefeed check in parseKeypress happens before the ctrl+letter check
 - Default key aliases in OpenTUI: only `enter` → `return` and `esc` → `escape`
 - Textarea keybindings flow: config.ts defaults → Keybind.parse() → keybind context → mapTextareaKeybindings() → OpenTUI KeyBinding[]
-- Hardcoded fallback bindings in useTextareaKeybindings: `{ name: "return", action: "submit" }` and `{ name: "return", meta: true, action: "newline" }`
+- Hardcoded fallback bindings in useTextareaKeybindings: `{ name: "return", action: "submit" }`, `{ name: "return", meta: true, action: "newline" }`, and `{ name: "linefeed", action: "newline" }`
 - Config-driven bindings are appended AFTER hardcoded ones (last-write-wins in OpenTUI's buildKeyBindingsMap)
 
 ---
@@ -36,4 +36,44 @@ Started: Sat Feb 14 11:28:47 CST 2026
   - Cannot directly import from textarea-keybindings.ts in tests due to SolidJS/OpenTUI JSX runtime dependency - re-implement pure logic in test instead
   - mapTextareaKeybindings converts false booleans to undefined (via `|| undefined`) to match OpenTUI's KeyBinding type which uses optional booleans
   - The config key convention is `input_${action.replace(/-/g, "_")}` - e.g., "move-left" → "input_move_left"
+---
+
+## 2026-02-14 - US-003
+- Verified Shift+Enter newline works in Kitty-protocol terminals (no code changes needed)
+- Documented terminal limitation: standard terminals can't distinguish Shift+Enter from Enter
+- Updated KEYBINDING-DIAGNOSIS.md with full end-to-end verification details
+- Files changed:
+  - packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md (updated)
+- **Learnings for future iterations:**
+  - Shift+Enter support is purely a terminal capability question — the keybinding pipeline handles it correctly
+  - OpenTUI textarea natively handles the "newline" action (inserts \n, expands height, moves cursor)
+  - The `maxHeight={6}` on textarea controls the auto-expand limit
+  - When a feature depends on terminal capabilities, verify the pipeline is correct and document the limitation rather than trying to work around it
+---
+
+## 2026-02-14 - US-004
+- Fixed Ctrl+J to work as universal newline shortcut in all terminal types
+- Added hardcoded `{ name: "linefeed", action: "newline" }` fallback in useTextareaKeybindings()
+- Added test verifying both standard terminal (linefeed) and Kitty terminal (ctrl+j) paths
+- Updated KEYBINDING-DIAGNOSIS.md with fix details and compatibility table
+- Files changed:
+  - packages/opencode/src/cli/cmd/tui/component/textarea-keybindings.ts (modified - added linefeed fallback)
+  - packages/opencode/test/tui/textarea-keybindings.test.ts (modified - updated for 3 hardcoded fallbacks, added linefeed test)
+  - packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md (updated - replaced Recommendations with fix details)
+- **Learnings for future iterations:**
+  - When a key produces different ParsedKey names across terminal types (e.g., Ctrl+J → "linefeed" vs "j"+ctrl), add hardcoded fallbacks for the variant that the config system can't express
+  - Hardcoded fallbacks in useTextareaKeybindings are the simplest fix for terminal compatibility gaps — no OpenTUI changes needed
+  - The linefeed key name has no other bindings in the TUI, so it's safe to unconditionally map to newline
+---
+
+## 2026-02-14 - US-005
+- Verified user-customizable submit and newline keybindings via config
+- Added 5 new tests to packages/opencode/test/tui/textarea-keybindings.test.ts (total: 14 tests)
+- Files changed:
+  - packages/opencode/test/tui/textarea-keybindings.test.ts (modified - added 5 config override tests)
+- **Learnings for future iterations:**
+  - Keybind.parse("none") returns [] which causes mapTextareaKeybindings to produce no bindings for that action
+  - The config layer (Zod schema in config.ts) provides defaults before keybinds reach the TUI — mapTextareaKeybindings never sees missing config in practice
+  - Hardcoded fallbacks (return→submit, meta+return→newline, linefeed→newline) always remain regardless of config; they provide baseline functionality
+  - When config sets input_submit to a modified key (e.g. ctrl+return), the hardcoded plain return→submit still exists but gets overridden by last-write-wins only if the key name matches
 ---

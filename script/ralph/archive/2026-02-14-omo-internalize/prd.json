@@ -15,8 +15,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "Completed. Diagnosis performed via source code analysis of OpenTUI's parseKeypress and parseKittyKeyboard. Key finding: Shift+Enter IS distinguishable in Kitty-protocol terminals (sends shift:true) but NOT in standard terminals. Ctrl+J has a bug in standard terminals: it produces { name: 'linefeed' } instead of { name: 'j', ctrl: true }, so the config binding doesn't match. See KEYBINDING-DIAGNOSIS.md for full details."
+      "passes": false,
+      "notes": "This is a diagnostic story. The debug logging should be added temporarily to understand the terminal behavior. The key question: does OpenTUI's ParsedKey distinguish Shift+Enter from Enter? If not, the issue is at the terminal emulator level."
     },
     {
       "id": "US-002",
@@ -30,8 +30,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Verified: mapTextareaKeybindings correctly generates KeyBinding entries. Hardcoded fallbacks preserved. Config bindings appended after hardcoded (last-write-wins). Unit test added at packages/opencode/test/tui/textarea-keybindings.test.ts with 8 passing tests."
+      "passes": false,
+      "notes": "Depends on US-001 findings. The current code already has config defaults input_newline='shift+return,ctrl+return,alt+return,ctrl+j' in config.ts. This story verifies they flow through correctly."
     },
     {
       "id": "US-003",
@@ -46,8 +46,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Verified: Shift+Enter works in Kitty-protocol terminals (Kitty, WezTerm, Ghostty, iTerm2 CSI u). Standard terminals cannot distinguish Shift+Enter from Enter (terminal limitation). Full end-to-end pipeline verified: config default → Keybind.parse → mapTextareaKeybindings → OpenTUI matching. No code changes needed — existing config and mapping handle it correctly. Documentation updated in KEYBINDING-DIAGNOSIS.md."
+      "passes": false,
+      "notes": "Depends on US-001 and US-002. If the terminal cannot distinguish Shift+Enter from Enter, this story is effectively a no-op (the config already has the binding, but the terminal doesn't send the modifier). In that case, document the limitation and pass."
     },
     {
       "id": "US-004",
@@ -61,8 +61,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Fixed: Added hardcoded { name: 'linefeed', action: 'newline' } fallback in useTextareaKeybindings(). In standard terminals, Ctrl+J sends 0x0A which OpenTUI parses to { name: 'linefeed' } — the config binding ctrl+j maps to { name: 'j', ctrl: true } which only works in Kitty terminals. The new fallback bridges this gap. In Kitty terminals, Ctrl+J continues to work via the config-driven binding. No conflicts with other TUI functionality. Test added verifying both paths."
+      "passes": false,
+      "notes": "Ctrl+J sends ASCII 0x0A (linefeed) which all terminals support. The config already has ctrl+j in input_newline defaults. This story verifies it actually works end-to-end."
     },
     {
       "id": "US-005",
@@ -77,8 +77,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "Verified: Config overrides work correctly. Added 5 tests: custom submit key override, custom newline key override, 'none' disables config-driven newline shortcuts, missing config produces no bindings, default config produces correct full binding set. Total: 14 tests passing. The config layer (config.ts Zod schema) provides defaults, Keybind.parse converts to Info[], mapTextareaKeybindings maps to OpenTUI KeyBinding[], and hardcoded fallbacks ensure basic functionality even without config."
+      "passes": false,
+      "notes": "The config system already supports this via keybinds config in config.ts. This story verifies the full flow from config -> textarea keybindings."
     }
   ]
 }
