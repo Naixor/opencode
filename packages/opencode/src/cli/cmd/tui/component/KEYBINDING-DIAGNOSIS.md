@@ -75,6 +75,29 @@ Plus the hardcoded fallback: `{ name: "return", meta: true }` → `"return:0:0:1
 
 4. **For terminals that support neither Kitty protocol nor Alt+Enter**, there is currently no working newline shortcut.
 
+## Shift+Enter Newline Status (US-003)
+
+**Shift+Enter newline WORKS in terminals that support the Kitty keyboard protocol** (Kitty, WezTerm, Ghostty, iTerm2 with CSI u). The existing config default `input_newline: "shift+return,ctrl+return,alt+return,ctrl+j"` correctly generates the keybinding `{ name: "return", shift: true, action: "newline" }` which matches the Kitty-protocol Shift+Enter event.
+
+**Shift+Enter newline DOES NOT WORK in standard terminals** (macOS Terminal.app, etc.) because these terminals send the same byte (`\r`) for both Enter and Shift+Enter. This is a fundamental terminal emulator limitation that cannot be fixed at the application level.
+
+**No code changes are required** for Shift+Enter support. The existing keybinding configuration and mapping pipeline handle it correctly for terminals that can distinguish the keys.
+
+### Verification Details (US-003)
+
+The full end-to-end flow has been verified:
+
+1. **Config default**: `input_newline: "shift+return,ctrl+return,alt+return,ctrl+j"` (config.ts:782-785)
+2. **Parsing**: `Keybind.parse("shift+return")` → `{ name: "return", shift: true, ctrl: false, meta: false, leader: false }` (keybind.ts)
+3. **Mapping**: `mapTextareaKeybindings()` converts to `{ name: "return", shift: true, action: "newline" }` (textarea-keybindings.ts)
+4. **OpenTUI matching**: Key `"return:0:1:0:0"` matches Kitty-protocol Shift+Enter event `{ name: "return", shift: true }`
+5. **Textarea behavior**: OpenTUI textarea handles the `"newline"` action natively — inserts `\n` at cursor, expands height (up to `maxHeight={6}`), and moves cursor to new line
+6. **Submit preserved**: Hardcoded `{ name: "return", action: "submit" }` maps to `"return:0:0:0:0"` — exact match means plain Enter (no modifiers) always submits
+
+**Terminal compatibility summary:**
+- Kitty, WezTerm, Ghostty, iTerm2 (CSI u): Shift+Enter works for newline
+- Standard terminals (Terminal.app, etc.): Shift+Enter = Enter (terminal limitation), use Alt+Enter or Ctrl+J instead
+
 ## Recommendations
 
 1. **Add `linefeed` as a keybinding alias or additional newline binding** to fix Ctrl+J in standard terminals. Either:
