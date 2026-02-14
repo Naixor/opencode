@@ -18,7 +18,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": "Schema-only change. No logic changes. File: packages/opencode/src/security/schema.ts. Follow existing namespace pattern (SecuritySchema). AllowlistEntry uses same RuleType enum as deny rules."
     },
     {
@@ -38,7 +38,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": "Primary file: packages/opencode/src/security/config.ts. Depends on US-001 for types. ResolvedSecurityConfig extends SecurityConfig so most callers need no change. The merge function now needs { config, path }[] input — findSecurityConfigs() already returns this shape."
     },
     {
@@ -55,7 +55,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
+      "passes": false,
       "notes": "Primary files: packages/opencode/src/security/config.ts (loadSecurityConfig refactor), packages/opencode/src/project/bootstrap.ts (verify). findSecurityConfigs() and mergeSecurityConfigs() already exist — this story wires them into the main loading path."
     },
     {
@@ -75,7 +75,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": "Primary file: packages/opencode/src/security/access.ts. Reuse existing matchPath() for AllowlistEntry matching. Add allowlist check AFTER the deny rule loop but BEFORE returning allowed: true. Early exit on first failing layer."
     },
     {
@@ -102,7 +102,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": "Test file: packages/opencode/test/security/access_control_cases/unit/allowlist.test.ts. Use existing test helpers: setupSecurityConfig(config, dir?) + teardownSecurityConfig(). setupSecurityConfig creates .git dir automatically. Use fs.realpathSync() on temp dirs for absolute rule patterns (macOS /private/var/ canonicalization). Follow existing test patterns in the same directory."
     },
     {
@@ -116,7 +116,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": "CLI command location: packages/opencode/src/cli/cmd/security/. Reads resolvedAllowlist from getSecurityConfig(). Reuse the same AllowlistEntry matching logic from access.ts."
     }
   ]

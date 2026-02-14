@@ -1,0 +1,15 @@
+# Ralph Progress Log
+Started: Fri 14 Feb 2026
+
+## Codebase Patterns
+- **Bun test file naming**: Files must have `.test.` or `.spec.` in the filename to be discovered
+- **Bun mock.module contamination**: `mock.module()` is process-wide in Bun — mocking any module in one test file affects ALL other test files in the same `bun test` run
+- Use `Instance.state()` with synchronous initializer for per-instance state
+- Security rules require `allowedRoles: []` field (Zod validates); missing it causes config to fall back to empty/permissive
+- Test pattern: `await using tmp = await tmpdir({ git: true, config: {} })` + `Instance.provide({ directory: tmp.path, fn: async () => { ... } })`
+- All tests run per-package: `bun test --cwd packages/opencode -- test/path/to/test.ts`
+- Security test helpers: `setupSecurityConfig(config, dir?)` + `teardownSecurityConfig()` — setupSecurityConfig creates `.git` dir automatically
+- macOS path canonicalization: `os.tmpdir()` returns `/var/folders/...` but `fs.realpathSync()` returns `/private/var/folders/...` — always use realpathSync on temp dirs for absolute patterns
+- `minimatch` is case-sensitive — be aware on macOS case-insensitive FS
+- `checkAccess()` does NOT normalize `../` in paths — callers must normalize
+---

@@ -74,3 +74,17 @@ Started: Sat 14 Feb 2026 11:25:14 CST
   - `@ts-expect-error` is NOT needed when reassigning namespace functions like `SecurityAudit.logSecurityEvent` — TypeScript allows it without error
   - The audit log file `.opencode-security-audit.log` gets created in the working directory during tests — the `afterEach` cleanup via `teardownSecurityConfig()` doesn't remove it
 ---
+
+## 2026-02-14 - US-006
+- Updated `security check` CLI command to display per-layer allowlist match status
+- Added `checkAllowlistLayers()` exported function to `SecurityAccess` namespace for reuse by CLI
+- When no allowlist configured: shows "No allowlist configured (all files accessible)"
+- When allowlist configured: shows each layer's source path, match status (Matched/Not matched), and matching pattern
+- Updated inactive security check to also consider allowlist presence (not just rules)
+- Symlink-aware: uses resolved real path for allowlist matching
+- Files changed: `packages/opencode/src/security/access.ts`, `packages/opencode/src/cli/cmd/security/check.ts`
+- **Learnings for future iterations:**
+  - `matchPath()` is a private function in `SecurityAccess` — to reuse it from the CLI, created a new exported `checkAllowlistLayers()` wrapper instead of exposing the low-level function
+  - The CLI check command's "inactive" guard needed updating: previously only checked `hasRules`, now also checks `hasAllowlist` since an allowlist-only config (no deny rules) is a valid security setup
+  - The `AllowlistMatchResult` interface returns the full `AllowlistLayer` object so the CLI can display `layer.source` without needing to re-fetch config
+---
