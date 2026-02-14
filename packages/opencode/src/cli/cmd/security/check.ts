@@ -17,9 +17,10 @@ export const SecurityCheckCommand = cmd({
     await bootstrap(process.cwd(), async () => {
       const config = SecurityConfig.getSecurityConfig()
       const hasRules = (config.rules?.length ?? 0) > 0
+      const hasAllowlist = config.resolvedAllowlist.length > 0
 
-      if (!hasRules) {
-        console.log("Security: inactive (no rules configured)")
+      if (!hasRules && !hasAllowlist) {
+        console.log("Security: inactive (no rules or allowlist configured)")
         return
       }
 
@@ -54,6 +55,26 @@ export const SecurityCheckCommand = cmd({
         console.log(`  ${op.padEnd(5)}: ${status}${reason}`)
       }
       console.log()
+
+      // Allowlist status
+      const checkPath = resolved?.isSymlink ? resolved.realPath : targetPath
+      const layerResults = SecurityAccess.checkAllowlistLayers(checkPath)
+
+      if (layerResults.length === 0) {
+        console.log("Allowlist: No allowlist configured (all files accessible)\n")
+      } else {
+        console.log("Allowlist:")
+        for (const result of layerResults) {
+          console.log(`  Layer: ${result.layer.source}`)
+          if (result.matched) {
+            console.log(`    Status:  Matched`)
+            console.log(`    Pattern: ${result.matchedPattern}`)
+          } else {
+            console.log(`    Status:  Not matched`)
+          }
+        }
+        console.log()
+      }
 
       // Inheritance chain
       const chain = SecurityAccess.getInheritanceChain(targetPath)

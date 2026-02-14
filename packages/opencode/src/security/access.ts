@@ -223,6 +223,32 @@ export namespace SecurityAccess {
     return { allowed: true }
   }
 
+  export interface AllowlistMatchResult {
+    layer: SecuritySchema.AllowlistLayer
+    matched: boolean
+    matchedPattern?: string
+  }
+
+  /**
+   * Check a file path against each allowlist layer and return per-layer match details.
+   */
+  export function checkAllowlistLayers(filePath: string): AllowlistMatchResult[] {
+    const config = SecurityConfig.getSecurityConfig()
+    if (config.resolvedAllowlist.length === 0) return []
+
+    const normalizedPath = filePath.replace(/\\/g, "/")
+
+    return config.resolvedAllowlist.map((layer) => {
+      for (const entry of layer.entries) {
+        const normalizedPattern = entry.pattern.replace(/\\/g, "/")
+        if (matchPath(normalizedPath, normalizedPattern, entry.type)) {
+          return { layer, matched: true, matchedPattern: entry.pattern }
+        }
+      }
+      return { layer, matched: false }
+    })
+  }
+
   /**
    * Get all parent directory paths from root to the given path
    */
