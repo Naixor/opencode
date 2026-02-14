@@ -8,16 +8,17 @@ export namespace SecurityConfig {
 
   const SECURITY_CONFIG_FILE = ".opencode-security.json"
 
-  const emptyConfig: SecuritySchema.SecurityConfig = {
+  const emptyConfig: SecuritySchema.ResolvedSecurityConfig = {
     version: "1.0",
     roles: [],
     rules: [],
+    resolvedAllowlist: [],
   }
 
-  let currentConfig: SecuritySchema.SecurityConfig = emptyConfig
+  let currentConfig: SecuritySchema.ResolvedSecurityConfig = emptyConfig
   let configLoaded = false
 
-  export async function loadSecurityConfig(projectRoot: string): Promise<SecuritySchema.SecurityConfig> {
+  export async function loadSecurityConfig(projectRoot: string): Promise<SecuritySchema.ResolvedSecurityConfig> {
     const configPath = path.join(projectRoot, SECURITY_CONFIG_FILE)
 
     const file = Bun.file(configPath)
@@ -66,8 +67,16 @@ export namespace SecurityConfig {
       return currentConfig
     }
 
+    const resolvedAllowlist: SecuritySchema.AllowlistLayer[] = validated.data.allowlist
+      ? [{ source: configPath, entries: validated.data.allowlist }]
+      : []
+
+    if (validated.data.allowlist && validated.data.allowlist.length === 0) {
+      log.warn("Empty allowlist configured — all LLM operations will be denied. No files are accessible to the LLM.")
+    }
+
     log.info("security config loaded", { path: configPath })
-    currentConfig = validated.data
+    currentConfig = { ...validated.data, resolvedAllowlist }
     configLoaded = true
     return currentConfig
   }
@@ -184,13 +193,26 @@ export namespace SecurityConfig {
    * - Logging uses the first defined config's logging settings
    * - Authentication uses the first defined config's authentication settings
    */
-  export function mergeSecurityConfigs(configs: SecuritySchema.SecurityConfig[]): SecuritySchema.SecurityConfig {
+  export function mergeSecurityConfigs(
+    configs: { config: SecuritySchema.SecurityConfig; path: string }[],
+  ): SecuritySchema.ResolvedSecurityConfig {
     if (configs.length === 0) return emptyConfig
-    if (configs.length === 1) return configs[0]
+    if (configs.length === 1) {
+      const entry = configs[0]
+      const resolvedAllowlist: SecuritySchema.AllowlistLayer[] = entry.config.allowlist
+        ? [{ source: entry.path, entries: entry.config.allowlist }]
+        : []
+      if (entry.config.allowlist && entry.config.allowlist.length === 0) {
+        log.warn(
+          "Empty allowlist configured — all LLM operations will be denied. No files are accessible to the LLM.",
+        )
+      }
+      return { ...entry.config, resolvedAllowlist }
+    }
 
     // Validate role definitions are identical across configs
     const roleMap = new Map<string, number>()
-    for (const config of configs) {
+    for (const { config } of configs) {
       for (const role of config.roles ?? []) {
         const existing = roleMap.get(role.name)
         if (existing !== undefined && existing !== role.level) {
@@ -206,13 +228,13 @@ export namespace SecurityConfig {
     const mergedRoles: SecuritySchema.Role[] = [...roleMap.entries()].map(([name, level]) => ({ name, level }))
 
     // Union all rules
-    const mergedRules: SecuritySchema.Rule[] = configs.flatMap((c) => c.rules ?? [])
+    const mergedRules: SecuritySchema.Rule[] = configs.flatMap((c) => c.config.rules ?? [])
 
     // Union segment markers
-    const mergedMarkers: SecuritySchema.MarkerConfig[] = configs.flatMap((c) => c.segments?.markers ?? [])
+    const mergedMarkers: SecuritySchema.MarkerConfig[] = configs.flatMap((c) => c.config.segments?.markers ?? [])
 
     // Union AST configs
-    const mergedAST: SecuritySchema.ASTConfig[] = configs.flatMap((c) => c.segments?.ast ?? [])
+    const mergedAST: SecuritySchema.ASTConfig[] = configs.flatMap((c) => c.config.segments?.ast ?? [])
 
     const mergedSegments =
       mergedMarkers.length > 0 || mergedAST.length > 0
@@ -223,23 +245,23 @@ export namespace SecurityConfig {
         : undefined
 
     // First defined logging wins
-    const mergedLogging = configs.find((c) => c.logging)?.logging
+    const mergedLogging = configs.find((c) => c.config.logging)?.config.logging
 
     // First defined authentication wins
-    const mergedAuthentication = configs.find((c) => c.authentication)?.authentication
+    const mergedAuthentication = configs.find((c) => c.config.authentication)?.config.authentication
 
     // Merge MCP policies: most restrictive wins
-    const mcpConfigs = configs.filter((c) => c.mcp)
+    const mcpConfigs = configs.filter((c) => c.config.mcp)
     const mergedMcp =
       mcpConfigs.length > 0
         ? (() => {
             let defaultPolicy: SecuritySchema.McpPolicy = "trusted"
             const servers: Record<string, SecuritySchema.McpPolicy> = {}
 
-            for (const config of mcpConfigs) {
-              if (!config.mcp) continue
-              defaultPolicy = mostRestrictiveMcpPolicy(defaultPolicy, config.mcp.defaultPolicy)
-              for (const [serverName, policy] of Object.entries(config.mcp.servers)) {
+            for (const entry of mcpConfigs) {
+              if (!entry.config.mcp) continue
+              defaultPolicy = mostRestrictiveMcpPolicy(defaultPolicy, entry.config.mcp.defaultPolicy)
+              for (const [serverName, policy] of Object.entries(entry.config.mcp.servers)) {
                 const existing = servers[serverName]
                 servers[serverName] = existing ? mostRestrictiveMcpPolicy(existing, policy) : policy
               }
@@ -249,18 +271,29 @@ export namespace SecurityConfig {
           })()
         : undefined
 
+    // Build allowlist layers — one per config that defines an allowlist
+    const resolvedAllowlist: SecuritySchema.AllowlistLayer[] = configs
+      .filter((c) => c.config.allowlist !== undefined)
+      .map((c) => ({ source: c.path, entries: c.config.allowlist! }))
+
+    const hasEmptyAllowlist = configs.some((c) => c.config.allowlist && c.config.allowlist.length === 0)
+    if (hasEmptyAllowlist) {
+      log.warn("Empty allowlist configured — all LLM operations will be denied. No files are accessible to the LLM.")
+    }
+
     return {
-      version: configs[0].version,
+      version: configs[0].config.version,
       roles: mergedRoles.length > 0 ? mergedRoles : undefined,
       rules: mergedRules.length > 0 ? mergedRules : undefined,
       segments: mergedSegments,
       logging: mergedLogging,
       authentication: mergedAuthentication,
       mcp: mergedMcp,
+      resolvedAllowlist,
     }
   }
 
-  export function getSecurityConfig(): SecuritySchema.SecurityConfig {
+  export function getSecurityConfig(): SecuritySchema.ResolvedSecurityConfig {
     if (!configLoaded) {
       log.warn("getSecurityConfig called before config was loaded, returning empty config")
       return emptyConfig

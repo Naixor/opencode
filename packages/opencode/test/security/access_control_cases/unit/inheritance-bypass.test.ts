@@ -53,7 +53,7 @@ describe("CASE-INH-001: Child config cannot weaken parent — parent protects se
   }
 
   test("merged config unions rules — parent restriction on secrets/** still present", () => {
-    const merged = SecurityConfig.mergeSecurityConfigs([parentConfig, childConfig])
+    const merged = SecurityConfig.mergeSecurityConfigs([{ config: parentConfig, path: "parent/.opencode-security.json" }, { config: childConfig, path: "child/.opencode-security.json" }])
 
     // Both rules should be present after merge
     expect(merged.rules?.length).toBe(2)
@@ -68,7 +68,7 @@ describe("CASE-INH-001: Child config cannot weaken parent — parent protects se
   })
 
   test("checkAccess on secrets/public/readme.txt — parent rule STILL blocks viewer read", async () => {
-    const merged = SecurityConfig.mergeSecurityConfigs([parentConfig, childConfig])
+    const merged = SecurityConfig.mergeSecurityConfigs([{ config: parentConfig, path: "parent/.opencode-security.json" }, { config: childConfig, path: "child/.opencode-security.json" }])
     await setupSecurityConfig(merged)
 
     // Even though child allows secrets/public/**, the parent rule secrets/** still denies
@@ -78,7 +78,7 @@ describe("CASE-INH-001: Child config cannot weaken parent — parent protects se
   })
 
   test("checkAccess on secrets/public/readme.txt — parent rule blocks developer write", async () => {
-    const merged = SecurityConfig.mergeSecurityConfigs([parentConfig, childConfig])
+    const merged = SecurityConfig.mergeSecurityConfigs([{ config: parentConfig, path: "parent/.opencode-security.json" }, { config: childConfig, path: "child/.opencode-security.json" }])
     await setupSecurityConfig(merged)
 
     const result = SecurityAccess.checkAccess("secrets/public/readme.txt", "write", "developer")
@@ -87,7 +87,7 @@ describe("CASE-INH-001: Child config cannot weaken parent — parent protects se
   })
 
   test("checkAccess on secrets/public/readme.txt — admin IS allowed (satisfies parent allowedRoles)", async () => {
-    const merged = SecurityConfig.mergeSecurityConfigs([parentConfig, childConfig])
+    const merged = SecurityConfig.mergeSecurityConfigs([{ config: parentConfig, path: "parent/.opencode-security.json" }, { config: childConfig, path: "child/.opencode-security.json" }])
     await setupSecurityConfig(merged)
 
     const result = SecurityAccess.checkAccess("secrets/public/readme.txt", "read", "admin")
@@ -105,7 +105,7 @@ describe("CASE-INH-001: Child config cannot weaken parent — parent protects se
 
   test("merge order does not matter — parent restriction always wins regardless of order", async () => {
     // Merge in reverse order: child first, parent second
-    const mergedReverse = SecurityConfig.mergeSecurityConfigs([childConfig, parentConfig])
+    const mergedReverse = SecurityConfig.mergeSecurityConfigs([{ config: childConfig, path: "child/.opencode-security.json" }, { config: parentConfig, path: "parent/.opencode-security.json" }])
     await setupSecurityConfig(mergedReverse)
 
     const result = SecurityAccess.checkAccess("secrets/public/readme.txt", "read", "viewer")
@@ -694,7 +694,7 @@ describe("CASE-INH-004: Glob edge cases — **/test*, src/*/private/, [!.]env", 
         ],
       }
 
-      const merged = SecurityConfig.mergeSecurityConfigs([configA, configB])
+      const merged = SecurityConfig.mergeSecurityConfigs([{ config: configA, path: "a/.opencode-security.json" }, { config: configB, path: "b/.opencode-security.json" }])
       await setupSecurityConfig(merged)
 
       // Both patterns should be active
