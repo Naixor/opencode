@@ -31,3 +31,46 @@ Started: Sat 14 Feb 2026 11:25:14 CST
   - `setupSecurityConfig(merged)` helper in tests accepts `SecurityConfig` parameter but `ResolvedSecurityConfig` passes via structural subtyping — the extra `resolvedAllowlist` field is stripped by Zod when written to JSON and re-parsed by `loadSecurityConfig()`
   - Test merge calls need dummy path strings like `"parent/.opencode-security.json"` — these don't need to be real paths for unit tests
 ---
+
+## 2026-02-14 - US-003
+- Refactored `loadSecurityConfig()` to use `findSecurityConfigs()` + `mergeSecurityConfigs()` instead of single-file loading
+- The function now discovers all `.opencode-security.json` files from project root up to git root and merges them
+- Single-config, no-config, and multi-config scenarios all handled correctly via existing `findSecurityConfigs()` and `mergeSecurityConfigs()` functions
+- Bootstrap call in `bootstrap.ts` unchanged — still calls `SecurityConfig.loadSecurityConfig(Instance.directory)`
+- Files changed: `packages/opencode/src/security/config.ts`
+- **Learnings for future iterations:**
+  - `findSecurityConfigs()` + `mergeSecurityConfigs()` already handled all the complex logic (config discovery, validation, merging, allowlist layer building, empty-allowlist warning) — `loadSecurityConfig()` just needed to delegate to them
+  - The old `loadSecurityConfig()` had duplicated logic (JSON parsing, Zod validation, allowlist layer building) that was already in `loadConfigFile()` + `mergeSecurityConfigs()` — removing the duplication made the code much simpler (50 lines removed, 7 added)
+  - `setupSecurityConfig()` test helper creates `.git` in the temp dir, so `findGitRoot()` returns that dir — meaning `findSecurityConfigs()` only looks at that single dir, preserving single-config test behavior
+---
+
+## 2026-02-14 - US-004
+- Enforced allowlist in `checkAccess()` with correct evaluation order: deny rules → operation filter → allowlist check
+- Deny rules checked first — if denied, returns immediately (deny always wins)
+- Allowlist only applies to `llm` operations — `read` and `write` bypass allowlist entirely
+- Empty `resolvedAllowlist` means no restriction (backward compatible)
+- AND across layers, OR within entries — file must match at least one entry in every layer
+- Reused existing `matchPath()` for AllowlistEntry matching (same logic as deny rules)
+- Symlinks resolved first, real path checked against allowlist
+- Friendly denial message includes rejected file path, rejecting layer source, and suggestion with example entry format
+- Audit logging via `SecurityAudit.logSecurityEvent()` on allowlist denial
+- Files changed: `packages/opencode/src/security/access.ts`
+- **Learnings for future iterations:**
+  - `matchPath()` already handles both `directory` and `file` type matching with minimatch — direct reuse for allowlist entries
+  - Symlink resolution happens once at the top of `checkAccess()`, so the resolved path is available for both deny rules and allowlist checks
+  - Early return after deny rules means allowlist check only runs for files that passed deny rules — correct priority order
+  - `path.dirname(filePath)` in the denial message provides a useful suggestion pattern for the user to add
+  - The deny rule check was restructured to be inside a conditional block (`if config.rules`) rather than early-returning, so that control flow continues to the allowlist check
+---
+
+## 2026-02-14 - US-005
+- Added 29 comprehensive unit tests across 15 test cases covering all allowlist scenarios
+- Test cases: file matching (type: file), directory matching (type: directory), denial with friendly messages, deny rule priority over allowlist, read/write bypass, empty allowlist, no allowlist (backward compat), glob pattern matching, exact file match, symlink resolution, two-layer AND logic, child cannot expand parent, single-layer scenarios, multi-level config merging, audit logging
+- Files changed: `packages/opencode/test/security/access_control_cases/unit/allowlist.test.ts`
+- **Learnings for future iterations:**
+  - When testing deny rules with allowlist, must define ALL roles in the roles array including the `admin` role — otherwise `isRoleAllowed()` returns true for any role with level > 0 (because undefined role defaults to level 0)
+  - `findSecurityConfigs()` orders configs child-first then parent — so in two-layer tests, the child config's layer is checked first, then parent's
+  - For multi-level directory tests, write separate `.opencode-security.json` files and call `loadSecurityConfig(childDir)` directly — `setupSecurityConfig()` only handles single-config scenarios
+  - `@ts-expect-error` is NOT needed when reassigning namespace functions like `SecurityAudit.logSecurityEvent` — TypeScript allows it without error
+  - The audit log file `.opencode-security-audit.log` gets created in the working directory during tests — the `afterEach` cleanup via `teardownSecurityConfig()` doesn't remove it
+---
