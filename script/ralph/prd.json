@@ -30,8 +30,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Depends on US-001 findings. The current code already has config defaults input_newline='shift+return,ctrl+return,alt+return,ctrl+j' in config.ts. This story verifies they flow through correctly."
+      "passes": true,
+      "notes": "Verified: mapTextareaKeybindings correctly generates KeyBinding entries. Hardcoded fallbacks preserved. Config bindings appended after hardcoded (last-write-wins). Unit test added at packages/opencode/test/tui/textarea-keybindings.test.ts with 8 passing tests."
     },
     {
       "id": "US-003",

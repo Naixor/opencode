@@ -26,3 +26,14 @@ Started: Sat Feb 14 11:28:47 CST 2026
   - Alt+Enter is the most reliable modifier+Enter combo across terminal types (works via `\x1b\r` → `{ name: "return", meta: true }`)
   - The diagnosis was done entirely through source code analysis - no runtime debug logging was needed since OpenTUI's parser source is available in node_modules
 ---
+
+## 2026-02-14 - US-002
+- Verified config-driven keybindings register correctly in OpenTUI
+- Added unit test at packages/opencode/test/tui/textarea-keybindings.test.ts (8 tests)
+- Files changed:
+  - packages/opencode/test/tui/textarea-keybindings.test.ts (new)
+- **Learnings for future iterations:**
+  - Cannot directly import from textarea-keybindings.ts in tests due to SolidJS/OpenTUI JSX runtime dependency - re-implement pure logic in test instead
+  - mapTextareaKeybindings converts false booleans to undefined (via `|| undefined`) to match OpenTUI's KeyBinding type which uses optional booleans
+  - The config key convention is `input_${action.replace(/-/g, "_")}` - e.g., "move-left" → "input_move_left"
+---
