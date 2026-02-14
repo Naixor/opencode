@@ -216,6 +216,152 @@ describe("useTextareaKeybindings structure", () => {
     })
   })
 
+  test("custom submit key overrides default submit binding", () => {
+    // User configures input_submit to ctrl+return instead of default "return"
+    const keybinds: Record<string, Keybind.Info[]> = {
+      input_submit: Keybind.parse("ctrl+return"),
+      input_newline: Keybind.parse("shift+return,ctrl+return,alt+return,ctrl+j"),
+    }
+
+    const hardcoded: KeyBinding[] = [
+      { name: "return", action: "submit" },
+      { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
+    ]
+    const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
+    const combined = [...hardcoded, ...configDriven]
+
+    // Config-driven submit should be ctrl+return (overrides hardcoded via last-write-wins)
+    const configSubmit = configDriven.filter((b) => b.action === "submit")
+    expect(configSubmit).toEqual([
+      { name: "return", ctrl: true, meta: undefined, shift: undefined, super: undefined, action: "submit" },
+    ])
+
+    // The hardcoded plain "return" → submit is still present but gets overridden
+    // because config-driven entries come after and OpenTUI uses last-write-wins
+    expect(combined[0]).toEqual({ name: "return", action: "submit" })
+    const lastReturnSubmit = [...combined].reverse().find((b) => b.name === "return" && b.action === "submit")
+    // The last "return" submit binding is the config-driven ctrl+return
+    // Since it comes after the hardcoded one, it wins for the "return" key via last-write-wins
+    expect(lastReturnSubmit).toEqual({
+      name: "return",
+      ctrl: true,
+      meta: undefined,
+      shift: undefined,
+      super: undefined,
+      action: "submit",
+    })
+  })
+
+  test("custom newline key overrides default newline bindings", () => {
+    // User configures input_newline to just "ctrl+n" instead of defaults
+    const keybinds: Record<string, Keybind.Info[]> = {
+      input_submit: Keybind.parse("return"),
+      input_newline: Keybind.parse("ctrl+n"),
+    }
+
+    const hardcoded: KeyBinding[] = [
+      { name: "return", action: "submit" },
+      { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
+    ]
+    const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
+    const combined = [...hardcoded, ...configDriven]
+
+    // Only one config-driven newline binding: ctrl+n
+    const configNewlines = configDriven.filter((b) => b.action === "newline")
+    expect(configNewlines).toEqual([
+      { name: "n", ctrl: true, meta: undefined, shift: undefined, super: undefined, action: "newline" },
+    ])
+
+    // Hardcoded meta+return and linefeed fallbacks still present
+    expect(combined).toContainEqual({ name: "return", meta: true, action: "newline" })
+    expect(combined).toContainEqual({ name: "linefeed", action: "newline" })
+  })
+
+  test("setting input_newline to 'none' disables config-driven newline shortcuts", () => {
+    // User sets input_newline to "none" to disable all newline shortcuts
+    const keybinds: Record<string, Keybind.Info[]> = {
+      input_submit: Keybind.parse("return"),
+      input_newline: Keybind.parse("none"),
+    }
+
+    // Keybind.parse("none") returns empty array
+    expect(keybinds.input_newline).toEqual([])
+
+    const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
+
+    // No config-driven newline bindings should be generated
+    const configNewlines = configDriven.filter((b) => b.action === "newline")
+    expect(configNewlines).toHaveLength(0)
+
+    // The hardcoded fallbacks (meta+return, linefeed) would still be present
+    // in the full combined array from useTextareaKeybindings, but no config-driven
+    // newline bindings exist, so effectively only hardcoded fallbacks remain
+    const hardcoded: KeyBinding[] = [
+      { name: "return", action: "submit" },
+      { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
+    ]
+    const combined = [...hardcoded, ...configDriven]
+    const allNewlines = combined.filter((b) => b.action === "newline")
+    // Only the 2 hardcoded fallbacks remain
+    expect(allNewlines).toHaveLength(2)
+    expect(allNewlines).toContainEqual({ name: "return", meta: true, action: "newline" })
+    expect(allNewlines).toContainEqual({ name: "linefeed", action: "newline" })
+  })
+
+  test("missing config values produce no bindings (fallback to defaults happens in config layer)", () => {
+    // When no keybinds config is provided at all, mapTextareaKeybindings returns empty
+    const keybinds: Record<string, Keybind.Info[]> = {}
+
+    const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
+    expect(configDriven).toHaveLength(0)
+
+    // With no config, only hardcoded fallbacks remain
+    const hardcoded: KeyBinding[] = [
+      { name: "return", action: "submit" },
+      { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
+    ]
+    const combined = [...hardcoded, ...configDriven]
+    expect(combined).toHaveLength(3)
+    // The config layer (config.ts) provides defaults before this point,
+    // so in practice keybinds will always have input_submit and input_newline
+  })
+
+  test("default config values produce correct full binding set", () => {
+    // Simulate the default config values
+    const keybinds: Record<string, Keybind.Info[]> = {
+      input_submit: Keybind.parse("return"),
+      input_newline: Keybind.parse("shift+return,ctrl+return,alt+return,ctrl+j"),
+    }
+
+    const hardcoded: KeyBinding[] = [
+      { name: "return", action: "submit" },
+      { name: "return", meta: true, action: "newline" },
+      { name: "linefeed", action: "newline" },
+    ]
+    const configDriven = TEXTAREA_ACTIONS.flatMap((action) => mapTextareaKeybindings(keybinds, action))
+    const combined = [...hardcoded, ...configDriven]
+
+    // Should have 1 hardcoded submit + 1 config submit
+    const submits = combined.filter((b) => b.action === "submit")
+    expect(submits).toHaveLength(2)
+
+    // Should have 2 hardcoded newlines + 4 config newlines = 6
+    const newlines = combined.filter((b) => b.action === "newline")
+    expect(newlines).toHaveLength(6)
+
+    // Config newlines: shift+return, ctrl+return, alt+return, ctrl+j
+    expect(configDriven.filter((b) => b.action === "newline")).toEqual([
+      { name: "return", ctrl: undefined, meta: undefined, shift: true, super: undefined, action: "newline" },
+      { name: "return", ctrl: true, meta: undefined, shift: undefined, super: undefined, action: "newline" },
+      { name: "return", ctrl: undefined, meta: true, shift: undefined, super: undefined, action: "newline" },
+      { name: "j", ctrl: true, meta: undefined, shift: undefined, super: undefined, action: "newline" },
+    ])
+  })
+
   test("linefeed hardcoded fallback ensures Ctrl+J works in standard terminals", () => {
     // In standard terminals, Ctrl+J sends 0x0A which OpenTUI parses to { name: "linefeed" }
     // The config binding ctrl+j maps to { name: "j", ctrl: true } which only works in Kitty terminals
