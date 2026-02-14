@@ -2,6 +2,7 @@
 Started: Sat 14 Feb 2026 02:05:22 CST
 
 ## Codebase Patterns
+- **Bun test file naming**: Files must have `.test.` or `.spec.` in the filename to be discovered — `.bench.ts` alone won't work, use `.bench.test.ts` or similar
 - **Bun mock.module contamination**: `mock.module()` is process-wide in Bun — mocking any module in one test file affects ALL other test files in the same `bun test` run. Integration tests using real SecurityConfig must be isolated from unit tests that mock `security/config`
 - **Root scripts vs workspace deps**: Scripts in `script/` at repo root cannot import workspace-only packages (like `zod`). Use plain types and manual validation for standalone scripts
 - Use `Instance.state()` with synchronous initializer for per-instance state that needs synchronous access (like Bus does); use async initializer only when lazy async loading is needed
@@ -999,4 +1000,32 @@ Started: Sat 14 Feb 2026 02:05:22 CST
   - Custom audit log path is configured via `.opencode-security.json` `logging` section with all fields required: `{ path, level, maxSizeMB, retentionDays }`
   - Integration tests that verify audit logging should set a custom log path in a temp directory to avoid writing to the project's default `.opencode-security-audit.log`
   - The `readAuditLog()` helper pattern (read file, split lines, JSON.parse each) works reliably for verifying audit entries in integration tests
+---
+
+## 2026-02-14 - US-035
+- Created performance benchmarks for the hook pipeline in `packages/opencode/test/session/hooks/hooks-bench.test.ts`
+- 17 benchmark tests covering all acceptance criteria:
+  - PreLLMChain 5 hooks: p50=0.002ms (target <5ms) — PASS
+  - PreToolChain 3 hooks: p50=0.001ms (target <2ms) — PASS
+  - PostToolChain 5 hooks: p50=0.002ms (target <10ms) — PASS
+  - tool-output-truncator: 1KB=0.000ms, 100KB=0.003ms, 1MB=0.024ms, 10MB=0.254ms (target <50ms) — PASS
+  - context-window-monitor: estimateTokens=0.000ms (target <1ms), estimateContextUsage=0.024ms — PASS
+  - disabled hook: 0.000ms (target <0.01ms) — PASS
+  - AGENTS.md cache hit=0.002ms, miss=0.038ms (~24x ratio) — PASS
+  - Full pipeline (26 hooks): PreLLM=0.019ms, PostTool=0.020ms, PreTool=0.001ms — all within targets
+  - Chain compilation (20 hooks): 0.019ms — PASS
+- Results documented in `tasks/omo-perf-report.md`
+- All 165 hook tests pass, typecheck passes (12/12)
+- Files changed:
+  - `packages/opencode/test/session/hooks/hooks-bench.test.ts` (new)
+  - `tasks/omo-perf-report.md` (new)
+  - `script/ralph/prd.json` (modified — US-035 passes: true)
+  - `script/ralph/progress.txt` (modified — appended progress)
+- **Learnings for future iterations:**
+  - Bun test files must have `.test.` or `.spec.` in the filename — `.bench.ts` alone won't be discovered
+  - `performance.now()` in Bun has sub-microsecond precision, making it suitable for benchmarking even sub-millisecond operations
+  - Hook chain overhead is negligible (~0.02ms for full pipeline) compared to LLM API latency (1-30s)
+  - `measureSyncMs` helper for synchronous benchmarks avoids async overhead; `measureMs` for async operations
+  - Context injection cache hits are ~24x faster than misses (file I/O is the bottleneck)
+  - Pre-existing test failures in security access_control_cases are due to `SecurityConfig.loadSecurityConfig` API changes — unrelated to hook pipeline
 ---

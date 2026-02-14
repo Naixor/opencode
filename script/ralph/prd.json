@@ -895,8 +895,8 @@
         "Typecheck passes"
       ],
       "priority": 35,
-      "passes": false,
-      "notes": "Final story. Run after all hooks implemented to measure real overhead."
+      "passes": true,
+      "notes": "Final story. All benchmarks pass well within targets. Results in tasks/omo-perf-report.md."
     }
   ]
 }
