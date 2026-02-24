@@ -127,4 +127,21 @@
   - Log directory is created via `mkdir -p` after the dependency check passes
   - Script resolves `PROJECT_ROOT` via `SCRIPT_DIR/../..` relative navigation
   - Typecheck is unaffected by `.sh` file changes (all cache hits)
+  - `COUNTER_FILE` lives at `.claude/logs/test-fix-round-counter` (per FR-32)
+  - Ledger initialization parses Markdown failure table rows via `grep -E '^\| *[0-9]'` and `IFS='|' read`
+  - `uuidgen | tr '[:upper:]' '[:lower:]'` generates lowercase UUID on macOS
+  - When resuming from existing ledger, validate JSON and reinitialize counter file if missing (crash recovery)
+---
+
+## 2026-02-25 - US-010
+- What was implemented: INIT state in `test-fix-driver.sh` — ledger initialization from /test-analyze output, and resume-from-existing-ledger logic
+- Files changed: `.claude/scripts/test-fix-driver.sh` (modified)
+- **Learnings for future iterations:**
+  - Parsing Markdown tables in bash: use `grep -E '^\| *[0-9]'` to match data rows, then `IFS='|' read` to split columns; `xargs` trims whitespace
+  - Building JSON arrays incrementally in bash: pipe through `jq '. + [{...}]'` in a while-read loop; works for < 100 entries
+  - The round counter file path is `$LOG_DIR/test-fix-round-counter` — must be resilient to loss (reinitialize if missing)
+  - `jq empty <file>` is a quick way to validate JSON without printing output
+  - The driver uses `timeout` command to enforce per-round time limits; exit code 124 indicates timeout
+  - The INIT state handles two paths: fresh start (invoke /test-analyze, create ledger) and resume (validate existing ledger, print status)
+  - Priority validation: default to P3 if the parsed priority doesn't match `^P[0-5]$`
 ---
