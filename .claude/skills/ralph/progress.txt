@@ -1,0 +1,113 @@
+## Codebase Patterns
+- Skills live in `.claude/skills/<skill-name>/SKILL.md` with YAML frontmatter (name, description, user-invocable)
+- SKILL.md files are pure prompt files — no code, just instructions for the AI agent
+- JSON schemas live in `.claude/schemas/` (e.g., `test-fix-ledger.schema.json`)
+- Typecheck command: `bun turbo typecheck`
+- Unit tests: `bun test --cwd packages/opencode`
+- E2E tests: `bun run --cwd packages/app test:e2e`
+
+---
+
+## 2026-02-24 - US-001
+- What was implemented: Created `.claude/skills/test-analyze/` directory and `SKILL.md` prompt file
+- Files changed: `.claude/skills/test-analyze/SKILL.md` (new)
+- **Learnings for future iterations:**
+  - Skill YAML frontmatter fields: `name`, `description`, `user-invocable`
+  - Description field should include trigger phrases for Claude Code skill detection
+  - The skill is immediately registered and available after creating SKILL.md (confirmed via system reminder)
+  - Typecheck is unaffected by `.md` file changes (all cache hits except the main package)
+---
+
+## 2026-02-24 - US-002
+- What was implemented: Enhanced the Dual Verification section (Step 3) in `.claude/skills/test-analyze/SKILL.md` with detailed step-by-step instructions for each verification method
+- Files changed: `.claude/skills/test-analyze/SKILL.md` (modified)
+- **Learnings for future iterations:**
+  - The existing SKILL.md already had a high-level Dual Verification section from US-001 — US-002 required making each sub-step more explicit and actionable
+  - Bun test summary line format: `N pass, N fail, N skip, N expect() calls`
+  - Bun test individual failure prefix: `(fail)` at the start of a line — use `grep -c '^\(fail\)'` to count
+  - COMPLETENESS_WARNING should be a blockquote block at the top of the report for high visibility
+  - Step-by-step sub-sections each got their own `---` separator for clarity
+---
+
+## 2026-02-24 - US-003
+- What was implemented: Enhanced Steps 4-6 in `.claude/skills/test-analyze/SKILL.md` with detailed, actionable error classification rules, priority assignment logic, and structured record format
+- Files changed: `.claude/skills/test-analyze/SKILL.md` (modified)
+- **Learnings for future iterations:**
+  - US-001 pre-built high-level Steps 4-6 — US-003 expanded them with explicit pattern lists, precedence rules, and examples
+  - Error classification uses 5 categories with precedence: compile > runtime > assertion > timeout > environment
+  - Priority (P0-P5) depends on both error_type AND whether the fault is in src/ vs test/ (source_file field)
+  - Correlation grouping keys on `source_file` — failures sharing the same source file are grouped together
+  - The structured record format has 8 fields: file, test, error_type, error_message, stack_trace, source_file, source_line, priority
+  - Including a concrete example record in the SKILL.md makes the format unambiguous for the agent
+---
+
+## 2026-02-24 - US-004
+- What was implemented: Replaced the skeleton Step 7 (Generate Markdown Report) with detailed, prescriptive sub-sections (7.1–7.5) defining exact output format, conditional rendering rules, and concrete examples
+- Files changed: `.claude/skills/test-analyze/SKILL.md` (modified)
+- **Learnings for future iterations:**
+  - US-001 pre-built a high-level Step 7 — US-004 expanded it into 5 numbered sub-sections (7.1 Summary, 7.2 Failure Table, 7.3 Per-File Breakdown, 7.4 Silent Skip Warnings, 7.5 Raw Output)
+  - Each sub-section has a "Rules:" block with explicit conditional rendering logic (e.g., "omit this section if no failures")
+  - The Failure Table uses correlation group headers (`### Group: <source_file>`) with group-level priority and count
+  - Error messages in the Failure Table are truncated to 30 chars; the full message appears in Per-File Breakdown
+  - Per-File Breakdown includes stack traces in fenced code blocks inside blockquotes for readability
+  - Silent Skip Warnings include a "Possible Reason" column for best-effort diagnosis
+  - Concrete Markdown examples in each sub-section make the expected output unambiguous
+---
+
+## 2026-02-24 - US-005
+- What was implemented: Created `.claude/schemas/test-fix-ledger.schema.json` — a full JSON Schema (draft 2020-12) defining the test-fix ledger format
+- Files changed: `.claude/schemas/test-fix-ledger.schema.json` (new)
+- **Learnings for future iterations:**
+  - Schemas live in `.claude/schemas/` directory (created for this story)
+  - JSON Schema allows `"type": ["string", "null"]` for nullable fields with enum — include `null` in the enum list too
+  - Used `$defs/entry` for the entry sub-schema to keep the top-level clean and allow reuse
+  - `additionalProperties: false` at both top-level and entry level ensures strict validation
+  - Entry fields: id, file, test, priority, status, attempt_count, max_attempts, diagnosis, fix_applied, escalation_reason, modified_files
+  - Status enum: discovered, attempted, fixed, escalated
+  - Escalation reason enum: design_decision, external_dependency, flaky, circular_regression, max_attempts_exceeded, out_of_scope
+  - Top-level fields: session_id, created_at, updated_at, initial_failure_count, entries[]
+  - Typecheck is unaffected by `.json` schema file changes (all cache hits)
+---
+
+## 2026-02-24 - US-006
+- What was implemented: Created `.claude/skills/test-fix-round/` directory and `SKILL.md` prompt file with full skill scaffold
+- Files changed: `.claude/skills/test-fix-round/SKILL.md` (new)
+- **Learnings for future iterations:**
+  - The SKILL.md for test-fix-round is more complex than test-analyze because it involves read-modify-write on the ledger JSON
+  - The skill references `/test-analyze` internally (Steps 5 and 7) — it depends on that skill being available
+  - Selection logic: filter by `status: "discovered"`, sort by priority then attempt_count, pick first
+  - Decision tree for diagnosis: source bug, API change, test bug, environment issue — each maps to a different fix strategy
+  - Ledger update has two paths: success (status → fixed) and failure (increment attempt_count, escalate if >= max_attempts)
+  - On failed fix, status goes back to `"discovered"` (not staying at `"attempted"`) so it can be retried
+  - Regression check (Step 7) can ADD new entries to the ledger if the fix caused new failures
+  - Writing ledger to disk must be the absolute last action — no code changes after that
+  - The skill was immediately registered and visible in the system reminder after creation
+---
+
+## 2026-02-24 - US-007
+- What was implemented: Expanded Step 3 (Diagnose the Failure) from 4 high-level sub-steps to 5 detailed, prescriptive sub-steps (3.1–3.5) with explicit instructions for each phase of diagnosis. Also enhanced Step 4 (Apply the Fix) with explicit CLAUDE.md convention rules.
+- Files changed: `.claude/skills/test-fix-round/SKILL.md` (modified)
+- **Learnings for future iterations:**
+  - US-006 scaffold created high-level Steps 3 and 4 — US-007 expanded them following the same pattern as US-002/US-003/US-004 did for test-analyze
+  - Step 3.1 now specifies reading imports, setup/teardown blocks, and summarizing test intent in one sentence
+  - Step 3.2 now has three fallback paths for locating source: entry fields → stack trace parsing → import analysis
+  - Step 3.4 decision tree now has explicit criteria, actions, and examples for each branch (source bug, API change, test bug, environment issue)
+  - Step 3.5 is new — explicitly requires recording diagnosis text with decision tree branch and specific defect description
+  - Step 4 now lists all CLAUDE.md conventions inline so the agent doesn't need to re-read CLAUDE.md during a fix round
+  - Test bug fixes require a `// Fixed: <reason>` comment on the corrected line — this makes fix intent clear in code review
+---
+
+## 2026-02-24 - US-008
+- What was implemented: Expanded Steps 5-8 (Verify the Fix, Update the Ledger, Regression Check, Write Ledger to Disk) from high-level instructions to detailed, prescriptive sub-steps (5.1–5.3, 6.1–6.2, 7.1–7.4, 8.1–8.3) with explicit logic, examples, and edge cases
+- Files changed: `.claude/skills/test-fix-round/SKILL.md` (modified)
+- **Learnings for future iterations:**
+  - US-006 scaffold created high-level Steps 5-8 — US-008 expanded them following the same pattern as US-007 did for Steps 3-4
+  - Step 5 (Verify) now has explicit sub-steps for running targeted test, parsing the report, and collecting modified files list
+  - Step 6 (Update Ledger) success path now includes a concrete JSON example of a fixed entry for clarity
+  - Step 6 failure path now explicitly requires reverting failed fix changes (`git checkout -- <file>`) before setting status back to "discovered"
+  - Step 6 failure path prefixes `fix_applied` with `"[FAILED] "` to distinguish failed attempts from successful fixes in the ledger history
+  - Step 7 (Regression Check) changed from `--scope bun` to `--scope all` per AC requirement for full suite coverage
+  - Step 7.4 handles circular regression — when a fix breaks a previously fixed test, both entries are updated and escalation with `"circular_regression"` is considered
+  - Step 8 adds pre-write validation (required fields, status enum, escalation_reason consistency) and post-write verification (read-back and JSON parse check)
+  - Step 8.3 defines a structured round summary output format for observability
+---

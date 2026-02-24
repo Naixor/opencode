@@ -179,56 +179,166 @@ Based on the root cause identified in 3.3, select exactly ONE fix strategy:
 
 ## Step 5: Verify the Fix
 
-1. Run `/test-analyze --file <test-file-path>` targeting the specific test file from the entry.
-2. Check the report: does the previously failing test now pass?
-3. If **yes** — the fix is verified. Proceed to update the ledger with `status: "fixed"`.
-4. If **no** — the test still fails. Proceed to update the ledger with incremented `attempt_count`.
+After applying the fix in Step 4, run a targeted test to confirm the specific failure is resolved. Do not run the full suite yet — that happens in Step 7.
+
+### 5.1 Run Targeted Test
+
+1. Invoke `/test-analyze --file <test-file-path>` where `<test-file-path>` is the entry's `file` field.
+2. Wait for the analysis to complete and produce a Markdown report.
+3. If `/test-analyze` itself fails to run (e.g., syntax error in modified code prevents test execution), treat this as a **failed fix** — proceed to Step 6 failure path.
+
+### 5.2 Parse the Verification Report
+
+1. In the report's **Summary** section, read the `fail` count.
+2. In the report's **Failure Table**, search for the entry's `test` name (exact match).
+3. Determine the outcome:
+   - **Fix verified:** The entry's test name does **not** appear in the Failure Table (it now passes).
+   - **Fix failed:** The entry's test name **still** appears in the Failure Table (it still fails).
+   - **Fix caused new failures in the same file:** The entry's test passes, but other tests in the same file now fail. Treat the fix as **verified** for the original entry, but note the new failures for Step 7.
+
+### 5.3 Collect Modified Files
+
+1. List every file you modified during Step 4 (source files, test files, config files).
+2. Use absolute paths relative to the project root (e.g., `packages/opencode/src/foo.ts`, not `./src/foo.ts`).
+3. Keep this list for the ledger update in Step 6.
 
 ---
 
 ## Step 6: Update the Ledger
 
-### If the fix succeeded (test passes):
+Update the selected entry based on the verification outcome from Step 5. Exactly one of the two paths below applies.
+
+### 6.1 Success Path — Fix Verified
+
+If the targeted test from Step 5.2 shows the entry's test now passes:
 
 1. Set the entry's `status` to `"fixed"`.
-2. Set `fix_applied` to the description of what was changed.
-3. Set `diagnosis` to the root cause description.
-4. Set `modified_files` to the list of files that were changed.
-5. Update the ledger's `updated_at` to the current ISO 8601 timestamp.
+2. Set `fix_applied` to a concise description of what was changed (e.g., `"Added null check in parseConfig() before accessing .name property"`).
+3. Set `diagnosis` to the root cause description from Step 3.5.
+4. Set `modified_files` to the list of file paths collected in Step 5.3.
+5. Update the top-level `updated_at` field to the current ISO 8601 timestamp (e.g., `2026-02-24T14:30:00Z`).
 
-### If the fix failed (test still fails):
+**Example of a fixed entry:**
+```json
+{
+  "id": "F-003",
+  "file": "test/security/access_control.test.ts",
+  "test": "access control > checkAccess > denies access to paths outside project root",
+  "priority": "P1",
+  "status": "fixed",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "diagnosis": "Source bug: checkAccess() did not normalize ../  in paths before matching against rules",
+  "fix_applied": "Added path normalization via path.resolve() before rule matching in checkAccess()",
+  "escalation_reason": null,
+  "modified_files": ["packages/opencode/src/security/access_control.ts"]
+}
+```
+
+### 6.2 Failure Path — Fix Did Not Work
+
+If the targeted test from Step 5.2 shows the entry's test still fails:
 
 1. Increment the entry's `attempt_count` by 1.
-2. Set `diagnosis` to the attempted root cause description.
-3. If `attempt_count >= max_attempts` (default 3), set `status` to `"escalated"` and `escalation_reason` to the most appropriate reason:
-   - `"design_decision"` — Fix requires an architectural choice beyond the agent's scope
-   - `"external_dependency"` — Failure depends on an external service or package
-   - `"flaky"` — Test passes intermittently / non-deterministic
-   - `"circular_regression"` — Fixing this test breaks other tests
-   - `"max_attempts_exceeded"` — No clear root cause found after max attempts
-   - `"out_of_scope"` — Fix requires changes outside the allowed scope
-4. If `attempt_count < max_attempts`, set `status` back to `"discovered"` so it can be retried in a future round.
-5. Update the ledger's `updated_at` to the current ISO 8601 timestamp.
+2. Set `diagnosis` to the attempted root cause description from Step 3.5 (preserve it even though the fix didn't work — it provides context for the next attempt).
+3. Set `fix_applied` to a description of what was tried, prefixed with `"[FAILED] "` (e.g., `"[FAILED] Tried adding null check in parseConfig()"`).
+4. **Check escalation threshold:** compare `attempt_count` against `max_attempts` (default 3):
+
+   **If `attempt_count >= max_attempts` — Escalate:**
+   - Set `status` to `"escalated"`.
+   - Set `escalation_reason` to the most specific applicable reason:
+     - `"design_decision"` — The fix requires an architectural choice or product decision beyond the agent's authority (e.g., "should this function return null or throw?").
+     - `"external_dependency"` — The failure depends on an external service, package version, or system configuration that the agent cannot change.
+     - `"flaky"` — The test passes intermittently; the failure is non-deterministic (e.g., timing-dependent, random seed).
+     - `"circular_regression"` — Fixing this test causes other tests to fail, and fixing those breaks this one again.
+     - `"max_attempts_exceeded"` — Use this as the default when none of the above reasons clearly apply.
+     - `"out_of_scope"` — The fix requires changes to files, services, or infrastructure outside the allowed scope.
+   - Set `modified_files` to the list of files changed (even though the fix failed — this documents what was tried).
+
+   **If `attempt_count < max_attempts` — Retry later:**
+   - Set `status` back to `"discovered"` so a future round can pick it up.
+   - **Revert the failed fix:** Undo the code changes made in Step 4 so they don't interfere with future attempts or cause regressions. Use `git checkout -- <file>` for each modified file.
+
+5. Update the top-level `updated_at` field to the current ISO 8601 timestamp.
 
 ---
 
 ## Step 7: Regression Check
 
-1. Run `/test-analyze --scope bun` to check for regressions across the full test suite.
-2. Compare the new failure list against existing ledger entries.
-3. If new failures are found (test names not already in the ledger):
-   - Add each as a new entry with `status: "discovered"`, `attempt_count: 0`, `max_attempts: 3`.
-   - Assign priority using the same classification rules from `/test-analyze`.
-   - Use sequential IDs continuing from the highest existing ID (e.g., if last is `F-012`, new ones start at `F-013`).
-4. If no new failures are found, no changes needed.
+After updating the ledger entry, run the full test suite to detect any regressions caused by the fix. This is critical — a fix that passes its own test but breaks others is not acceptable.
+
+### 7.1 Run Full Suite Analysis
+
+1. Invoke `/test-analyze --scope all` to run and analyze the complete test suite.
+2. Wait for the analysis to complete and produce a Markdown report.
+3. If the full suite analysis fails to run, log a warning and skip to Step 8 — do not block the ledger write.
+
+### 7.2 Compare Against Existing Ledger
+
+1. Extract the list of failing test names from the `/test-analyze` report's Failure Table.
+2. For each failure in the report, check if a matching entry already exists in the ledger:
+   - Match by **both** `file` (test file path) **and** `test` (test name) — both must match.
+   - If a match exists, the failure is already tracked — no action needed.
+3. Collect any failures that do **not** match existing ledger entries — these are **new regressions**.
+
+### 7.3 Add New Regression Entries
+
+If new regressions were found in Step 7.2:
+
+1. For each new failure, create a new ledger entry:
+   - `id`: Sequential ID continuing from the highest existing ID. Parse the numeric suffix from the last entry's ID (e.g., `F-012` → `12`) and increment (e.g., `F-013`, `F-014`, ...).
+   - `file`: The test file path from the report.
+   - `test`: The full test name from the report.
+   - `priority`: Use the priority assigned by `/test-analyze` in its report.
+   - `status`: `"discovered"`.
+   - `attempt_count`: `0`.
+   - `max_attempts`: `3`.
+   - `diagnosis`: `null`.
+   - `fix_applied`: `null`.
+   - `escalation_reason`: `null`.
+   - `modified_files`: `[]`.
+2. Append the new entries to the ledger's `entries` array.
+
+### 7.4 Handle Circular Regression
+
+If a new failure involves a test that was previously `"fixed"` in the ledger (i.e., an earlier round fixed it, but this round's fix broke it again):
+
+1. Find the previously fixed entry in the ledger.
+2. Set its `status` back to `"discovered"`.
+3. Increment its `attempt_count` by 1.
+4. Append a note to its `diagnosis`: `" [REGRESSION: re-broken by fix to <current-entry-id>]"`.
+5. If the current entry's fix is the cause, consider escalating the **current** entry with `escalation_reason: "circular_regression"`.
 
 ---
 
 ## Step 8: Write Ledger to Disk
 
-1. Serialize the updated ledger to JSON with 2-space indentation.
+This is the **final action** of the round. No code changes, test runs, or other modifications may occur after this step.
+
+### 8.1 Validate Before Writing
+
+1. Verify that every entry in the ledger has all required fields: `id`, `file`, `test`, `priority`, `status`, `attempt_count`, `max_attempts`.
+2. Verify that the `status` field of every entry is one of: `"discovered"`, `"attempted"`, `"fixed"`, `"escalated"`.
+3. Verify that `escalation_reason` is set for all entries with `status: "escalated"`, and is `null` for all other entries.
+4. Verify that `updated_at` has been refreshed to the current timestamp.
+
+### 8.2 Write the File
+
+1. Serialize the full ledger object to JSON with 2-space indentation.
 2. Write the JSON to the `--ledger` path, overwriting the existing file.
-3. This must be the **final action** before exiting — no further code changes after this point.
+3. Confirm the write succeeded by reading back the file and verifying it parses as valid JSON.
+
+### 8.3 Print Round Summary
+
+Print a brief summary of what happened this round:
+
+```
+ROUND COMPLETE:
+  Entry: <id> (<test name>)
+  Outcome: <fixed | escalated | retry>
+  New regressions: <count>
+  Ledger: <fixed-count> fixed, <escalated-count> escalated, <discovered-count> remaining
+```
 
 ---
 
