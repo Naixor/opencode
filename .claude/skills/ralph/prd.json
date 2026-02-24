@@ -177,8 +177,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented LOOP state in test-fix-driver.sh. Added helper functions: count_non_terminal (jq query for non-terminal entries), read_round/increment_round (counter file management). The while-true loop reads ledger, checks termination conditions (count=0 → REPORT, round>=max → FORCE_ESCALATE), then invokes claude -p with timeout. Agent output redirected to per-round log files. Exit code handling: 0=success, 124=timeout, other=crash — all increment round counter and loop. Placeholder functions for FORCE_ESCALATE and REPORT (US-012). Typecheck passes."
     },
     {
       "id": "US-012",
@@ -194,8 +194,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented FORCE_ESCALATE and REPORT states in test-fix-driver.sh. force_escalate() uses jq to set all non-terminal entries to status='escalated' with escalation_reason='max_attempts_exceeded', validates ledger integrity after write. generate_report() invokes claude -p '/test-fix-report --ledger <path>' with timeout, prints ledger summary. Exit codes: 0 if all fixed, 1 if any escalated, 2 on internal error. Typecheck passes."
     },
     {
       "id": "US-013",
