@@ -123,6 +123,57 @@ check_dependencies
 # ── Ensure Log Directory ──────────────────────────────────────────────
 mkdir -p "$LOG_DIR"
 
+# ── Signal Handling ──────────────────────────────────────────────────
+# Trap SIGINT/SIGTERM to exit gracefully after the current round completes.
+# The driver does NOT kill the Agent mid-round — it waits for completion.
+SHUTDOWN_REQUESTED=0
+
+print_ledger_summary() {
+  if [[ -f "$LEDGER_PATH" ]] && jq empty "$LEDGER_PATH" 2>/dev/null; then
+    local total fixed escalated discovered attempted
+    total=$(jq '.entries | length' "$LEDGER_PATH")
+    fixed=$(jq '[.entries[] | select(.status == "fixed")] | length' "$LEDGER_PATH")
+    escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
+    discovered=$(jq '[.entries[] | select(.status == "discovered")] | length' "$LEDGER_PATH")
+    attempted=$(jq '[.entries[] | select(.status == "attempted")] | length' "$LEDGER_PATH")
+    echo "[STATUS] Ledger: $total total, $fixed fixed, $escalated escalated, $discovered discovered, $attempted attempted"
+  fi
+}
+
+handle_shutdown() {
+  echo ""
+  echo "[SIGNAL] Shutdown requested — will exit after current round completes"
+  SHUTDOWN_REQUESTED=1
+}
+
+trap handle_shutdown SIGINT SIGTERM
+
+# ── Concurrency Safety: File Locking ─────────────────────────────────
+# Acquire an exclusive lock on a lock file derived from the ledger path.
+# If another driver instance holds the lock, exit immediately with an error.
+LOCK_FILE="${LEDGER_PATH}.lock"
+
+# Open the lock file on file descriptor 9
+exec 9>"$LOCK_FILE"
+
+if ! flock -n 9; then
+  echo "ERROR: Another test-fix-driver instance is already running (lock held on $LOCK_FILE)" >&2
+  echo "If you believe this is stale, remove the lock file: rm $LOCK_FILE" >&2
+  exit 2
+fi
+
+# Release lock and print summary on exit (normal or signal)
+cleanup() {
+  flock -u 9 2>/dev/null || true
+  exec 9>&- 2>/dev/null || true
+  rm -f "$LOCK_FILE" 2>/dev/null || true
+  print_ledger_summary
+  echo "[EXIT] Driver stopped."
+}
+
+trap 'handle_shutdown' SIGINT SIGTERM
+trap 'cleanup' EXIT
+
 # ── Print Configuration ───────────────────────────────────────────────
 echo "test-fix-driver.sh"
 echo "  Project root:  $PROJECT_ROOT"
@@ -420,6 +471,13 @@ while true; do
     fi
   fi
 
+  # Check if shutdown was requested between rounds
+  if [[ "$SHUTDOWN_REQUESTED" -eq 1 ]]; then
+    echo "[SIGNAL] Graceful shutdown — exiting after completing previous round"
+    print_ledger_summary
+    exit 1
+  fi
+
   # Record terminal count before the round
   local_terminal_before=$(count_terminal)
 
@@ -428,9 +486,27 @@ while true; do
   echo "[LOOP] Invoking Agent: timeout ${ROUND_TIMEOUT}s claude -p '/test-fix-round --ledger $LEDGER_PATH'"
   echo "[LOOP] Log: $local_log_file"
 
-  local_exit_code=0
+  # Protect the Agent from SIGINT/SIGTERM: temporarily set "ignore"
+  # disposition before forking so the child inherits it. Then restore
+  # the handler in the parent. This ensures the Agent is NOT killed
+  # mid-round when the user presses Ctrl+C.
+  trap '' SIGINT SIGTERM
   timeout "$ROUND_TIMEOUT" claude -p "/test-fix-round --ledger $LEDGER_PATH" \
-    > "$local_log_file" 2>&1 || local_exit_code=$?
+    > "$local_log_file" 2>&1 &
+  agent_pid=$!
+  trap 'handle_shutdown' SIGINT SIGTERM
+
+  # Wait for agent completion — re-wait if interrupted by a signal
+  local_exit_code=0
+  while true; do
+    if wait "$agent_pid" 2>/dev/null; then
+      local_exit_code=0
+      break
+    fi
+    local_exit_code=$?
+    # If agent is still running (wait was interrupted by signal), re-wait
+    kill -0 "$agent_pid" 2>/dev/null || break
+  done
 
   if [[ "$local_exit_code" -eq 0 ]]; then
     echo "[LOOP] Agent completed successfully"

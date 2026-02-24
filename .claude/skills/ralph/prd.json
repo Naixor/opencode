@@ -225,8 +225,8 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added signal handling and concurrency safety to test-fix-driver.sh. flock on ${LEDGER_PATH}.lock with non-blocking acquire (exits with error if already held). SIGINT/SIGTERM trapped via handle_shutdown() which sets SHUTDOWN_REQUESTED flag. Agent invocation uses signal-safe pattern: temporarily set 'ignore' disposition before forking so child inherits it, then restore handler in parent + re-wait loop. Cleanup EXIT trap releases flock, removes lock file, prints ledger summary. Typecheck passes."
     },
     {
       "id": "US-015",
