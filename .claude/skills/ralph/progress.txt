@@ -7,6 +7,8 @@
 - Unit tests: `bun test --cwd packages/opencode`
 - E2E tests: `bun run --cwd packages/app test:e2e`
 - macOS does not have `flock` by default — install via `brew install util-linux`
+- Signal-safe child wait pattern: `trap '' SIG` before fork → child inherits ignore → `trap handler SIG` after fork → `while kill -0 $pid; wait $pid; done`
+- File locking pattern: `exec 9>"$FILE.lock"; flock -n 9` — use fd 9 for lock, EXIT trap for cleanup
 
 ---
 
@@ -183,4 +185,17 @@
   - Refactored `increment_round` to be called once after the exit-code if/elif/else block instead of being duplicated in all three branches — reduces code duplication
   - The staleness termination path reuses the same `force_escalate + generate_report + exit code` pattern as the max-rounds termination path
   - Exit code logic is now in three termination points (all-terminal, max-rounds, staleness) — all use the same pattern
+---
+
+## 2026-02-25 - US-014
+- What was implemented: Added signal handling (SIGINT/SIGTERM) and concurrency safety (flock) to `test-fix-driver.sh`
+- Files changed: `.claude/scripts/test-fix-driver.sh` (modified)
+- **Learnings for future iterations:**
+  - Signal-safe child protection pattern: `trap '' SIGINT SIGTERM` before forking the child, then `trap 'handler' SIGINT SIGTERM` after fork — children inherit the "ignore" disposition at fork time, so they won't be killed by terminal SIGINT
+  - `wait` in bash is interrupted by trapped signals — use a `while kill -0 $pid; wait $pid` loop to re-wait until the child actually exits
+  - File locking pattern: `exec 9>"$FILE.lock"; flock -n 9` acquires exclusive lock on fd 9; use EXIT trap to release (`flock -u 9; exec 9>&-; rm -f "$FILE.lock"`)
+  - `flock -n` (non-blocking) returns immediately with non-zero if lock is already held — perfect for "exit if another instance is running"
+  - The `cleanup` function on EXIT trap handles both normal exit and signal-triggered exit paths
+  - `SHUTDOWN_REQUESTED` flag is checked at the TOP of each loop iteration (between rounds), ensuring the current round completes before shutdown
+  - The graceful shutdown exits with code 1 (partial success) since there may be remaining non-terminal entries
 ---
