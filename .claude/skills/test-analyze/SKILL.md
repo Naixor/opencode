@@ -270,56 +270,158 @@ Example record:
 
 ## Step 7: Generate Markdown Report
 
-Output a Markdown report with these sections:
+Output a single Markdown document with the sections below **in this exact order**. If the `COMPLETENESS_WARNING` block was triggered (Step 3), it must appear before the Summary as the very first content in the report.
 
-### Summary
-```
+---
+
+### 7.1 Summary Section
+
+Always include this section. Fill in actual values from Steps 2–3.
+
+```markdown
 ## Summary
 
-- **Total:** N tests
-- **Pass:** N
-- **Fail:** N
-- **Skip:** N
-- **Dual Verification:** PASS | FAIL (details if FAIL)
-- **Completeness Warnings:** None | list of warnings
+| Metric | Value |
+|--------|-------|
+| **Scope** | bun / e2e / all |
+| **Total** | N |
+| **Pass** | N |
+| **Fail** | N |
+| **Skip** | N |
+| **Dual Verification** | PASS / FAIL |
+
+### Verification Details
+
+- **Source A (summary line):** N failures
+- **Source B (grep count):** N failures
+- **Arithmetic check:** pass(X) + fail(Y) + skip(Z) = W — PASS / FAIL (expected T)
+- **Silent skip check:** PASS / FAIL (N file(s) not executed)
 ```
 
-### Failure Table (sorted by priority, grouped by correlation)
-```
+Rules:
+- `Dual Verification` is **PASS** only if **all four** checks pass (Source A/B match, arithmetic, silent skip).
+- If any check is `FAIL`, add a parenthetical with the specific check names that failed, e.g., `FAIL (Source A/B mismatch, silent skip)`.
+- If `source_a_fail = UNKNOWN`, display `Source A: UNKNOWN (summary line not found)`.
+
+---
+
+### 7.2 Failure Table Section
+
+Include this section only if there are failures (`fail > 0`). Failures are grouped by correlation group (shared `source_file`) and sorted by group priority (lowest P number first). Within each group, sort by individual priority then alphabetically by test name.
+
+```markdown
 ## Failures
+
+### Group: src/provider/auth.ts (P0, 3 failures)
 
 | # | Priority | File | Test | Error Type | Error Message | Source |
 |---|----------|------|------|------------|---------------|--------|
-| 1 | P0 | path/to/test.ts | test name | compile | Cannot find module | src/foo.ts:42 |
+| 1 | P0 | test/provider/auth.test.ts | describe > validates token | compile | Cannot find module 'src/pro...' | src/provider/auth.ts:12 |
+| 2 | P2 | test/provider/auth.test.ts | describe > refreshes session | runtime | Cannot read properties of ... | src/provider/auth.ts:45 |
+| 3 | P3 | test/provider/login.test.ts | login > rejects expired | assertion | Expected: 401, Received: 200 | src/provider/auth.ts:78 |
+
+### Group: src/tool/file.ts (P2, 1 failure)
+
+| # | Priority | File | Test | Error Type | Error Message | Source |
+|---|----------|------|------|------------|---------------|--------|
+| 4 | P2 | test/tool/file.test.ts | file > handles missing path | runtime | TypeError: Cannot read pro... | src/tool/file.ts:33 |
+
+### Ungrouped (2 failures)
+
+| # | Priority | File | Test | Error Type | Error Message | Source |
+|---|----------|------|------|------------|---------------|--------|
+| 5 | P4 | test/agent/prompt.test.ts | prompt > loads templates | timeout | Test timed out after 5000ms | — |
+| 6 | P5 | test/server/routes.test.ts | routes > binds port | environment | EADDRINUSE: port 4096 alr... | — |
 ```
 
-### Per-File Breakdown
-```
+Rules:
+- Each group gets a `### Group: <source_file> (P<N>, M failures)` header showing the group's shared source file, overall priority, and failure count.
+- The **#** column is a sequential number across the entire report (not per-group).
+- **Error Message** is truncated to 30 characters with `...` in the table. The full message appears in the Per-File Breakdown.
+- **Source** column shows `source_file:source_line` or `—` if unknown.
+- Failures with no identifiable `source_file` go under a `### Ungrouped (N failures)` header, listed last.
+- If there are zero failures, omit this entire section and instead print: `## Failures\n\nNo failures detected.`
+
+---
+
+### 7.3 Per-File Breakdown Section
+
+Always include this section if there are failures. One sub-heading per test file that contains at least one failure. Sorted alphabetically by file path.
+
+```markdown
 ## Per-File Breakdown
 
-### path/to/test-file.test.ts (3 failures)
-- test name 1: assertion - expected X, got Y
-- test name 2: runtime - Cannot read property 'foo'
-- test name 3: compile - Missing import
+### test/provider/auth.test.ts (2 failures)
+
+1. **describe > validates token** — `compile` (P0)
+   > Cannot find module 'src/provider/auth-v2' from 'test/provider/auth.test.ts'
+
+2. **describe > refreshes session** — `runtime` (P2)
+   > Cannot read properties of undefined (reading 'expiresAt')
+   >
+   > Stack:
+   > ```
+   > at refreshSession (src/provider/auth.ts:45)
+   > at Object.<anonymous> (test/provider/auth.test.ts:88)
+   > ```
+
+### test/provider/login.test.ts (1 failure)
+
+1. **login > rejects expired** — `assertion` (P3)
+   > Expected: 401, Received: 200
 ```
 
-### Silent Skip Warnings (if any)
-```
+Rules:
+- Each test file heading includes the failure count in parentheses.
+- Each failure entry shows: full test name, error_type, priority, full error message (not truncated), and stack trace (max 5 frames, excluding node_modules frames).
+- Stack traces are wrapped in a fenced code block inside a blockquote for readability.
+- Only include stack trace if it provides useful location information; omit for assertion errors where `Expected:/Received:` is sufficient.
+
+---
+
+### 7.4 Silent Skip Warnings Section
+
+Include this section **only** if the silent skip check (Step 3) detected test files on disk that were not executed.
+
+```markdown
 ## Silent Skip Warnings
 
-The following test files exist on disk but did not appear in test output:
-- path/to/missed-test.test.ts
-- path/to/another-missed.test.ts
+**N test file(s)** exist on disk but did not appear in test output:
+
+| # | File Path | Possible Reason |
+|---|-----------|-----------------|
+| 1 | test/security/symlink.test.ts | File may not match test runner glob |
+| 2 | test/util/deprecated.test.ts | File may be excluded by config |
 ```
 
-### Raw Output Path
-```
+Rules:
+- List every silently skipped file with a sequential number.
+- The **Possible Reason** column is a best-effort guess (e.g., check if the file is excluded in a config, has a `.skip` marker, or uses an unusual extension). If no reason can be determined, write `Unknown`.
+- If there are no silent skips, omit this entire section.
+
+---
+
+### 7.5 Raw Output Section
+
+Always include this section as the last section in the report.
+
+```markdown
 ## Raw Output
 
-Full test output saved to: <path>
+Full test output saved to: `<path>`
 ```
 
-If `--output` was not specified, note that raw output was not saved.
+If `--output` was **not** specified:
+
+```markdown
+## Raw Output
+
+Raw output was not saved to disk. Use `--output <path>` to persist the raw test output.
+```
+
+Rules:
+- The path must be wrapped in backticks for readability.
+- If `--output` was specified, confirm the file was written successfully. If it failed to write, note the error.
 
 ---
 
