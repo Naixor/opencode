@@ -146,49 +146,124 @@ The warning block format:
 
 ## Step 4: Error Classification
 
-Classify each failure into one of these categories based on the error message and stack trace:
+Classify each failure into **exactly one** of the 5 error_type categories below. Scan the error message and stack trace against the patterns in order — use the **first matching** category (higher rows take precedence).
 
-| Error Type | Pattern Match |
-|------------|--------------|
-| `compile` | `SyntaxError`, `TypeError: ... is not a function`, `Cannot find module`, import/export errors |
-| `runtime` | `ReferenceError`, `RangeError`, unhandled promise rejection, null/undefined access |
-| `assertion` | `expect(...)`, `AssertionError`, `toBe`, `toEqual`, test matcher failures |
-| `timeout` | `timed out`, `exceeded timeout`, `SIGTERM` in test context |
-| `environment` | `ENOENT`, `EACCES`, `ECONNREFUSED`, missing env var, port-in-use errors |
+### 4.1 `compile` — Code failed to parse or resolve
+
+Match if the error message or stack trace contains **any** of these patterns:
+
+- `SyntaxError` (any variant)
+- `TypeError: <name> is not a function` or `TypeError: <name> is not a constructor`
+- `Cannot find module` or `Module not found`
+- `Cannot find name` or `is not defined` in a type context
+- `import` or `export` paired with `unexpected token`, `not found`, or `does not provide`
+- `Cannot resolve` or `Could not resolve`
+
+### 4.2 `runtime` — Code compiled but crashed at runtime
+
+Match if the error message or stack trace contains **any** of these patterns:
+
+- `ReferenceError` (any variant)
+- `RangeError` (any variant)
+- `TypeError` **not** matching the compile patterns above (e.g., `Cannot read properties of undefined`, `is not iterable`)
+- `Unhandled promise rejection` or `UnhandledPromiseRejection`
+- `null` or `undefined` paired with access verbs (`read`, `property`, `call`)
+- `Maximum call stack size exceeded`
+
+### 4.3 `assertion` — Test expectation did not match
+
+Match if the error message or stack trace contains **any** of these patterns:
+
+- `expect(` or `expect.` (Bun/Jest matchers)
+- `AssertionError` or `AssertionError`
+- Matcher keywords: `toBe`, `toEqual`, `toMatch`, `toThrow`, `toContain`, `toHaveBeenCalled`, `toHaveLength`, `toStrictEqual`
+- `Expected:` / `Received:` diff blocks
+- `assert.` (Node.js assert module)
+
+### 4.4 `timeout` — Test exceeded time limit
+
+Match if the error message or stack trace contains **any** of these patterns:
+
+- `timed out` or `Timeout`
+- `exceeded timeout` or `exceeded the timeout`
+- `SIGTERM` when it appears in a test execution context
+- `Test timeout` or `test exceeded`
+
+### 4.5 `environment` — External dependency or OS-level issue
+
+Match if **none** of the above categories match, **or** if the error contains:
+
+- `ENOENT` (file not found)
+- `EACCES` or `EPERM` (permission denied)
+- `ECONNREFUSED` or `ECONNRESET` (network issues)
+- `EADDRINUSE` or `port` paired with `in use` or `already`
+- Missing environment variable (`process.env.<VAR>` is `undefined`)
+- `ENOMEM`, `EMFILE` (resource exhaustion)
+
+### Precedence Rule
+
+If a failure matches **multiple** categories, apply this precedence order: `compile` > `runtime` > `assertion` > `timeout` > `environment`. Always classify as the highest-precedence match.
 
 ---
 
 ## Step 5: Priority Assignment
 
-Assign priority P0-P5 based on error type and source location:
+Assign priority P0–P5 based on `error_type` and whether the fault originates in a **source file** or a **test file**:
 
-| Priority | Rule |
-|----------|------|
-| P0 | `compile` errors in source files (blocks all other tests) |
-| P1 | `compile` errors in test files |
-| P2 | `runtime` errors in source files |
-| P3 | `assertion` errors (test logic vs source logic mismatch) |
-| P4 | `timeout` errors |
-| P5 | `environment` errors |
+| Priority | Rule | Rationale |
+|----------|------|-----------|
+| P0 | `compile` errors where `source_file` is under `src/` | Blocks compilation; likely cascades to many tests |
+| P1 | `compile` errors where `source_file` is under `test/` | Only affects the test itself but must be loadable |
+| P2 | `runtime` errors where `source_file` is under `src/` | Source code bug causing crashes |
+| P3 | `assertion` errors (any location) | Test logic vs source logic mismatch |
+| P4 | `timeout` errors (any location) | May be flaky or resource-related |
+| P5 | `environment` errors (any location) | External dependency or setup issue |
+
+**Source vs Test distinction:** Inspect the `source_file` field (extracted from the stack trace). If the deepest non-node_modules, non-test frame points to a file under `src/`, it's a source file error. If it points to a file under `test/`, or if `source_file` cannot be determined, treat it as a test file error (use the lower-priority variant for compile/runtime).
 
 ### Correlation Grouping
-Group failures that share the same source file (from stack trace) into a single correlation group. This helps identify root causes that affect multiple tests.
+
+Group multiple failures that share the same root cause to avoid duplicate fix effort:
+
+1. Extract the `source_file` from each failure's stack trace.
+2. Group all failures where `source_file` is identical into a **correlation group**.
+3. Name each group by its shared `source_file` (e.g., `src/provider/auth.ts`).
+4. Within a group, sort failures by priority (P0 first).
+5. Assign the group's overall priority as the **highest** (lowest number) priority among its members.
+6. Failures with no identifiable `source_file` go into an `ungrouped` bucket.
+
+In the final report, display correlated failures together under a group header so the fixer can address the root cause once.
 
 ---
 
 ## Step 6: Structured Record Format
 
-For each failure, produce a record with these fields:
+For each failure, produce a record with **all** of these fields:
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `file` | string | Test file path relative to repo root |
+| `test` | string | Full test name including `describe` block (e.g., `"describe > test name"`) |
+| `error_type` | enum | One of: `compile`, `runtime`, `assertion`, `timeout`, `environment` |
+| `error_message` | string | First line of the error (truncated to 200 chars) |
+| `stack_trace` | string | Relevant stack frames, max 5 lines, trimmed of node_modules frames |
+| `source_file` | string \| null | Source file path from stack trace (deepest non-test, non-node_modules frame), or `null` if not identifiable |
+| `source_line` | number \| null | Line number in source_file, or `null` if not identifiable |
+| `priority` | enum | One of: `P0`, `P1`, `P2`, `P3`, `P4`, `P5` |
+
+Example record:
 ```
-- file: <test file path>
-- test: <test name / describe block>
-- error_type: compile | runtime | assertion | timeout | environment
-- error_message: <first line of error>
-- stack_trace: <relevant stack frames, max 5 lines>
-- source_file: <source file from stack trace, if identifiable>
-- source_line: <line number in source file, if identifiable>
-- priority: P0 | P1 | P2 | P3 | P4 | P5
+- file: test/security/access_control.test.ts
+- test: checkAccess > rejects paths with null bytes
+- error_type: runtime
+- error_message: TypeError: Cannot read properties of undefined (reading 'length')
+- stack_trace: |
+    at resolveSymlink (src/security/symlink.ts:42)
+    at checkAccess (src/security/access.ts:18)
+    at Object.<anonymous> (test/security/access_control.test.ts:55)
+- source_file: src/security/symlink.ts
+- source_line: 42
+- priority: P2
 ```
 
 ---
