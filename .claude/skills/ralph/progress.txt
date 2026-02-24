@@ -199,3 +199,17 @@
   - `SHUTDOWN_REQUESTED` flag is checked at the TOP of each loop iteration (between rounds), ensuring the current round completes before shutdown
   - The graceful shutdown exits with code 1 (partial success) since there may be remaining non-terminal entries
 ---
+
+## 2026-02-25 - US-015
+- What was implemented: Created `.claude/skills/test-fix-report/` directory and `SKILL.md` prompt file for final report generation from the test-fix ledger
+- Files changed: `.claude/skills/test-fix-report/SKILL.md` (new)
+- **Learnings for future iterations:**
+  - The report skill is the third skill in the workflow ecosystem: test-analyze (discovery), test-fix-round (fixing), test-fix-report (reporting)
+  - The driver's `generate_report()` function invokes this skill via `claude -p '/test-fix-report --ledger <path>'`
+  - Ledger integrity has two checks: no-orphan (all entries terminal) and arithmetic (fixed + escalated >= initial_failure_count)
+  - Iteration history reconstruction from ledger entries uses `attempt_count` and final `status` — no per-round snapshots exist in the ledger
+  - The report is saved to `tasks/test-fix-report.md` (relative to project root) — this path is hardcoded in the skill
+  - Escalated entries get actionable "Suggested Next Steps" based on the escalation_reason enum — each reason maps to specific advice
+  - The "Changes by File" section aggregates `modified_files` across all fixed entries, deduplicating and linking back to entry IDs
+  - Conditional "Orphaned Entries" section only appears if the no-orphan check fails
+---
