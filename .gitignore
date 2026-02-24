@@ -33,3 +33,4 @@ packages/opencode/test/security/access_control_cases/report/
 
 # Security test project
 test-security-project
+packages/opencode/test/.opencode-security-audit.log
