@@ -171,3 +171,16 @@
   - Exit code logic is duplicated at two termination points (all-terminal and max-rounds) — both paths use the same pattern: count escalated entries, exit 0 if none, exit 1 otherwise
   - The FORCE_ESCALATE path always has escalated entries (by definition), but the exit code check is still correct since some entries may have been fixed before max-rounds was reached
 ---
+
+## 2026-02-25 - US-013
+- What was implemented: Added staleness detection to `test-fix-driver.sh` — detects when no progress is being made and force-escalates remaining entries
+- Files changed: `.claude/scripts/test-fix-driver.sh` (modified)
+- **Learnings for future iterations:**
+  - Added `count_terminal()` helper alongside existing `count_non_terminal()` — separated concerns for clarity
+  - `stale_rounds` counter lives as a plain shell variable (not persisted to file) since it resets on driver restart anyway
+  - The staleness check happens AFTER the agent invocation and round increment, comparing `count_terminal` before vs after
+  - `MAX_STALE_ROUNDS=3` matches the PRD requirement (FR-30: "3 consecutive rounds produce zero new terminal entries")
+  - Refactored `increment_round` to be called once after the exit-code if/elif/else block instead of being duplicated in all three branches — reduces code duplication
+  - The staleness termination path reuses the same `force_escalate + generate_report + exit code` pattern as the max-rounds termination path
+  - Exit code logic is now in three termination points (all-terminal, max-rounds, staleness) — all use the same pattern
+---

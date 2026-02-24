@@ -210,8 +210,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added staleness detection to test-fix-driver.sh. New count_terminal() helper function. stale_rounds counter initialized to 0 before the loop. Before each round, terminal count is recorded; after each round, it's compared. If no increase, stale_rounds increments. If stale_rounds >= 3, transitions to FORCE_ESCALATE. Also refactored increment_round to be called once after the if/elif/else exit code block (was duplicated in all three branches). Typecheck passes."
     },
     {
       "id": "US-014",

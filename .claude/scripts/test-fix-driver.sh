@@ -273,6 +273,11 @@ count_non_terminal() {
   echo $((total - terminal))
 }
 
+# ── Helper: Count Terminal Entries ────────────────────────────────────
+count_terminal() {
+  jq '[.entries[] | select(.status == "fixed" or .status == "escalated")] | length' "$LEDGER_PATH"
+}
+
 # ── Helper: Read Round Counter ───────────────────────────────────────
 read_round() {
   if [[ -f "$COUNTER_FILE" ]]; then
@@ -358,12 +363,15 @@ generate_report() {
 echo ""
 echo "[LOOP] Starting fix loop..."
 
+stale_rounds=0
+MAX_STALE_ROUNDS=3
+
 while true; do
   local_round=$(read_round)
   local_remaining=$(count_non_terminal)
 
   echo ""
-  echo "[LOOP] Round $local_round | $local_remaining non-terminal entries remaining"
+  echo "[LOOP] Round $local_round | $local_remaining non-terminal entries remaining | stale_rounds=$stale_rounds"
 
   # Termination: all entries are terminal
   if [[ "$local_remaining" -eq 0 ]]; then
@@ -396,6 +404,25 @@ while true; do
     fi
   fi
 
+  # Termination: staleness detected (no progress for 3 consecutive rounds)
+  if [[ "$stale_rounds" -ge "$MAX_STALE_ROUNDS" ]]; then
+    echo "[LOOP] $stale_rounds consecutive rounds with no progress — transitioning to FORCE_ESCALATE"
+    force_escalate
+    generate_report
+    # Determine exit code: 0 if all fixed, 1 if any escalated
+    local_escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
+    if [[ "$local_escalated" -eq 0 ]]; then
+      echo "[DONE] All failures fixed!"
+      exit 0
+    else
+      echo "[DONE] $local_escalated failure(s) escalated for human review."
+      exit 1
+    fi
+  fi
+
+  # Record terminal count before the round
+  local_terminal_before=$(count_terminal)
+
   # Invoke Agent for one fix round
   local_log_file="$LOG_DIR/test-fix-round-${local_round}.log"
   echo "[LOOP] Invoking Agent: timeout ${ROUND_TIMEOUT}s claude -p '/test-fix-round --ledger $LEDGER_PATH'"
@@ -407,12 +434,21 @@ while true; do
 
   if [[ "$local_exit_code" -eq 0 ]]; then
     echo "[LOOP] Agent completed successfully"
-    increment_round
   elif [[ "$local_exit_code" -eq 124 ]]; then
     echo "[WARN] Agent timed out after ${ROUND_TIMEOUT}s — retrying same ledger state"
-    increment_round
   else
     echo "[WARN] Agent exited with code $local_exit_code — retrying same ledger state"
-    increment_round
+  fi
+
+  increment_round
+
+  # Staleness detection: compare terminal count before and after the round
+  local_terminal_after=$(count_terminal)
+  if [[ "$local_terminal_after" -gt "$local_terminal_before" ]]; then
+    echo "[LOOP] Progress detected: terminal entries $local_terminal_before → $local_terminal_after"
+    stale_rounds=0
+  else
+    stale_rounds=$((stale_rounds + 1))
+    echo "[LOOP] No progress: terminal entries unchanged at $local_terminal_after (stale_rounds=$stale_rounds/$MAX_STALE_ROUNDS)"
   fi
 done
