@@ -2,9 +2,11 @@
 - Skills live in `.claude/skills/<skill-name>/SKILL.md` with YAML frontmatter (name, description, user-invocable)
 - SKILL.md files are pure prompt files — no code, just instructions for the AI agent
 - JSON schemas live in `.claude/schemas/` (e.g., `test-fix-ledger.schema.json`)
+- Shell scripts live in `.claude/scripts/` (e.g., `test-fix-driver.sh`)
 - Typecheck command: `bun turbo typecheck`
 - Unit tests: `bun test --cwd packages/opencode`
 - E2E tests: `bun run --cwd packages/app test:e2e`
+- macOS does not have `flock` by default — install via `brew install util-linux`
 
 ---
 
@@ -110,4 +112,19 @@
   - Step 7.4 handles circular regression — when a fix breaks a previously fixed test, both entries are updated and escalation with `"circular_regression"` is considered
   - Step 8 adds pre-write validation (required fields, status enum, escalation_reason consistency) and post-write verification (read-back and JSON parse check)
   - Step 8.3 defines a structured round summary output format for observability
+---
+
+## 2026-02-25 - US-009
+- What was implemented: Created `.claude/scripts/test-fix-driver.sh` — the outer-loop shell script driver scaffold
+- Files changed: `.claude/scripts/test-fix-driver.sh` (new)
+- **Learnings for future iterations:**
+  - Shell scripts for the workflow live in `.claude/scripts/` directory (created for this story)
+  - macOS does not ship `flock` — it requires `brew install util-linux`
+  - The script uses `set -euo pipefail` for strict error handling
+  - Argument parsing uses a `while/case` loop with `shift 2` for flag+value pairs
+  - Default ledger path uses `$$` (PID) for uniqueness: `/tmp/test-fix-ledger-$$.json`
+  - Dependency check collects all missing deps into an array before printing, so the user sees all missing deps at once
+  - Log directory is created via `mkdir -p` after the dependency check passes
+  - Script resolves `PROJECT_ROOT` via `SCRIPT_DIR/../..` relative navigation
+  - Typecheck is unaffected by `.sh` file changes (all cache hits)
 ---
