@@ -145,3 +145,29 @@
   - The INIT state handles two paths: fresh start (invoke /test-analyze, create ledger) and resume (validate existing ledger, print status)
   - Priority validation: default to P3 if the parsed priority doesn't match `^P[0-5]$`
 ---
+
+## 2026-02-25 - US-011
+- What was implemented: LOOP state in `test-fix-driver.sh` — the main while-true loop that reads the ledger, checks termination conditions, invokes the Agent per round, and handles timeouts/crashes
+- Files changed: `.claude/scripts/test-fix-driver.sh` (modified)
+- **Learnings for future iterations:**
+  - Helper functions (`count_non_terminal`, `read_round`, `increment_round`) keep the loop body clean and readable
+  - `count_non_terminal` uses two jq queries: total entries minus entries matching `status == "fixed" or status == "escalated"`
+  - Using `local_` prefix for variables inside the while loop since `local` keyword only works inside functions in bash
+  - The loop checks termination conditions BEFORE invoking the agent: count=0 → REPORT, round>=max → FORCE_ESCALATE
+  - All exit paths (success, timeout, crash) increment the round counter to avoid infinite retry on the same round number
+  - Round counter always increments even on timeout/crash — this ensures max-rounds is a hard limit on total invocations
+  - Placeholder functions for `force_escalate()` and `generate_report()` are defined above the loop so US-012 can fill them in
+  - Agent output goes to `$LOG_DIR/test-fix-round-<N>.log` for post-mortem analysis
+---
+
+## 2026-02-25 - US-012
+- What was implemented: FORCE_ESCALATE and REPORT states in `test-fix-driver.sh` — replaced placeholder functions with full implementations
+- Files changed: `.claude/scripts/test-fix-driver.sh` (modified)
+- **Learnings for future iterations:**
+  - `force_escalate()` uses a single jq expression with conditional update: `if .status != "fixed" and .status != "escalated" then ... end` — cleaner than filtering + merging
+  - Writing jq output to a variable first, then echoing to file avoids the "read and write same file" race condition: `updated=$(jq ... "$FILE"); echo "$updated" > "$FILE"`
+  - `generate_report()` is non-fatal: timeout or crash of /test-fix-report logs a warning but doesn't prevent the driver from printing the ledger summary and exiting with the correct code
+  - Report log goes to `$LOG_DIR/test-fix-report.log` (not per-round, since report only runs once)
+  - Exit code logic is duplicated at two termination points (all-terminal and max-rounds) — both paths use the same pattern: count escalated entries, exit 0 if none, exit 1 otherwise
+  - The FORCE_ESCALATE path always has escalated entries (by definition), but the exit code check is still correct since some entries may have been fixed before max-rounds was reached
+---
