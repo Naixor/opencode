@@ -264,11 +264,94 @@ else
   init_ledger
 fi
 
-# ── Placeholder: LOOP, FORCE_ESCALATE, REPORT ────────────────────────
-# US-011: LOOP state (round invocation with timeout)
-# US-012: FORCE_ESCALATE and REPORT states
-# US-013: Staleness detection
-# US-014: Signal handling and concurrency safety
+# ── Helper: Count Non-Terminal Entries ────────────────────────────────
+count_non_terminal() {
+  local total
+  total=$(jq '.entries | length' "$LEDGER_PATH")
+  local terminal
+  terminal=$(jq '[.entries[] | select(.status == "fixed" or .status == "escalated")] | length' "$LEDGER_PATH")
+  echo $((total - terminal))
+}
 
+# ── Helper: Read Round Counter ───────────────────────────────────────
+read_round() {
+  if [[ -f "$COUNTER_FILE" ]]; then
+    cat "$COUNTER_FILE"
+  else
+    echo "0"
+  fi
+}
+
+# ── Helper: Increment Round Counter ──────────────────────────────────
+increment_round() {
+  local current
+  current=$(read_round)
+  echo $((current + 1)) > "$COUNTER_FILE"
+}
+
+# ── Placeholder: FORCE_ESCALATE ──────────────────────────────────────
+# US-012: FORCE_ESCALATE and REPORT states (implemented in next story)
+force_escalate() {
+  echo "[FORCE_ESCALATE] Not yet implemented (US-012)"
+}
+
+# ── Placeholder: REPORT ──────────────────────────────────────────────
+# US-012: REPORT state (implemented in next story)
+generate_report() {
+  echo "[REPORT] Not yet implemented (US-012)"
+}
+
+# ── LOOP State: Round Invocation with Timeout ────────────────────────
 echo ""
-echo "INIT complete. LOOP state implementation pending (US-011 through US-014)."
+echo "[LOOP] Starting fix loop..."
+
+while true; do
+  local_round=$(read_round)
+  local_remaining=$(count_non_terminal)
+
+  echo ""
+  echo "[LOOP] Round $local_round | $local_remaining non-terminal entries remaining"
+
+  # Termination: all entries are terminal
+  if [[ "$local_remaining" -eq 0 ]]; then
+    echo "[LOOP] All ledger entries are terminal — transitioning to REPORT"
+    generate_report
+    # Determine exit code: 0 if all fixed, 1 if any escalated
+    local_escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
+    if [[ "$local_escalated" -eq 0 ]]; then
+      echo "[DONE] All failures fixed!"
+      exit 0
+    else
+      echo "[DONE] $local_escalated failure(s) escalated for human review."
+      exit 1
+    fi
+  fi
+
+  # Termination: max rounds exceeded
+  if [[ "$local_round" -ge "$MAX_ROUNDS" ]]; then
+    echo "[LOOP] Round $local_round >= max rounds $MAX_ROUNDS — transitioning to FORCE_ESCALATE"
+    force_escalate
+    generate_report
+    exit 1
+  fi
+
+  # Invoke Agent for one fix round
+  local_log_file="$LOG_DIR/test-fix-round-${local_round}.log"
+  echo "[LOOP] Invoking Agent: timeout ${ROUND_TIMEOUT}s claude -p '/test-fix-round --ledger $LEDGER_PATH'"
+  echo "[LOOP] Log: $local_log_file"
+
+  local_exit_code=0
+  timeout "$ROUND_TIMEOUT" claude -p "/test-fix-round --ledger $LEDGER_PATH" \
+    > "$local_log_file" 2>&1 || local_exit_code=$?
+
+  if [[ "$local_exit_code" -eq 0 ]]; then
+    echo "[LOOP] Agent completed successfully"
+    increment_round
+  elif [[ "$local_exit_code" -eq 124 ]]; then
+    echo "[WARN] Agent timed out after ${ROUND_TIMEOUT}s — retrying same ledger state"
+    increment_round
+  else
+    echo "[WARN] Agent exited with code $local_exit_code — retrying same ledger state"
+    increment_round
+  fi
+done
