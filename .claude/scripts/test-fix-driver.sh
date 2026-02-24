@@ -289,16 +289,69 @@ increment_round() {
   echo $((current + 1)) > "$COUNTER_FILE"
 }
 
-# ── Placeholder: FORCE_ESCALATE ──────────────────────────────────────
-# US-012: FORCE_ESCALATE and REPORT states (implemented in next story)
+# ── FORCE_ESCALATE State ──────────────────────────────────────────────
+# Set all non-terminal ledger entries to status='escalated' with
+# escalation_reason='max_attempts_exceeded', then transition to REPORT.
 force_escalate() {
-  echo "[FORCE_ESCALATE] Not yet implemented (US-012)"
+  echo "[FORCE_ESCALATE] Escalating all remaining non-terminal entries..."
+
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  local updated
+  updated=$(jq \
+    --arg now "$now" \
+    '
+    .updated_at = $now |
+    .entries = [.entries[] |
+      if .status != "fixed" and .status != "escalated" then
+        .status = "escalated" |
+        .escalation_reason = "max_attempts_exceeded"
+      else
+        .
+      end
+    ]
+    ' "$LEDGER_PATH")
+
+  echo "$updated" > "$LEDGER_PATH"
+
+  # Validate the updated ledger
+  if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
+    echo "[ERROR] Ledger corrupted during force-escalate" >&2
+    exit 2
+  fi
+
+  local escalated_count
+  escalated_count=$(jq '[.entries[] | select(.escalation_reason == "max_attempts_exceeded")] | length' "$LEDGER_PATH")
+  echo "[FORCE_ESCALATE] $escalated_count entry/entries force-escalated"
+  echo "[FORCE_ESCALATE] Transitioning to REPORT"
 }
 
-# ── Placeholder: REPORT ──────────────────────────────────────────────
-# US-012: REPORT state (implemented in next story)
+# ── REPORT State ──────────────────────────────────────────────────────
+# Invoke /test-fix-report to generate the final Markdown report from the ledger.
 generate_report() {
-  echo "[REPORT] Not yet implemented (US-012)"
+  echo "[REPORT] Generating final report from ledger..."
+
+  local report_log="$LOG_DIR/test-fix-report.log"
+
+  local exit_code=0
+  timeout "$ROUND_TIMEOUT" claude -p "/test-fix-report --ledger $LEDGER_PATH" \
+    > "$report_log" 2>&1 || exit_code=$?
+
+  if [[ $exit_code -eq 124 ]]; then
+    echo "[WARN] /test-fix-report timed out after ${ROUND_TIMEOUT}s — report may be incomplete" >&2
+  elif [[ $exit_code -ne 0 ]]; then
+    echo "[WARN] /test-fix-report exited with code $exit_code — report may be incomplete" >&2
+  else
+    echo "[REPORT] Report generation complete. See $report_log"
+  fi
+
+  # Print ledger summary regardless of report generation outcome
+  local total fixed escalated
+  total=$(jq '.entries | length' "$LEDGER_PATH")
+  fixed=$(jq '[.entries[] | select(.status == "fixed")] | length' "$LEDGER_PATH")
+  escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
+  echo "[REPORT] Final ledger: $total total, $fixed fixed, $escalated escalated"
 }
 
 # ── LOOP State: Round Invocation with Timeout ────────────────────────
@@ -332,7 +385,15 @@ while true; do
     echo "[LOOP] Round $local_round >= max rounds $MAX_ROUNDS — transitioning to FORCE_ESCALATE"
     force_escalate
     generate_report
-    exit 1
+    # Determine exit code: 0 if all fixed, 1 if any escalated
+    local_escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
+    if [[ "$local_escalated" -eq 0 ]]; then
+      echo "[DONE] All failures fixed!"
+      exit 0
+    else
+      echo "[DONE] $local_escalated failure(s) escalated for human review."
+      exit 1
+    fi
   fi
 
   # Invoke Agent for one fix round
