@@ -91,6 +91,7 @@
             "circular_regression",
             "max_attempts_exceeded",
             "out_of_scope",
+            "timeout",
             null
           ],
           "default": null,

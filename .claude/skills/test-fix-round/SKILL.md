@@ -46,7 +46,11 @@ Execute a single test-fix cycle. Read the ledger, select the highest-priority `d
 3. If multiple entries share the same priority, prefer the one with the lowest `attempt_count`.
 4. Select the **first** entry from the sorted list — this is the target for this round.
 5. Update the selected entry's `status` to `"attempted"`.
-6. If no `discovered` entries remain, print `NO_WORK: All ledger entries are terminal (fixed or escalated). Nothing to do.` and exit.
+6. **Immediately write the ledger to disk** (flush) so that the driver can
+   detect which entry is in-progress if the agent times out before Step 8.
+   Write the same format as Step 8 (JSON, 2-space indent). Do not validate
+   or do regression checks at this point — this is a checkpoint write only.
+7. If no `discovered` entries remain, print `NO_WORK: All ledger entries are terminal (fixed or escalated). Nothing to do.` and exit.
 
 ---
 

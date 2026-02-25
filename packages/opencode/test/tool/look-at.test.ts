@@ -1,10 +1,11 @@
-import { describe, expect, test, afterEach, mock } from "bun:test"
+import { describe, expect, test, beforeEach, afterEach, mock, spyOn } from "bun:test"
 import path from "path"
 import fs from "fs"
 import { LookAtTool } from "../../src/tool/look-at"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import { setupSecurityConfig, teardownSecurityConfig } from "../security/access_control_cases/helpers"
+import { Provider } from "../../src/provider/provider"
 
 const ctx = {
   sessionID: "test",
@@ -21,10 +22,17 @@ const ctx = {
 const TINY_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
-// Mock the generateText function and Provider to avoid real API calls
+// Mock the generateText function to avoid real API calls
 const mockGenerateText = mock(() =>
   Promise.resolve({ text: "Analysis: This image shows a 1x1 pixel." }),
 )
+
+// Keep mock.module for "ai" (external module, named function import)
+mock.module("ai", () => ({
+  generateText: mockGenerateText,
+}))
+
+// Use spyOn for Provider namespace to avoid leaking mock.module to other test files
 const mockGetLanguage = mock(() => Promise.resolve({}))
 const mockGetModel = mock(() =>
   Promise.resolve({
@@ -48,23 +56,22 @@ const mockProviderList = mock(() =>
   }),
 )
 
-// Mock modules
-mock.module("ai", () => ({
-  generateText: mockGenerateText,
-}))
-
-mock.module("../../src/provider/provider", () => ({
-  Provider: {
-    getModel: mockGetModel,
-    getLanguage: mockGetLanguage,
-    parseModel: mockParseModel,
-    list: mockProviderList,
-    defaultModel: () => Promise.resolve({ providerID: "google", modelID: "gemini-2.5-flash" }),
-  },
-}))
+const spies: Array<ReturnType<typeof spyOn>> = []
 
 describe("look_at tool", () => {
+  beforeEach(() => {
+    spies.push(
+      spyOn(Provider, "getModel").mockImplementation(mockGetModel as typeof Provider.getModel),
+      spyOn(Provider, "getLanguage").mockImplementation(mockGetLanguage as typeof Provider.getLanguage),
+      spyOn(Provider, "parseModel").mockImplementation(mockParseModel as typeof Provider.parseModel),
+      spyOn(Provider, "list").mockImplementation(mockProviderList as typeof Provider.list),
+      spyOn(Provider, "defaultModel").mockImplementation(async () => ({ providerID: "google", modelID: "gemini-2.5-flash" }) as Awaited<ReturnType<typeof Provider.defaultModel>>),
+    )
+  })
+
   afterEach(() => {
+    spies.forEach((s) => s.mockRestore())
+    spies.length = 0
     teardownSecurityConfig()
     mockGenerateText.mockClear()
     mockGetModel.mockClear()

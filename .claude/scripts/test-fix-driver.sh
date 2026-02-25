@@ -41,7 +41,7 @@ OPTIONS:
                          Default: 600 (10 minutes)
   --ledger-path <PATH>   Path to the ledger JSON file. If the file does not
                          exist, the driver will initialize it via /test-analyze.
-                         Default: /tmp/test-fix-ledger-<PID>.json
+                         Default: .claude/logs/test-fix-ledger.json
   --help                 Show this help message and exit
 
 EXIT CODES:
@@ -57,7 +57,7 @@ EXAMPLES:
   .claude/scripts/test-fix-driver.sh --ledger-path /tmp/my-ledger.json --round-timeout 300
 
   # Resume from an existing ledger (crash recovery)
-  .claude/scripts/test-fix-driver.sh --ledger-path /tmp/test-fix-ledger-12345.json
+  .claude/scripts/test-fix-driver.sh --ledger-path .claude/logs/test-fix-ledger.json
 EOF
 }
 
@@ -88,11 +88,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Apply default ledger path if not specified
-if [[ -z "$LEDGER_PATH" ]]; then
-  LEDGER_PATH="/tmp/test-fix-ledger-$$.json"
-fi
-
 # ── Dependency Check ──────────────────────────────────────────────────
 check_dependencies() {
   local missing=()
@@ -122,6 +117,11 @@ check_dependencies
 
 # ── Ensure Log Directory ──────────────────────────────────────────────
 mkdir -p "$LOG_DIR"
+
+# Apply default ledger path if not specified (after LOG_DIR is created)
+if [[ -z "$LEDGER_PATH" ]]; then
+  LEDGER_PATH="$LOG_DIR/test-fix-ledger.json"
+fi
 
 # ── Signal Handling ──────────────────────────────────────────────────
 # Trap SIGINT/SIGTERM to exit gracefully after the current round completes.
@@ -345,6 +345,62 @@ increment_round() {
   echo $((current + 1)) > "$COUNTER_FILE"
 }
 
+# ── Handle Timeout: Update In-Progress Entries ────────────────────────
+# When the agent times out, any entry left in status="attempted" was being
+# worked on. Increment attempt_count, record diagnosis, and escalate if
+# max_attempts is reached (escalation_reason="timeout"), otherwise reset
+# to "discovered" for retry.
+handle_timeout() {
+  local timeout_secs="$1"
+
+  # Check for in-progress entries
+  local attempted_count
+  attempted_count=$(jq '[.entries[] | select(.status == "attempted")] | length' "$LEDGER_PATH" 2>/dev/null || echo "0")
+
+  if [[ "$attempted_count" -eq 0 ]]; then
+    echo "[TIMEOUT] No in-progress entries found — ledger unchanged"
+    return
+  fi
+
+  echo "[TIMEOUT] Found $attempted_count in-progress entry/entries — updating ledger"
+
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  local updated
+  updated=$(jq \
+    --arg now "$now" \
+    --arg msg "[TIMEOUT] Agent timed out after ${timeout_secs}s while attempting fix" \
+    '
+    .updated_at = $now |
+    .entries = [.entries[] |
+      if .status == "attempted" then
+        .attempt_count += 1 |
+        .diagnosis = $msg |
+        if .attempt_count >= .max_attempts then
+          .status = "escalated" |
+          .escalation_reason = "timeout"
+        else
+          .status = "discovered"
+        end
+      else
+        .
+      end
+    ]
+    ' "$LEDGER_PATH")
+
+  echo "$updated" > "$LEDGER_PATH"
+
+  if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
+    echo "[ERROR] Ledger corrupted during timeout handling" >&2
+    exit 2
+  fi
+
+  local escalated_count
+  escalated_count=$(jq '[.entries[] | select(.escalation_reason == "timeout")] | length' "$LEDGER_PATH")
+  echo "[TIMEOUT] $attempted_count timed-out entry/entries processed ($escalated_count escalated with reason=timeout)"
+}
+
 # ── FORCE_ESCALATE State ──────────────────────────────────────────────
 # Set all non-terminal ledger entries to status='escalated' with
 # escalation_reason='max_attempts_exceeded', then transition to REPORT.
@@ -511,7 +567,8 @@ while true; do
   if [[ "$local_exit_code" -eq 0 ]]; then
     echo "[LOOP] Agent completed successfully"
   elif [[ "$local_exit_code" -eq 124 ]]; then
-    echo "[WARN] Agent timed out after ${ROUND_TIMEOUT}s — retrying same ledger state"
+    echo "[WARN] Agent timed out after ${ROUND_TIMEOUT}s"
+    handle_timeout "$ROUND_TIMEOUT"
   else
     echo "[WARN] Agent exited with code $local_exit_code — retrying same ledger state"
   fi
