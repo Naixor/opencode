@@ -1,0 +1,264 @@
+name: Daily Upstream Dev Branch Check
+
+on:
+  schedule:
+    # 每天北京时间凌晨4点 (UTC 20:00 前一天)
+    - cron: '0 20 * * *'
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Add upstream remote & fetch
+        run: |
+          git remote add upstream https://github.com/anomalyco/opencode.git || true
+          git fetch upstream dev
+          git fetch origin master
+
+      - name: Generate diff report
+        id: diff
+        run: |
+          TOTAL=$(git rev-list master..upstream/dev --count)
+          RECENT=$(git rev-list master..upstream/dev --since='1 day ago' --count)
+
+          # ===== 基础统计 =====
+          cat > report.md << 'HEADER'
+          ## 🔍 OpenCode Upstream Dev vs Master 日报
+
+          HEADER
+
+          echo "| 指标 | 数值 |" >> report.md
+          echo "|------|------|" >> report.md
+          echo "| 累计落后 commits | ${TOTAL} |" >> report.md
+          echo "| 最近 24h 新增 | ${RECENT} |" >> report.md
+          echo "" >> report.md
+
+          # ===== 最近提交列表 =====
+          if [ "$RECENT" -gt 0 ]; then
+            echo "### 📋 最近 24h 提交" >> report.md
+            echo '```' >> report.md
+            git log master..upstream/dev --oneline --since='1 day ago' >> report.md
+            echo '```' >> report.md
+            echo "" >> report.md
+          fi
+
+          # ===== 模块影响分析 =====
+          echo "### 📦 模块影响分析" >> report.md
+          echo "" >> report.md
+          echo "| 模块 | 变更文件数 | 关键变更 |" >> report.md
+          echo "|------|-----------|---------|" >> report.md
+
+          for module in agent provider skill tool server cli/cmd cli/cmd/tui packages/app packages/desktop packages/sdk packages/plugin; do
+            COUNT=$(git diff master..upstream/dev --name-only | grep "${module}/" | wc -l)
+            if [ "$COUNT" -gt 0 ]; then
+              # 提取该模块相关的 commit message 作为关键变更摘要
+              CHANGES=$(git log master..upstream/dev --oneline --since='7 days ago' -- "*${module}/*" 2>/dev/null | head -3 | sed 's/^[a-f0-9]* //' | tr '\n' '; ' | sed 's/; $//')
+              if [ -z "$CHANGES" ]; then
+                CHANGES="(older changes)"
+              fi
+              echo "| \`${module}\` | ${COUNT} | ${CHANGES} |" >> report.md
+            fi
+          done
+          echo "" >> report.md
+
+          # ===== 功能变更分析 =====
+          echo "### 🔬 功能变更分析" >> report.md
+          echo "" >> report.md
+
+          # 新增功能
+          FEATS=$(git log master..upstream/dev --oneline --since='7 days ago' | grep -iE '^[a-f0-9]+ feat' || true)
+          if [ -n "$FEATS" ]; then
+            echo "**✨ 新增功能:**" >> report.md
+            echo "$FEATS" | while read -r line; do echo "- \`${line}\`" >> report.md; done
+            echo "" >> report.md
+          fi
+
+          # Bug 修复
+          FIXES=$(git log master..upstream/dev --oneline --since='7 days ago' | grep -iE '^[a-f0-9]+ fix' || true)
+          if [ -n "$FIXES" ]; then
+            echo "**🐛 Bug 修复:**" >> report.md
+            echo "$FIXES" | while read -r line; do echo "- \`${line}\`" >> report.md; done
+            echo "" >> report.md
+          fi
+
+          # Breaking Changes
+          BREAKING=$(git log master..upstream/dev --oneline --since='7 days ago' | grep -iE 'BREAKING|breaking.change' || true)
+          if [ -n "$BREAKING" ]; then
+            echo "**⚠️ Breaking Changes:**" >> report.md
+            echo "$BREAKING" | while read -r line; do echo "- \`${line}\`" >> report.md; done
+            echo "" >> report.md
+          fi
+
+          # 重构 / chore
+          REFACTORS=$(git log master..upstream/dev --oneline --since='7 days ago' | grep -iE '^[a-f0-9]+ (refactor|chore)' || true)
+          if [ -n "$REFACTORS" ]; then
+            echo "**🔧 重构/维护:**" >> report.md
+            echo "$REFACTORS" | while read -r line; do echo "- \`${line}\`" >> report.md; done
+            echo "" >> report.md
+          fi
+
+          # ===== API / Schema 变更检测 =====
+          echo "### 🔌 API & Schema 变更" >> report.md
+          API_CHANGES=$(git diff master..upstream/dev --name-only | grep -iE '(route|api|schema|openapi|migrate)' || true)
+          if [ -n "$API_CHANGES" ]; then
+            echo '```' >> report.md
+            echo "$API_CHANGES" >> report.md
+            echo '```' >> report.md
+          else
+            echo "无 API/Schema 文件变更" >> report.md
+          fi
+          echo "" >> report.md
+
+          # ===== 依赖变更检测 =====
+          echo "### 📎 依赖变更" >> report.md
+          PKG_CHANGED=$(git diff master..upstream/dev --name-only | grep -E 'package\.json|bun\.lock' || true)
+          if [ -n "$PKG_CHANGED" ]; then
+            echo "以下包管理文件有变更：" >> report.md
+            echo '```' >> report.md
+            echo "$PKG_CHANGED" >> report.md
+            echo '```' >> report.md
+          else
+            echo "无依赖变更" >> report.md
+          fi
+          echo "" >> report.md
+
+          # ===== 合并建议 =====
+          echo "### 💡 合并建议" >> report.md
+          echo "" >> report.md
+
+          HAS_BREAKING="false"
+          if [ -n "$BREAKING" ]; then HAS_BREAKING="true"; fi
+
+          HAS_API="false"
+          if [ -n "$API_CHANGES" ]; then HAS_API="true"; fi
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "✅ **已是最新**，无需操作。" >> report.md
+          elif [ "$HAS_BREAKING" = "true" ]; then
+            echo "⚠️ **存在 Breaking Changes**，建议仔细 review 后再合并。需关注兼容性影响。" >> report.md
+          elif [ "$HAS_API" = "true" ]; then
+            echo "⚡ **存在 API/Schema 变更**，建议尽快合并以避免冲突积累，合并后需运行 \`./script/generate.ts\` 重新生成 SDK。" >> report.md
+          elif [ "$TOTAL" -gt 100 ]; then
+            echo "🔴 **落后较多 (${TOTAL} commits)**，强烈建议尽快合并，差距越大冲突风险越高。" >> report.md
+          elif [ "$TOTAL" -gt 30 ]; then
+            echo "🟡 **落后 ${TOTAL} commits**，建议本周内安排合并。" >> report.md
+          elif [ -n "$FIXES" ]; then
+            echo "🟢 **包含 bug fix**，建议合并以获取修复。落后 ${TOTAL} commits。" >> report.md
+          else
+            echo "🟢 **变更较小 (${TOTAL} commits)**，可择机合并。" >> report.md
+          fi
+
+          echo "total=${TOTAL}" >> $GITHUB_OUTPUT
+          echo "recent=${RECENT}" >> $GITHUB_OUTPUT
+
+      - name: Build Feishu message
+        id: feishu_msg
+        run: |
+          TOTAL=$(cat $GITHUB_OUTPUT 2>/dev/null | grep total | cut -d= -f2 || git rev-list master..upstream/dev --count)
+          RECENT=$(cat $GITHUB_OUTPUT 2>/dev/null | grep recent | cut -d= -f2 || git rev-list master..upstream/dev --since='1 day ago' --count)
+
+          # 提取合并建议（report.md 最后一段）
+          ADVICE=$(tail -1 report.md | sed 's/^.*\*\*//;s/\*\*.*$//' || echo "请查看完整报告")
+
+          # 最近提交摘要（最多5条）
+          RECENT_COMMITS=$(git log master..upstream/dev --format='• %s' --since='1 day ago' | head -5 | tr '\n' '\n')
+          if [ -z "$RECENT_COMMITS" ]; then
+            RECENT_COMMITS="最近 24h 无新提交"
+          fi
+
+          # 构建飞书富文本消息 JSON
+          cat > feishu_payload.json << PAYLOAD
+          {
+            "msg_type": "interactive",
+            "card": {
+              "header": {
+                "title": {
+                  "tag": "plain_text",
+                  "content": "📊 OpenCode Upstream 日报"
+                },
+                "template": "blue"
+              },
+              "elements": [
+                {
+                  "tag": "div",
+                  "fields": [
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**累计落后**\n${TOTAL} commits"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**24h 新增**\n${RECENT} commits"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "div",
+                  "text": {
+                    "tag": "lark_md",
+                    "content": "**最近提交：**\n${RECENT_COMMITS}"
+                  }
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "div",
+                  "text": {
+                    "tag": "lark_md",
+                    "content": "**合并建议：** $(tail -1 report.md)"
+                  }
+                },
+                {
+                  "tag": "action",
+                  "actions": [
+                    {
+                      "tag": "button",
+                      "text": {
+                        "tag": "plain_text",
+                        "content": "查看完整报告"
+                      },
+                      "type": "primary",
+                      "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          PAYLOAD
+
+      - name: Send Feishu notification
+        if: env.FEISHU_WEBHOOK_URL != ''
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        run: |
+          curl -s -X POST "$FEISHU_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d @feishu_payload.json
+
+      - name: Upload report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-diff-report-${{ github.run_number }}
+          path: report.md
+          retention-days: 30
+
+      - name: Print report
+        run: cat report.md
