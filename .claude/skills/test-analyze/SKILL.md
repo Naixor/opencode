@@ -83,13 +83,22 @@ Extract failure count from the bun test summary line. Follow these steps exactly
 
 Independently count failure markers in the raw output. Follow these steps exactly:
 
-1. Count all lines in the raw output that match the pattern `^(fail)` (bun test's individual failure prefix). Use:
+**bun test failure markers vary by output mode:**
+- **Non-TTY / piped output** (what Claude's Bash tool captures): `(fail) test name [Xms]`
+- **TTY / interactive terminal**: `✗ test name [Xms]` (U+2717 BALLOT X)
+
+Check for BOTH patterns and take the maximum count to handle either mode:
+
+1. Count lines matching `^(fail)` (non-TTY format):
    ```
-   grep -c '^\(fail\)' <raw-output-file>
+   grep -c '^(fail)' <raw-output-file>
    ```
-   or equivalent regex search on the captured output.
-2. Store the result as `source_b_fail`.
-3. If `source_b_fail` differs from `source_a_fail`, this is a discrepancy — flag for `COMPLETENESS_WARNING`.
+2. Count lines matching `✗` (TTY format):
+   ```
+   grep -c '✗' <raw-output-file>
+   ```
+3. Set `source_b_fail = max(count_from_step1, count_from_step2)`.
+4. If `source_b_fail` differs from `source_a_fail`, this is a discrepancy — flag for `COMPLETENESS_WARNING`.
 
 ---
 

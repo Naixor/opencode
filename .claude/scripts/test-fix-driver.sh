@@ -64,27 +64,27 @@ EOF
 # ── Argument Parsing ──────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --max-rounds)
-      MAX_ROUNDS="$2"
-      shift 2
-      ;;
-    --round-timeout)
-      ROUND_TIMEOUT="$2"
-      shift 2
-      ;;
-    --ledger-path)
-      LEDGER_PATH="$2"
-      shift 2
-      ;;
-    --help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "ERROR: Unknown argument: $1" >&2
-      echo "Run with --help for usage information." >&2
-      exit 2
-      ;;
+  --max-rounds)
+    MAX_ROUNDS="$2"
+    shift 2
+    ;;
+  --round-timeout)
+    ROUND_TIMEOUT="$2"
+    shift 2
+    ;;
+  --ledger-path)
+    LEDGER_PATH="$2"
+    shift 2
+    ;;
+  --help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "ERROR: Unknown argument: $1" >&2
+    echo "Run with --help for usage information." >&2
+    exit 2
+    ;;
   esac
 done
 
@@ -100,10 +100,6 @@ check_dependencies() {
     missing+=("jq (JSON processor — install via: brew install jq)")
   fi
 
-  if ! command -v flock &>/dev/null; then
-    missing+=("flock (file locking — install via: brew install util-linux)")
-  fi
-
   if [[ ${#missing[@]} -gt 0 ]]; then
     echo "ERROR: Missing required dependencies:" >&2
     for dep in "${missing[@]}"; do
@@ -114,6 +110,49 @@ check_dependencies() {
 }
 
 check_dependencies
+
+# ── Portable Timeout ─────────────────────────────────────────────────
+# Detect available timeout command: GNU timeout, gtimeout (Homebrew coreutils),
+# or fall back to a pure-bash implementation using background processes.
+TIMEOUT_CMD=""
+if command -v timeout &>/dev/null; then
+  TIMEOUT_CMD="timeout"
+elif command -v gtimeout &>/dev/null; then
+  TIMEOUT_CMD="gtimeout"
+fi
+
+run_with_timeout() {
+  local secs="$1"
+  shift
+
+  if [[ -n "$TIMEOUT_CMD" ]]; then
+    "$TIMEOUT_CMD" "$secs" "$@"
+    return $?
+  fi
+
+  # Fallback: run command in background with a sleep-based watcher.
+  # If the command doesn't finish within $secs, the watcher kills it
+  # and we return 124 (matching GNU timeout's convention).
+  "$@" &
+  local cmd_pid=$!
+  (sleep "$secs" && kill "$cmd_pid" 2>/dev/null) &
+  local watcher_pid=$!
+
+  local exit_code=0
+  wait "$cmd_pid" 2>/dev/null || exit_code=$?
+
+  if kill -0 "$watcher_pid" 2>/dev/null; then
+    # Command finished before timeout — kill the watcher
+    kill "$watcher_pid" 2>/dev/null
+    wait "$watcher_pid" 2>/dev/null
+  else
+    # Watcher exited first — timeout was triggered
+    wait "$watcher_pid" 2>/dev/null
+    exit_code=124
+  fi
+
+  return "$exit_code"
+}
 
 # ── Ensure Log Directory ──────────────────────────────────────────────
 mkdir -p "$LOG_DIR"
@@ -148,25 +187,40 @@ handle_shutdown() {
 
 trap handle_shutdown SIGINT SIGTERM
 
-# ── Concurrency Safety: File Locking ─────────────────────────────────
-# Acquire an exclusive lock on a lock file derived from the ledger path.
-# If another driver instance holds the lock, exit immediately with an error.
-LOCK_FILE="${LEDGER_PATH}.lock"
+# ── Concurrency Safety: Directory-Based Locking ──────────────────────
+# Use mkdir for portable atomic locking (works on macOS and Linux).
+# mkdir is atomic on POSIX filesystems, so two concurrent mkdir calls
+# for the same path will have exactly one succeed.
+LOCK_DIR="${LEDGER_PATH}.lock"
 
-# Open the lock file on file descriptor 9
-exec 9>"$LOCK_FILE"
-
-if ! flock -n 9; then
-  echo "ERROR: Another test-fix-driver instance is already running (lock held on $LOCK_FILE)" >&2
-  echo "If you believe this is stale, remove the lock file: rm $LOCK_FILE" >&2
+acquire_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo $$ >"$LOCK_DIR/pid"
+    return 0
+  fi
+  # Lock exists — check if the owning process is still alive (stale lock detection)
+  if [[ -f "$LOCK_DIR/pid" ]]; then
+    local lock_pid
+    lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+      echo "[WARN] Removing stale lock (PID $lock_pid no longer running)" >&2
+      rm -rf "$LOCK_DIR"
+      if mkdir "$LOCK_DIR" 2>/dev/null; then
+        echo $$ >"$LOCK_DIR/pid"
+        return 0
+      fi
+    fi
+  fi
+  echo "ERROR: Another test-fix-driver instance is already running (lock: $LOCK_DIR)" >&2
+  echo "If you believe this is stale, remove the lock directory: rm -rf $LOCK_DIR" >&2
   exit 2
-fi
+}
+
+acquire_lock
 
 # Release lock and print summary on exit (normal or signal)
 cleanup() {
-  flock -u 9 2>/dev/null || true
-  exec 9>&- 2>/dev/null || true
-  rm -f "$LOCK_FILE" 2>/dev/null || true
+  rm -rf "$LOCK_DIR" 2>/dev/null || true
   print_ledger_summary
   echo "[EXIT] Driver stopped."
 }
@@ -197,8 +251,8 @@ init_ledger() {
 
   # Invoke claude with /test-analyze to get a structured failure report
   local exit_code=0
-  timeout "$ROUND_TIMEOUT" claude -p "/test-analyze --scope bun --output $raw_output" \
-    > "$report_file" 2>&1 || exit_code=$?
+  run_with_timeout "$ROUND_TIMEOUT" claude -p "/test-analyze --scope bun --output $raw_output" \
+    >"$report_file" 2>&1 || exit_code=$?
 
   if [[ $exit_code -eq 124 ]]; then
     echo "[ERROR] /test-analyze timed out after ${ROUND_TIMEOUT}s" >&2
@@ -211,6 +265,24 @@ init_ledger() {
   fi
 
   echo "[INIT] /test-analyze complete. Parsing failure report..."
+
+  # Cross-verify: count failure markers in raw bun test output as ground truth.
+  # bun test uses (fail) prefix in non-TTY/piped mode and ✗ (U+2717) in TTY mode.
+  # Take the max of both counts to handle either output format.
+  local raw_fail_count=0
+  if [[ -s "$raw_output" ]]; then
+    local count_fail_prefix count_x_marker
+    count_fail_prefix=$(grep -c '^(fail)' "$raw_output" 2>/dev/null || echo "0")
+    count_x_marker=$(grep -c '✗' "$raw_output" 2>/dev/null || echo "0")
+    if [[ "$count_fail_prefix" -ge "$count_x_marker" ]]; then
+      raw_fail_count="$count_fail_prefix"
+    else
+      raw_fail_count="$count_x_marker"
+    fi
+    echo "[INIT] Raw bun test output: $raw_fail_count failure marker(s) detected (fail-prefix=$count_fail_prefix, ✗=$count_x_marker)"
+  else
+    echo "[WARN] Raw output file not found or empty — skipping raw failure cross-verification"
+  fi
 
   # Parse failure table rows from the Markdown report.
   # Each data row matches: | <number> | <priority> | <file> | <test> | <error_type> | <message> | <source> |
@@ -257,6 +329,62 @@ init_ledger() {
       }]')
   done < <(grep -E '^\| *[0-9]' "$report_file" 2>/dev/null || true)
 
+  # Cross-check: if ✗ count > report table count, Claude missed failures — abort and warn.
+  if [[ "$raw_fail_count" -gt "$count" ]]; then
+    echo "[WARN] COMPLETENESS MISMATCH: raw output has $raw_fail_count ✗ failure(s) but report table has only $count row(s)." >&2
+    echo "[WARN] Claude may have missed failures. Re-running /test-analyze with explicit ✗ hint..." >&2
+
+    local exit_code2=0
+    run_with_timeout "$ROUND_TIMEOUT" claude -p \
+      "/test-analyze --scope bun --output $raw_output
+
+IMPORTANT: bun test marks every failing test with the ✗ character (U+2717) at the start of the line.
+The raw output at $raw_output already contains $raw_fail_count lines with ✗.
+Make sure your Failure Table has exactly $raw_fail_count rows — do NOT skip any ✗ line." \
+      >"$report_file" 2>&1 || exit_code2=$?
+
+    if [[ $exit_code2 -eq 0 ]]; then
+      # Re-parse after retry
+      entries_json="[]"
+      count=0
+      while IFS='|' read -r _ num priority file test error_type error_message source _rest; do
+        num="$(echo "$num" | xargs)"
+        priority="$(echo "$priority" | xargs)"
+        file="$(echo "$file" | xargs)"
+        test_name="$(echo "$test" | xargs)"
+        error_type="$(echo "$error_type" | xargs)"
+        [[ "$num" =~ ^[0-9]+$ ]] || continue
+        count=$((count + 1))
+        local entry_id2
+        printf -v entry_id2 "F-%03d" "$count"
+        if [[ ! "$priority" =~ ^P[0-5]$ ]]; then
+          priority="P3"
+        fi
+        entries_json=$(echo "$entries_json" | jq \
+          --arg id "$entry_id2" \
+          --arg file "$file" \
+          --arg test "$test_name" \
+          --arg priority "$priority" \
+          '. + [{
+            id: $id,
+            file: $file,
+            test: $test,
+            priority: $priority,
+            status: "discovered",
+            attempt_count: 0,
+            max_attempts: 3,
+            diagnosis: null,
+            fix_applied: null,
+            escalation_reason: null,
+            modified_files: []
+          }]')
+      done < <(grep -E '^\| *[0-9]' "$report_file" 2>/dev/null || true)
+      echo "[INIT] Retry complete: $count failure(s) parsed after re-run"
+    else
+      echo "[WARN] Retry /test-analyze failed with code $exit_code2 — proceeding with $count entries from first run" >&2
+    fi
+  fi
+
   # Build the full ledger JSON
   local session_id
   session_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
@@ -275,7 +403,7 @@ init_ledger() {
       updated_at: $updated_at,
       initial_failure_count: $initial_failure_count,
       entries: $entries
-    }' > "$LEDGER_PATH"
+    }' >"$LEDGER_PATH"
 
   # Validate the generated ledger is valid JSON
   if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
@@ -287,7 +415,7 @@ init_ledger() {
   echo "[INIT] Ledger written to $LEDGER_PATH"
 
   # Initialize round counter to 0
-  echo "0" > "$COUNTER_FILE"
+  echo "0" >"$COUNTER_FILE"
   echo "[INIT] Round counter initialized at $COUNTER_FILE"
 }
 
@@ -303,7 +431,7 @@ if [[ -f "$LEDGER_PATH" ]]; then
 
   # Ensure round counter exists (may have been lost if driver was killed)
   if [[ ! -f "$COUNTER_FILE" ]]; then
-    echo "0" > "$COUNTER_FILE"
+    echo "0" >"$COUNTER_FILE"
     echo "[INIT] Round counter missing — reinitialized to 0"
   fi
 
@@ -342,7 +470,7 @@ read_round() {
 increment_round() {
   local current
   current=$(read_round)
-  echo $((current + 1)) > "$COUNTER_FILE"
+  echo $((current + 1)) >"$COUNTER_FILE"
 }
 
 # ── Handle Timeout: Update In-Progress Entries ────────────────────────
@@ -389,7 +517,7 @@ handle_timeout() {
     ]
     ' "$LEDGER_PATH")
 
-  echo "$updated" > "$LEDGER_PATH"
+  echo "$updated" >"$LEDGER_PATH"
 
   if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
     echo "[ERROR] Ledger corrupted during timeout handling" >&2
@@ -425,7 +553,7 @@ force_escalate() {
     ]
     ' "$LEDGER_PATH")
 
-  echo "$updated" > "$LEDGER_PATH"
+  echo "$updated" >"$LEDGER_PATH"
 
   # Validate the updated ledger
   if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
@@ -447,8 +575,8 @@ generate_report() {
   local report_log="$LOG_DIR/test-fix-report.log"
 
   local exit_code=0
-  timeout "$ROUND_TIMEOUT" claude -p "/test-fix-report --ledger $LEDGER_PATH" \
-    > "$report_log" 2>&1 || exit_code=$?
+  run_with_timeout "$ROUND_TIMEOUT" claude -p "/test-fix-report --ledger $LEDGER_PATH" \
+    >"$report_log" 2>&1 || exit_code=$?
 
   if [[ $exit_code -eq 124 ]]; then
     echo "[WARN] /test-fix-report timed out after ${ROUND_TIMEOUT}s — report may be incomplete" >&2
@@ -547,9 +675,12 @@ while true; do
   # the handler in the parent. This ensures the Agent is NOT killed
   # mid-round when the user presses Ctrl+C.
   trap '' SIGINT SIGTERM
-  timeout "$ROUND_TIMEOUT" claude -p "/test-fix-round --ledger $LEDGER_PATH" \
-    > "$local_log_file" 2>&1 &
+  claude -p "/test-fix-round --ledger $LEDGER_PATH" \
+    >"$local_log_file" 2>&1 &
   agent_pid=$!
+  # Timeout watcher: kills the agent after ROUND_TIMEOUT seconds
+  (sleep "$ROUND_TIMEOUT" && kill "$agent_pid" 2>/dev/null) &
+  watcher_pid=$!
   trap 'handle_shutdown' SIGINT SIGTERM
 
   # Wait for agent completion — re-wait if interrupted by a signal
@@ -563,6 +694,17 @@ while true; do
     # If agent is still running (wait was interrupted by signal), re-wait
     kill -0 "$agent_pid" 2>/dev/null || break
   done
+
+  # Clean up timeout watcher and detect whether timeout occurred
+  if kill -0 "$watcher_pid" 2>/dev/null; then
+    # Watcher still alive → agent finished before timeout
+    kill "$watcher_pid" 2>/dev/null
+    wait "$watcher_pid" 2>/dev/null
+  else
+    # Watcher exited first → timeout was triggered
+    wait "$watcher_pid" 2>/dev/null
+    local_exit_code=124
+  fi
 
   if [[ "$local_exit_code" -eq 0 ]]; then
     echo "[LOOP] Agent completed successfully"
