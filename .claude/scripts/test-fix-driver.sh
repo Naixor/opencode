@@ -457,6 +457,75 @@ count_terminal() {
   jq '[.entries[] | select(.status == "fixed" or .status == "escalated")] | length' "$LEDGER_PATH"
 }
 
+# ── Helper: Add New Failures From a Report File ────────────────────────
+# Parses the Failure Table rows in a Markdown report and appends any failure
+# not already tracked in the ledger as a new "discovered" entry.
+# Prints the number of new entries added to stdout.
+add_failures_from_report() {
+  local report_file="$1"
+  local new_count=0
+
+  while IFS='|' read -r _ num priority file test _rest; do
+    num="$(echo "$num" | xargs)"
+    priority="$(echo "$priority" | xargs)"
+    file="$(echo "$file" | xargs)"
+    test_name="$(echo "$test" | xargs)"
+
+    # Only process data rows (num must be an integer)
+    [[ "$num" =~ ^[0-9]+$ ]] || continue
+
+    # Skip if already tracked in ledger (match by file + test name)
+    local exists
+    exists=$(jq \
+      --arg f "$file" \
+      --arg t "$test_name" \
+      '[.entries[] | select(.file == $f and .test == $t)] | length' \
+      "$LEDGER_PATH")
+    [[ "$exists" -gt 0 ]] && continue
+
+    # Compute next sequential ID
+    local last_num next_id
+    last_num=$(jq -r '[.entries[].id | capture("F-(?P<n>[0-9]+)") | .n | tonumber] | max // 0' "$LEDGER_PATH")
+    printf -v next_id "F-%03d" $((last_num + 1))
+
+    if [[ ! "$priority" =~ ^P[0-5]$ ]]; then
+      priority="P3"
+    fi
+
+    local now
+    now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+    local updated
+    updated=$(jq \
+      --arg id "$next_id" \
+      --arg f "$file" \
+      --arg t "$test_name" \
+      --arg priority "$priority" \
+      --arg now "$now" \
+      '
+      .updated_at = $now |
+      .entries += [{
+        id: $id,
+        file: $f,
+        test: $t,
+        priority: $priority,
+        status: "discovered",
+        attempt_count: 0,
+        max_attempts: 3,
+        diagnosis: null,
+        fix_applied: null,
+        escalation_reason: null,
+        modified_files: []
+      }]
+      ' "$LEDGER_PATH")
+
+    echo "$updated" >"$LEDGER_PATH"
+    new_count=$((new_count + 1))
+  done < <(grep -E '^\| *[0-9]' "$report_file" 2>/dev/null || true)
+
+  echo "$new_count"
+}
+
 # ── Helper: Read Round Counter ───────────────────────────────────────
 read_round() {
   if [[ -f "$COUNTER_FILE" ]]; then
@@ -600,6 +669,7 @@ echo "[LOOP] Starting fix loop..."
 
 stale_rounds=0
 MAX_STALE_ROUNDS=3
+FINAL_CHECK_DONE=0
 
 while true; do
   local_round=$(read_round)
@@ -610,7 +680,41 @@ while true; do
 
   # Termination: all entries are terminal
   if [[ "$local_remaining" -eq 0 ]]; then
-    echo "[LOOP] All ledger entries are terminal — transitioning to REPORT"
+    if [[ "$FINAL_CHECK_DONE" -eq 0 ]]; then
+      echo "[FINAL_CHECK] All known failures resolved — running full suite to catch any missed failures..."
+      final_output="$LOG_DIR/test-fix-final-check.txt"
+      bun test --cwd "$PROJECT_ROOT/packages/opencode" >"$final_output" 2>&1 || true
+
+      local_fc_a=$(grep -c '^(fail)' "$final_output" 2>/dev/null || echo "0")
+      local_fc_b=$(grep -c '✗' "$final_output" 2>/dev/null || echo "0")
+      final_fail_count=$(( local_fc_a > local_fc_b ? local_fc_a : local_fc_b ))
+      echo "[FINAL_CHECK] Full suite: $final_fail_count failure(s)"
+
+      if [[ "$final_fail_count" -eq 0 ]]; then
+        FINAL_CHECK_DONE=1
+        echo "[FINAL_CHECK] Suite is clean — proceeding to REPORT"
+      else
+        echo "[FINAL_CHECK] $final_fail_count new failure(s) detected — invoking /test-analyze to catalog them..."
+        final_analyze_log="$LOG_DIR/test-fix-final-analyze.log"
+        local_fc_ec=0
+        run_with_timeout "$ROUND_TIMEOUT" claude -p \
+          "/test-analyze --scope bun --output $final_output" \
+          >"$final_analyze_log" 2>&1 || local_fc_ec=$?
+
+        if [[ "$local_fc_ec" -eq 0 ]]; then
+          local_new_count=$(add_failures_from_report "$final_analyze_log")
+          echo "[FINAL_CHECK] $local_new_count new failure(s) added to ledger — continuing fix loop"
+        else
+          echo "[WARN] /test-analyze failed (code $local_fc_ec) — skipping final check to avoid infinite loop" >&2
+          FINAL_CHECK_DONE=1
+        fi
+
+        # Whether we added entries or hit an error, re-evaluate at top of loop
+        continue
+      fi
+    fi
+
+    echo "[LOOP] All ledger entries are terminal and suite is clean — transitioning to REPORT"
     generate_report
     # Determine exit code: 0 if all fixed, 1 if any escalated
     local_escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
