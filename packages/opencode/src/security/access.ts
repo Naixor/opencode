@@ -9,6 +9,32 @@ import fs from "fs"
 export namespace SecurityAccess {
   const log = Log.create({ service: "security-access" })
 
+  let projectRoot: string | undefined
+
+  /**
+   * Set the project root directory used to normalize absolute paths
+   * to relative paths before matching against security rules/allowlist patterns.
+   * Must be called during bootstrap (after Instance.directory is available).
+   */
+  export function setProjectRoot(root: string) {
+    projectRoot = path.resolve(root)
+  }
+
+  /**
+   * Normalize a file path to be relative to the project root.
+   * If the path is absolute and starts with projectRoot, strips the prefix.
+   * Otherwise returns the path as-is.
+   */
+  function normalizePath(filePath: string): string {
+    if (!projectRoot) return filePath
+    const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(filePath)
+    if (resolved.startsWith(projectRoot + "/")) {
+      return resolved.slice(projectRoot.length + 1)
+    }
+    if (resolved === projectRoot) return ""
+    return filePath
+  }
+
   export interface AccessResult {
     allowed: boolean
     reason?: string
@@ -39,7 +65,7 @@ export namespace SecurityAccess {
 
     // Check each rule against all parent paths and the file itself
     for (const rule of config.rules) {
-      const normalizedPattern = rule.pattern.replace(/\\/g, "/")
+      const normalizedPattern = normalizePath(rule.pattern).replace(/\\/g, "/")
 
       // Check for direct match on the file path
       if (matchPath(normalizedPath, normalizedPattern, rule.type)) {
@@ -107,17 +133,17 @@ export namespace SecurityAccess {
    * - More restrictive child rules take precedence over inherited rules
    * - Less restrictive child rules do NOT override parent restrictions
    */
-  export function checkAccess(
-    filePath: string,
-    operation: SecuritySchema.Operation,
-    role: string,
-  ): AccessResult {
+  export function checkAccess(filePath: string, operation: SecuritySchema.Operation, role: string): AccessResult {
     const config = SecurityConfig.getSecurityConfig()
 
     // Resolve symbolic links before checking access
     const resolved = resolveSymlink(filePath)
     const pathToCheck = resolved?.realPath ?? filePath
     const isSymlink = resolved?.isSymlink ?? false
+
+    // Normalize to relative paths for pattern matching against rules/allowlist
+    const relativePathToCheck = normalizePath(pathToCheck)
+    const relativeFilePath = normalizePath(filePath)
 
     // 1. Check deny rules first — deny always wins
     if (config.rules && config.rules.length > 0) {
@@ -126,10 +152,10 @@ export namespace SecurityAccess {
 
       // If path is a symlink, check both the symlink path and the target path
       // Access is denied if either the symlink itself or its target is protected
-      const pathsToCheck = isSymlink ? [filePath, pathToCheck] : [pathToCheck]
+      const pathsToCheck = isSymlink ? [relativeFilePath, relativePathToCheck] : [relativePathToCheck]
 
       for (const checkPath of pathsToCheck) {
-        const isTargetPath = isSymlink && checkPath === pathToCheck && checkPath !== filePath
+        const isTargetPath = isSymlink && checkPath === relativePathToCheck && checkPath !== relativeFilePath
 
         // Get all applicable rules including inherited ones
         const inheritedRules = getInheritanceChain(checkPath)
@@ -156,6 +182,7 @@ export namespace SecurityAccess {
 
           log.debug("access denied", {
             path: filePath,
+            relativePath: relativeFilePath,
             operation,
             role,
             rule: rule.pattern,
@@ -173,8 +200,9 @@ export namespace SecurityAccess {
       }
     }
 
-    // 2. Allowlist only applies to 'llm' operations
-    if (operation !== "llm") {
+    // 2. Allowlist applies to 'llm' AND 'read' operations
+    // This ensures LLM tools (Read, Glob, Grep) cannot access files outside the allowlist
+    if (operation !== "llm" && operation !== "read") {
       return { allowed: true }
     }
 
@@ -184,22 +212,24 @@ export namespace SecurityAccess {
     }
 
     // 4. Check file against every allowlist layer (AND across layers, OR within entries)
-    // Use resolved (real) path for allowlist matching
-    const normalizedPath = pathToCheck.replace(/\\/g, "/")
+    // Use normalized relative path for allowlist matching
+    const normalizedPath = relativePathToCheck.replace(/\\/g, "/")
 
     for (const layer of config.resolvedAllowlist) {
       const matched = layer.entries.some((entry) => {
-        const normalizedPattern = entry.pattern.replace(/\\/g, "/")
+        const normalizedPattern = normalizePath(entry.pattern).replace(/\\/g, "/")
         return matchPath(normalizedPath, normalizedPattern, entry.type)
       })
 
       if (!matched) {
+        const displayPath = relativeFilePath || filePath
         const reason =
-          `Access denied: file '${filePath}' is not in the allowlist defined in '${layer.source}'. ` +
-          `Add a matching entry to the allowlist, e.g.: { "pattern": "${path.dirname(filePath).replace(/\\/g, "/")}/**", "type": "directory" }`
+          `Access denied: file '${displayPath}' is not in the allowlist defined in '${layer.source}'. ` +
+          `Add a matching entry to the allowlist, e.g.: { "pattern": "${path.dirname(displayPath).replace(/\\/g, "/")}/**", "type": "directory" }`
 
         log.debug("access denied by allowlist", {
           path: filePath,
+          relativePath: relativeFilePath,
           operation,
           role,
           layer: layer.source,
@@ -236,11 +266,11 @@ export namespace SecurityAccess {
     const config = SecurityConfig.getSecurityConfig()
     if (config.resolvedAllowlist.length === 0) return []
 
-    const normalizedPath = filePath.replace(/\\/g, "/")
+    const normalizedPath = normalizePath(filePath).replace(/\\/g, "/")
 
     return config.resolvedAllowlist.map((layer) => {
       for (const entry of layer.entries) {
-        const normalizedPattern = entry.pattern.replace(/\\/g, "/")
+        const normalizedPattern = normalizePath(entry.pattern).replace(/\\/g, "/")
         if (matchPath(normalizedPath, normalizedPattern, entry.type)) {
           return { layer, matched: true, matchedPattern: entry.pattern }
         }
@@ -301,8 +331,10 @@ export namespace SecurityAccess {
       }
 
       // Also check glob match
-      return minimatch(normalizedPath, normalizedPattern, { matchBase: true }) ||
+      return (
+        minimatch(normalizedPath, normalizedPattern, { matchBase: true }) ||
         minimatch(normalizedPath, `${normalizedPattern}/**`, { matchBase: true })
+      )
     }
 
     // For file rules, match directly

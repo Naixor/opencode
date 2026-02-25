@@ -14,6 +14,7 @@ import { ShareNext } from "@/share/share-next"
 import { Snapshot } from "../snapshot"
 import { Truncate } from "../tool/truncation"
 import { SecurityConfig } from "../security/config"
+import { SecurityAccess } from "../security/access"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
@@ -27,6 +28,7 @@ export async function InstanceBootstrap() {
   Vcs.init()
   Snapshot.init()
   Truncate.init()
+  SecurityAccess.setProjectRoot(Instance.directory)
   await SecurityConfig.loadSecurityConfig(Instance.directory)
 
   Bus.subscribe(Command.Event.Executed, async (payload) => {

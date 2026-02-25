@@ -136,10 +136,10 @@ describe("CASE-AL-004: Deny rule overrides allowlist — deny always wins", () =
 })
 
 // ---------------------------------------------------------------------------
-// CASE-AL-005: read and write operations unaffected by allowlist
+// CASE-AL-005: read operations enforced by allowlist, write bypasses
 // ---------------------------------------------------------------------------
-describe("CASE-AL-005: Read and write operations bypass allowlist", () => {
-  test("read allowed even if file not in allowlist", async () => {
+describe("CASE-AL-005: Read operations enforced by allowlist, write bypasses", () => {
+  test("read denied if file not in allowlist", async () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
       allowlist: [{ pattern: "src/**", type: "directory" }],
@@ -147,6 +147,17 @@ describe("CASE-AL-005: Read and write operations bypass allowlist", () => {
     await setupSecurityConfig(config)
 
     const result = SecurityAccess.checkAccess("test/foo.ts", "read", "developer")
+    expect(result.allowed).toBe(false)
+  })
+
+  test("read allowed if file is in allowlist", async () => {
+    const config: SecuritySchema.SecurityConfig = {
+      version: "1.0",
+      allowlist: [{ pattern: "src/**", type: "directory" }],
+    }
+    await setupSecurityConfig(config)
+
+    const result = SecurityAccess.checkAccess("src/foo.ts", "read", "developer")
     expect(result.allowed).toBe(true)
   })
 
@@ -180,14 +191,14 @@ describe("CASE-AL-006: Empty allowlist denies all llm operations", () => {
     expect(result.allowed).toBe(false)
   })
 
-  test("empty allowlist still allows read and write", async () => {
+  test("empty allowlist blocks read but allows write", async () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
       allowlist: [],
     }
     await setupSecurityConfig(config)
 
-    expect(SecurityAccess.checkAccess("src/foo.ts", "read", "developer").allowed).toBe(true)
+    expect(SecurityAccess.checkAccess("src/foo.ts", "read", "developer").allowed).toBe(false)
     expect(SecurityAccess.checkAccess("src/foo.ts", "write", "developer").allowed).toBe(true)
   })
 })
@@ -395,15 +406,9 @@ describe("CASE-AL-011: Two-layer allowlist — AND across layers", () => {
     fs.mkdirSync(childDir, { recursive: true })
 
     // Parent has allowlist: src/**
-    fs.writeFileSync(
-      path.join(parentDir, ".opencode-security.json"),
-      JSON.stringify(parentConfig, null, 2),
-    )
+    fs.writeFileSync(path.join(parentDir, ".opencode-security.json"), JSON.stringify(parentConfig, null, 2))
     // Child has allowlist: src/** + test/**
-    fs.writeFileSync(
-      path.join(childDir, ".opencode-security.json"),
-      JSON.stringify(childConfig, null, 2),
-    )
+    fs.writeFileSync(path.join(childDir, ".opencode-security.json"), JSON.stringify(childConfig, null, 2))
     // .git at parent level
     fs.mkdirSync(path.join(parentDir, ".git"), { recursive: true })
 
@@ -449,14 +454,8 @@ describe("CASE-AL-012: Child config cannot expand parent allowlist", () => {
     const childDir = path.join(dir, "subproject")
     fs.mkdirSync(childDir, { recursive: true })
 
-    fs.writeFileSync(
-      path.join(parentDir, ".opencode-security.json"),
-      JSON.stringify(parentConfig, null, 2),
-    )
-    fs.writeFileSync(
-      path.join(childDir, ".opencode-security.json"),
-      JSON.stringify(childConfig, null, 2),
-    )
+    fs.writeFileSync(path.join(parentDir, ".opencode-security.json"), JSON.stringify(parentConfig, null, 2))
+    fs.writeFileSync(path.join(childDir, ".opencode-security.json"), JSON.stringify(childConfig, null, 2))
     fs.mkdirSync(path.join(parentDir, ".git"), { recursive: true })
 
     await SecurityConfig.loadSecurityConfig(childDir)
@@ -492,14 +491,8 @@ describe("CASE-AL-013: Single-layer allowlist scenarios", () => {
     const childDir = path.join(dir, "subproject")
     fs.mkdirSync(childDir, { recursive: true })
 
-    fs.writeFileSync(
-      path.join(parentDir, ".opencode-security.json"),
-      JSON.stringify(parentConfig, null, 2),
-    )
-    fs.writeFileSync(
-      path.join(childDir, ".opencode-security.json"),
-      JSON.stringify(childConfig, null, 2),
-    )
+    fs.writeFileSync(path.join(parentDir, ".opencode-security.json"), JSON.stringify(parentConfig, null, 2))
+    fs.writeFileSync(path.join(childDir, ".opencode-security.json"), JSON.stringify(childConfig, null, 2))
     fs.mkdirSync(path.join(parentDir, ".git"), { recursive: true })
 
     await SecurityConfig.loadSecurityConfig(childDir)
@@ -533,14 +526,8 @@ describe("CASE-AL-013: Single-layer allowlist scenarios", () => {
     const childDir = path.join(dir, "subproject")
     fs.mkdirSync(childDir, { recursive: true })
 
-    fs.writeFileSync(
-      path.join(parentDir, ".opencode-security.json"),
-      JSON.stringify(parentConfig, null, 2),
-    )
-    fs.writeFileSync(
-      path.join(childDir, ".opencode-security.json"),
-      JSON.stringify(childConfig, null, 2),
-    )
+    fs.writeFileSync(path.join(parentDir, ".opencode-security.json"), JSON.stringify(parentConfig, null, 2))
+    fs.writeFileSync(path.join(childDir, ".opencode-security.json"), JSON.stringify(childConfig, null, 2))
     fs.mkdirSync(path.join(parentDir, ".git"), { recursive: true })
 
     await SecurityConfig.loadSecurityConfig(childDir)
@@ -603,9 +590,7 @@ describe("CASE-AL-014: Multi-level config loading via findSecurityConfigs + merg
       allowlist: [{ pattern: "src/**", type: "directory" }],
     }
 
-    const merged = SecurityConfig.mergeSecurityConfigs([
-      { config, path: "/repo/.opencode-security.json" },
-    ])
+    const merged = SecurityConfig.mergeSecurityConfigs([{ config, path: "/repo/.opencode-security.json" }])
 
     expect(merged.resolvedAllowlist.length).toBe(1)
     expect(merged.resolvedAllowlist[0].source).toBe("/repo/.opencode-security.json")
