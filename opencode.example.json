@@ -1,0 +1,809 @@
+{
+  // ============================================================================
+  // opencode.json 完整配置示例（含 omo 内置合并后的所有字段）
+  //
+  // 说明：
+  //   - opencode 支持 JSONC 格式（允许注释），文件名可以是 opencode.json 或 opencode.jsonc
+  //   - 所有字段均为可选，只需配置你需要覆盖默认值的部分
+  //   - 标记 [omo] 的字段为 oh-my-opencode 合并后新增的字段
+  //   - 标记 [opencode] 的字段为 opencode 原生已有的字段
+  // ============================================================================
+
+  "$schema": "https://opencode.ai/config.json",
+
+  // ============================================================================
+  // 基础设置
+  // ============================================================================
+
+  // [opencode] 界面主题
+  "theme": "opencode",
+
+  // [opencode] 日志级别: "debug" | "info" | "warn" | "error"
+  "logLevel": "info",
+
+  // [opencode] 自定义用户名，在会话中显示
+  "username": "my-username",
+
+  // [opencode] 自动更新: true 自动更新, false 禁用, "notify" 仅通知
+  "autoupdate": "notify",
+
+  // [opencode] 分享行为: "manual" 手动, "auto" 自动, "disabled" 禁用
+  "share": "manual",
+
+  // [opencode] 是否启用快照
+  "snapshot": false,
+
+  // ============================================================================
+  // TUI (终端 UI) 设置
+  // ============================================================================
+
+  // [opencode] 终端 UI 特定配置
+  "tui": {
+    // 滚动速度
+    "scroll_speed": 3,
+    // 滚动加速度
+    "scroll_acceleration": 1.5,
+    // diff 展示样式
+    "diff_style": "unified"
+  },
+
+  // ============================================================================
+  // Server 设置 (opencode serve / web 命令)
+  // ============================================================================
+
+  // [opencode] 服务端配置
+  "server": {
+    "port": 9321,
+    "hostname": "localhost",
+    // mDNS 发现
+    "mdns": false,
+    "mdnsDomain": "opencode.local",
+    // 跨域
+    "cors": true
+  },
+
+  // ============================================================================
+  // 模型 & Provider 配置
+  // ============================================================================
+
+  // [opencode] 默认主模型，格式: "provider/model"
+  "model": "anthropic/claude-opus-4-6",
+
+  // [opencode] 轻量模型，用于标题生成等小任务
+  "small_model": "anthropic/claude-haiku-4-5",
+
+  // [opencode] 默认使用的主 Agent，必须是 primary 模式的 agent
+  "default_agent": "sisyphus",
+
+  // [opencode] 禁用自动加载的 provider
+  "disabled_providers": [
+    // "openrouter",
+    // "azure"
+  ],
+
+  // [opencode] 白名单模式: 设置后只启用列出的 provider，其余全部忽略
+  // "enabled_providers": ["anthropic", "openai", "google"],
+
+  // [opencode] Provider 配置 — 自定义 provider 选项和模型定义
+  "provider": {
+    // Anthropic provider 示例
+    "anthropic": {
+      // provider 内的模型白名单/黑名单
+      "whitelist": ["claude-opus-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"],
+      // "blacklist": ["claude-2"],
+
+      "options": {
+        // API Key（建议使用环境变量 ANTHROPIC_API_KEY，而非写在配置中）
+        // "apiKey": "sk-ant-...",
+
+        // 自定义 baseURL（私有化部署场景）
+        // "baseURL": "https://my-proxy.example.com/v1",
+
+        // 请求超时 (ms)，默认 300000 (5分钟)，设为 false 禁用超时
+        "timeout": 300000,
+
+        // 启用 promptCacheKey（prompt 缓存）
+        "setCacheKey": true
+      }
+    },
+
+    // Google provider 示例 — 含自定义模型定义
+    "google": {
+      "models": {
+        "gemini-3-pro": {
+          "name": "Gemini 3 Pro",
+          "limit": {
+            "context": 1048576,
+            "output": 65535
+          },
+          "modalities": {
+            "input": ["text", "image", "pdf"],
+            "output": ["text"]
+          },
+          // 模型的变体（variant）定义 — 控制 thinking level 等
+          "variants": {
+            "low": { "thinkingLevel": "low" },
+            "high": { "thinkingLevel": "high" }
+          }
+        },
+        "gemini-3-flash": {
+          "name": "Gemini 3 Flash",
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "modalities": {
+            "input": ["text", "image", "pdf"],
+            "output": ["text"]
+          },
+          "variants": {
+            "minimal": { "thinkingLevel": "minimal" },
+            "low": { "thinkingLevel": "low" },
+            "medium": { "thinkingLevel": "medium" },
+            "high": { "thinkingLevel": "high" }
+          }
+        }
+      }
+    },
+
+    // GitHub Copilot provider 示例
+    "github-copilot": {
+      "options": {
+        // GitHub Enterprise URL（企业版场景）
+        // "enterpriseUrl": "https://github.my-company.com"
+      }
+    },
+
+    // 自定义 OpenAI-compatible provider 示例
+    "my-custom-provider": {
+      "models": {
+        "my-local-model": {
+          "name": "My Local LLM",
+          "limit": {
+            "context": 32768,
+            "output": 4096
+          }
+        }
+      },
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+        "apiKey": "ollama"
+      }
+    }
+  },
+
+  // ============================================================================
+  // Agent 配置
+  //
+  // Agent 分为三类:
+  //   - primary: 用户直接交互的顶层 agent（sisyphus, build, plan）
+  //   - subagent: 被顶层 agent 委派调用的子 agent（explore, oracle 等）
+  //   - all: 两种模式均可
+  //
+  // 可选 Agent（optional）需要 options.enabled: true 来显式启用
+  // ============================================================================
+
+  "agent": {
+
+    // -----------------------------------------------------------------------
+    // Primary Agents（主 Agent）
+    // -----------------------------------------------------------------------
+
+    // Sisyphus — 主编排 Agent，负责任务规划、委派和直接执行
+    "sisyphus": {
+      // [opencode] 使用的模型，格式 "provider/model"
+      "model": "anthropic/claude-opus-4-6",
+
+      // [opencode] 模型变体（如 thinking level），对应 provider 中 variants 定义的 key
+      "variant": "max",
+
+      // [opencode] 温度参数 (0-2)，越低越确定性，越高越随机
+      "temperature": 0.1,
+
+      // [opencode] top_p 采样参数 (0-1)
+      // "top_p": 0.95,
+
+      // [opencode] 替换整个系统 prompt（谨慎使用，会覆盖内置 prompt）
+      // "prompt": "You are a custom orchestrator...",
+
+      // [omo] 追加到系统 prompt 尾部（推荐，不破坏原有 prompt）
+      // "prompt_append": "\n\nAdditional custom instructions for sisyphus...",
+
+      // [omo] 思考/推理控制 — 精细控制模型的 thinking 行为
+      "thinking": {
+        "type": "enabled",                 // "enabled" | "disabled"
+        "budgetTokens": 32768              // thinking token 预算
+      },
+
+      // [omo] 推理强度: "low" | "medium" | "high" | "xhigh"
+      // 用于支持 reasoningEffort 参数的模型（如 OpenAI o-series）
+      // "reasoningEffort": "high",
+
+      // [omo] 输出详细程度: "low" | "medium" | "high"
+      // "textVerbosity": "medium",
+
+      // [omo] 最大输出 token 数
+      // "maxTokens": 64000,
+
+      // [opencode] 最大 agentic 迭代步数（超出后强制文本响应）
+      // "steps": 50,
+
+      // [opencode] Agent 描述
+      // "description": "Primary orchestration agent",
+
+      // [opencode] 模式: "primary" | "subagent" | "all"
+      // "mode": "primary",
+
+      // [opencode] 颜色: hex (#FF5733) 或 主题色 (primary/secondary/accent/success/warning/error/info)
+      // "color": "#7C3AED",
+
+      // [opencode] 从 @ 自动补全菜单中隐藏
+      // "hidden": false,
+
+      // [opencode] 权限覆盖（精细控制 agent 的工具和文件访问权限）
+      "permission": {
+        "question": "allow",
+        "plan_enter": "allow"
+        // "*": "allow",
+        // "edit": { "*": "allow", "*.lock": "deny" },
+        // "bash": "allow",
+        // "external_directory": { "*": "ask" }
+      },
+
+      // [omo] 模型降级链 — 当首选模型不可用时的备选方案
+      // 按顺序尝试，直到找到可用的 provider + model
+      "fallback": [
+        { "model": "opencode/kimi-k2.5-free" },
+        { "model": "opencode/glm-4.7-free" }
+      ],
+
+      // [omo] 传给底层 provider SDK 的额外参数
+      // "providerOptions": {}
+
+      // [opencode] 通用选项桶（agent 特定的杂项配置）
+      "options": {}
+    },
+
+    // Build — 全权限构建 Agent，无自定义 prompt，使用 provider 默认行为
+    "build": {
+      // "model": "anthropic/claude-sonnet-4-5",
+      // "temperature": 0.1,
+      "permission": {
+        "question": "allow",
+        "plan_enter": "allow"
+      }
+    },
+
+    // Plan — 规划模式 Agent，禁止所有编辑操作（只读）
+    "plan": {
+      // "model": "anthropic/claude-opus-4-6",
+      // 注意: plan agent 的 edit 权限默认被 deny，仅允许写入 .opencode/plans/*.md
+    },
+
+    // -----------------------------------------------------------------------
+    // Built-in Sub-agents（内置子 Agent，默认可用）
+    // -----------------------------------------------------------------------
+
+    // General — 通用多步任务执行 Agent
+    "general": {
+      // "model": "anthropic/claude-sonnet-4-5"
+      // 默认禁止 todoread/todowrite
+    },
+
+    // Explore — 快速代码库探索 Agent（只读：grep, glob, read, bash）
+    "explore": {
+      "model": "anthropic/claude-haiku-4-5",
+      "fallback": [
+        { "model": "github-copilot/grok-code-fast-1" },
+        { "model": "opencode/gpt-5-nano" }
+      ]
+    },
+
+    // OmO-Explore — 高级探索 Agent，额外支持 LSP + AST-grep
+    "omo-explore": {
+      // "model": "anthropic/claude-haiku-4-5"
+      // 权限: grep, glob, list, bash, read, lsp, ast_grep_search, webfetch, websearch, codesearch
+    },
+
+    // Oracle — 战略顾问 Agent，专攻疑难调试和架构决策（只读）
+    "oracle": {
+      "model": "opencode/gpt-5.2",
+      "variant": "high",
+      "temperature": 0.1,
+      "reasoningEffort": "high",
+      "fallback": [
+        { "model": "google/gemini-3-pro" },
+        { "model": "anthropic/claude-opus-4-6" }
+      ]
+    },
+
+    // -----------------------------------------------------------------------
+    // Optional Agents（可选 Agent，需要 options.enabled: true 显式启用）
+    // -----------------------------------------------------------------------
+
+    // Hephaestus — 全权限构建子 Agent，专注深度实现任务
+    "hephaestus": {
+      "options": { "enabled": true },
+      "model": "opencode/gpt-5.3-codex",
+      "variant": "medium",
+      "reasoningEffort": "medium"
+    },
+
+    // Prometheus — 战略规划 Agent（启用后替换 plan agent）
+    //   工作流: 访谈 → Metis 预分析 → 方案生成 → Momus 审查 → .opencode/plans/
+    "prometheus": {
+      "options": { "enabled": true },
+      "model": "anthropic/claude-opus-4-6",
+      "variant": "max",
+      "temperature": 0.1,
+      "fallback": [
+        { "model": "opencode/kimi-k2.5-free" },
+        { "model": "opencode/gpt-5.2" }
+      ]
+    },
+
+    // Atlas — 多 Agent 编排总指挥，通过 task() 协调多个 Agent 并行工作
+    "atlas": {
+      "options": { "enabled": true },
+      "model": "opencode/kimi-k2.5-free",
+      "fallback": [
+        { "model": "anthropic/claude-sonnet-4-5" },
+        { "model": "opencode/gpt-5.2" }
+      ]
+    },
+
+    // Librarian — 文档与知识检索 Agent（只读，擅长 gh CLI / websearch / context7）
+    "librarian": {
+      "options": { "enabled": true },
+      "model": "opencode/glm-4.7-free",
+      "fallback": [
+        { "model": "anthropic/claude-sonnet-4-5" }
+      ]
+    },
+
+    // Metis — 前置规划顾问，评估意图和权衡方案（只读）
+    "metis": {
+      "options": { "enabled": true },
+      "model": "anthropic/claude-opus-4-6",
+      "variant": "max",
+      "temperature": 0.3,
+      "fallback": [
+        { "model": "opencode/kimi-k2.5-free" },
+        { "model": "opencode/gpt-5.2" }
+      ]
+    },
+
+    // Momus — 代码审查 Agent，聚焦质量、正确性和最佳实践（只读）
+    "momus": {
+      "options": { "enabled": true },
+      "model": "opencode/gpt-5.2",
+      "variant": "medium",
+      "fallback": [
+        { "model": "anthropic/claude-opus-4-6" },
+        { "model": "google/gemini-3-pro" }
+      ]
+    },
+
+    // Multimodal-Looker — 多模态分析 Agent，处理图片/截图/PDF/图表（只读）
+    "multimodal-looker": {
+      "options": { "enabled": true },
+      "model": "google/gemini-3-flash",
+      "fallback": [
+        { "model": "opencode/gpt-5.2" },
+        { "model": "opencode/glm-4.6v" }
+      ]
+    },
+
+    // Sisyphus-Junior — 轻量执行 Agent，不能再委派子任务（禁止 task()）
+    "sisyphus-junior": {
+      "options": { "enabled": true }
+      // 无需单独配置 model，由 delegate_task 的 category 参数决定使用的模型
+    },
+
+    // -----------------------------------------------------------------------
+    // Internal Agents（内部 Agent，通常不需要手动配置）
+    // -----------------------------------------------------------------------
+
+    // Title — 会话标题生成（hidden, 仅系统内部使用）
+    "title": {
+      // "temperature": 0.5
+    },
+
+    // Summary — 会话摘要生成（hidden）
+    // "summary": {},
+
+    // Compaction — 上下文窗口压缩（hidden）
+    // "compaction": {},
+
+    // -----------------------------------------------------------------------
+    // 禁用 Agent
+    // -----------------------------------------------------------------------
+
+    // 方式一: 在 agent 内设置 disable: true
+    // "some-agent": { "disable": true },
+
+    // 方式二 [omo]: 顶层数组批量禁用
+    // "disabled_agents": ["atlas", "momus"]
+  },
+
+  // ============================================================================
+  // Task Categories（任务类别）
+  //
+  // 当通过 delegate_task / task 委派任务时，可以指定 category 来自动路由到
+  // 最合适的模型。Category 与 subagent_type 互斥（二选一）。
+  //
+  // 用户定义的 category 会与内置默认值合并（用户配置覆盖同名默认值）。
+  // ============================================================================
+
+  "categories": {
+
+    // 前端/UI 相关任务
+    "visual-engineering": {
+      "description": "UI/UX implementation, frontend components, styling, layout work",
+      "model": "google/gemini-3-pro"
+      // [omo] "variant": "high"
+    },
+
+    // 最强推理能力 — 复杂架构决策、高难度调试
+    "ultrabrain": {
+      "description": "Complex reasoning, architecture decisions, hard debugging requiring deep analysis",
+      "model": "opencode/gpt-5.3-codex",
+      // [omo] category 级别的 variant 支持
+      "variant": "xhigh",
+      // [omo] category 级别的推理强度控制
+      "reasoningEffort": "high"
+    },
+
+    // 深度探索 — 全面分析、大规模重构
+    "deep": {
+      "description": "Deep codebase exploration, thorough analysis, comprehensive refactoring",
+      "model": "opencode/gpt-5.3-codex",
+      "variant": "medium"
+    },
+
+    // 创意写作 — 文案、命名、prompt 工程
+    "artistry": {
+      "description": "Creative writing, documentation, naming, prompt engineering",
+      "model": "google/gemini-3-pro",
+      "variant": "high"
+    },
+
+    // 快速简单任务 — 小修改、查询、格式化
+    "quick": {
+      "description": "Fast, simple tasks: small edits, lookups, formatting, trivial fixes",
+      "model": "anthropic/claude-haiku-4-5"
+    },
+
+    // 写作 — 文档、README、注释、changelog
+    "writing": {
+      "description": "Documentation, README, comments, technical writing, changelogs",
+      "model": "google/gemini-3-flash"
+    },
+
+    // 通用低复杂度任务
+    "unspecified-low": {
+      "description": "General tasks with low complexity — no specific category, use cheap/fast model",
+      "model": "anthropic/claude-sonnet-4-5"
+    },
+
+    // 通用高复杂度任务
+    "unspecified-high": {
+      "description": "General tasks with high complexity — no specific category, use capable model",
+      "model": "anthropic/claude-opus-4-6",
+      "variant": "max"
+    },
+
+    // [omo] 每个 category 还支持以下扩展字段:
+    // "temperature": 0.3,
+    // "top_p": 0.95,
+    // "maxTokens": 64000,
+    // "thinking": { "type": "enabled", "budgetTokens": 16384 },
+    // "textVerbosity": "medium",
+    // "tools": { "bash": true, "write": false },  // 针对此类别的工具开关
+    // "prompt_append": "...",                       // 追加 prompt 指令
+    // "disable": false,                             // 禁用此 category
+
+    // 你也可以定义自己的 category:
+    "my-custom-category": {
+      "description": "Custom task category for my specific workflow",
+      "model": "anthropic/claude-sonnet-4-5",
+      "prompt_append": "Focus on clean, idiomatic code with comprehensive error handling."
+    }
+  },
+
+  // ============================================================================
+  // Background Task（后台任务管理器）
+  // ============================================================================
+
+  // [opencode] 后台任务配置 — 控制通过 delegate_task(run_in_background=true) 创建的任务
+  "background_task": {
+    // 最大并发后台任务数（默认 3）
+    "defaultConcurrency": 3,
+
+    // 按 provider 设置并发上限
+    "providerConcurrency": {
+      "anthropic": 5,
+      "opencode": 3,
+      "google": 4
+    },
+
+    // 按模型设置并发上限
+    "modelConcurrency": {
+      "anthropic/claude-opus-4-6": 2
+    },
+
+    // 任务超时检测（ms），默认 180000 (3分钟)
+    "staleTimeoutMs": 180000,
+
+    // 会话退出时是否保持后台任务运行（默认 false）
+    "persist_on_exit": false
+  },
+
+  // ============================================================================
+  // MCP Servers (Model Context Protocol)
+  // ============================================================================
+
+  // [opencode] MCP 服务器配置
+  "mcp": {
+
+    // 本地 stdio 模式的 MCP server
+    "my-local-mcp": {
+      "command": ["node", "/path/to/mcp-server/index.js"],
+      "args": ["--port", "3000"],
+      "env": {
+        "MCP_API_KEY": "..."
+      }
+    },
+
+    // 远程 HTTP 模式的 MCP server
+    "my-remote-mcp": {
+      "url": "https://mcp.example.com/v1",
+      "headers": {
+        "Authorization": "Bearer ..."
+      }
+    },
+
+    // 禁用某个已配置的 MCP server
+    "some-mcp-to-disable": {
+      "enabled": false
+    }
+  },
+
+  // [opencode] 禁用内置 MCP server（即使它们的 API key 可用）
+  "disabled_mcps": [
+    // "context7",
+    // "grep-app",
+    // "websearch"
+  ],
+
+  // ============================================================================
+  // Plugins（插件）
+  // ============================================================================
+
+  // [opencode] 插件列表 — npm 包名@版本 或 file:// 路径
+  "plugin": [
+    // "opencode-anthropic-auth@0.0.13",   // 内置插件（默认自动加载）
+    // "my-custom-plugin@latest",
+    // "file:///path/to/local/plugin"
+  ],
+  // 注意: omo 内置后不再需要在此处声明 oh-my-opencode 插件
+
+  // ============================================================================
+  // Permissions（权限系统）
+  //
+  // 全局权限配置，适用于所有 agent（各 agent 自己的 permission 字段会覆盖此处）
+  // action: "allow" | "deny" | "ask"
+  // ============================================================================
+
+  // [opencode] 全局权限配置
+  "permission": {
+    // 工具权限
+    "bash": "allow",
+    "edit": "allow",
+    "write": "allow",
+    "read": {
+      "*": "allow",
+      "*.env": "ask",          // .env 文件需要确认
+      "*.env.*": "ask",
+      "*.env.example": "allow"
+    },
+    "grep": "allow",
+    "glob": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+
+    // Agent 循环卡住时的提示
+    "doom_loop": "ask",
+
+    // 访问工作目录外的文件
+    "external_directory": {
+      "*": "ask"
+    }
+  },
+
+  // [opencode] 工具级开关（全局禁用/启用）
+  // "tools": {
+  //   "webfetch": true,
+  //   "websearch": true
+  // },
+
+  // ============================================================================
+  // Hooks（钩子系统）
+  //
+  // 控制各种行为钩子的启用/禁用
+  // [opencode] 原生 hooks + [omo] 合并后的 hooks
+  // ============================================================================
+
+  "hooks": {
+    // [omo] Ralph Loop — Agent 循环卡住时自动恢复继续
+    "ralph-loop":                  { "enabled": true },
+
+    // [omo] Session Recovery — 会话错误自动恢复
+    "session-recovery":            { "enabled": true },
+
+    // [omo] Rules Injector — 自动注入 AGENTS.md / CLAUDE.md 规则文件
+    "rules-injector":              { "enabled": true },
+
+    // [omo] Todo Continuation — 确保 Todo 列表被持续推进
+    "todo-continuation-enforcer":  { "enabled": true },
+
+    // [omo] Auto Update Checker — 检查插件更新
+    "auto-update-checker":         { "enabled": false },
+
+    // [omo] Keyword Detector — 意图检测
+    "keyword-detector":            { "enabled": true },
+
+    // [omo] Anthropic Context Window Limit Recovery — Anthropic 上下文窗口超限恢复
+    "anthropic-context-window-limit-recovery": { "enabled": true },
+
+    // [omo] Atlas Orchestrator Hooks — 多 Agent 编排相关
+    "atlas":                       { "enabled": true },
+
+    // [omo] Claude Code Hooks Bridge — Claude Code 兼容桥
+    "claude-code-hooks":           { "enabled": true }
+  },
+
+  // ============================================================================
+  // Instructions（额外指令文件）
+  //
+  // 加载额外的指令/规则文件，注入到系统 prompt 中
+  // 支持: 文件路径, glob 模式, URL
+  // ============================================================================
+
+  // [opencode] 指令文件列表
+  "instructions": [
+    // 相对路径（相对项目根目录）
+    // "AGENTS.md",
+    // ".opencode/instructions.md",
+
+    // Glob 模式
+    // ".opencode/rules/*.md",
+
+    // URL（运行时拉取）
+    // "https://example.com/team-coding-standards.md"
+  ],
+
+  // ============================================================================
+  // Skills（技能系统）
+  // ============================================================================
+
+  // [opencode] 额外的 skill 文件夹路径
+  "skills": {
+    "paths": [
+      // ".opencode/skills",
+      // "/shared/team-skills"
+    ]
+  },
+
+  // ============================================================================
+  // Commands（自定义命令）
+  // ============================================================================
+
+  // [opencode] 自定义斜杠命令
+  "command": {
+    "my-review": {
+      "template": "Review the changes in the current branch against main. Focus on correctness and edge cases.",
+      "description": "Review current branch changes",
+      "agent": "sisyphus",
+      // "model": "anthropic/claude-opus-4-6",
+      "subtask": false
+    },
+    "my-test": {
+      "template": "Run the test suite and fix any failures: $ARGUMENTS",
+      "description": "Run tests and fix failures"
+    }
+  },
+
+  // ============================================================================
+  // Compaction（上下文压缩）
+  // ============================================================================
+
+  // [opencode] 上下文压缩配置
+  "compaction": {
+    // 上下文窗口满时自动压缩（默认 true）
+    "auto": true,
+    // 裁剪旧的工具输出（默认 true）
+    "prune": true
+  },
+
+  // ============================================================================
+  // Notification（通知）
+  // ============================================================================
+
+  // [opencode] 任务完成通知配置
+  "notification": {
+    // 启用通知（默认 true）
+    "enabled": true,
+    // 通知声音（默认 true）
+    "sound": true
+  },
+
+  // ============================================================================
+  // Formatter & LSP
+  // ============================================================================
+
+  // [opencode] 代码格式化器配置
+  "formatter": {
+    "prettier": {
+      "command": ["npx", "prettier", "--write"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".json", ".css"]
+    },
+    "black": {
+      "command": ["black"],
+      "extensions": [".py"]
+    }
+    // 设为 false 禁用所有格式化: "formatter": false
+  },
+
+  // [opencode] LSP 服务器配置
+  "lsp": {
+    "typescript": {
+      "command": ["typescript-language-server", "--stdio"],
+      "extensions": [".ts", ".tsx"],
+      "env": {},
+      "initialization": {}
+    }
+    // 设为 false 禁用所有 LSP: "lsp": false
+    // 禁用单个: "typescript": { "disabled": true }
+  },
+
+  // ============================================================================
+  // File Watcher
+  // ============================================================================
+
+  // [opencode] 文件监视器配置
+  "watcher": {
+    // 忽略的路径模式
+    "ignore": [
+      "node_modules",
+      ".git",
+      "dist",
+      "build"
+    ]
+  },
+
+  // ============================================================================
+  // Experimental（实验性功能）
+  // ============================================================================
+
+  // [opencode] 实验性功能开关
+  "experimental": {
+    // 批量工具调用
+    "batch_tool": false,
+
+    // OpenTelemetry 追踪
+    "openTelemetry": false,
+
+    // 仅主 agent 可用的工具列表
+    // "primary_tools": ["persistent_task"],
+
+    // 工具调用被拒绝时继续 agent 循环
+    "continue_loop_on_deny": false,
+
+    // MCP 请求超时 (ms)
+    "mcp_timeout": 30000,
+
+    // 禁用粘贴摘要
+    "disable_paste_summary": false
+  }
+}
