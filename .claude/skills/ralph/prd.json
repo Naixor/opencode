@@ -1,0 +1,249 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/test-fix-workflow",
+  "description": "Universal Test Fix Workflow - AI Agent-driven automated test failure diagnosis and fix system with ledger tracking, shell driver, and structured reporting",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create /test-analyze skill directory and prompt file",
+      "description": "As a developer, I need the skill scaffold so that /test-analyze can be invoked in Claude Code.",
+      "acceptanceCriteria": [
+        "Create .claude/skills/test-analyze/ directory",
+        "Create .claude/skills/test-analyze/SKILL.md with skill metadata: name, trigger phrases, description",
+        "SKILL.md instructs the agent to run bun test, parse output, and produce a structured failure report",
+        "SKILL.md defines --scope (bun|e2e|all), --file <path>, --output <path> arguments",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Implement dual verification logic in /test-analyze skill",
+      "description": "As an AI Agent, I need the skill prompt to include dual verification instructions so that zero failures are missed.",
+      "acceptanceCriteria": [
+        "SKILL.md includes step-by-step instructions for Source A extraction (bun summary line N fail)",
+        "SKILL.md includes step-by-step instructions for Source B extraction (grep -c '^(fail)' count)",
+        "SKILL.md includes arithmetic check instruction (pass + fail + skip = total)",
+        "SKILL.md includes silent skip check instruction (compare test files on disk vs files in output)",
+        "SKILL.md instructs agent to emit COMPLETENESS_WARNING if any check fails",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add error classification and priority assignment to /test-analyze",
+      "description": "As an AI Agent, I need the skill to classify each failure by type and assign priority so that fixes can be ordered correctly.",
+      "acceptanceCriteria": [
+        "SKILL.md defines 5 error_type categories with pattern matching rules: compile, runtime, assertion, timeout, environment",
+        "SKILL.md defines P0-P5 priority assignment rules based on error_type and source location",
+        "SKILL.md defines correlation grouping: multiple tests failing from same source file are grouped together",
+        "SKILL.md specifies the structured record format: file, test, error_type, error_message, stack_trace, source_file, source_line, priority",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Define /test-analyze Markdown report output format",
+      "description": "As an AI Agent, I need the skill to output a standardized Markdown report so that downstream tools can consume it.",
+      "acceptanceCriteria": [
+        "SKILL.md defines report template with Summary section (total/pass/fail/skip, dual-verification status)",
+        "SKILL.md defines Failure Table section (sorted by priority, grouped by correlation)",
+        "SKILL.md defines Per-File Breakdown section (test files with failure counts)",
+        "SKILL.md defines Silent Skip Warnings section",
+        "SKILL.md includes raw output file path in the report",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Create ledger JSON schema and initialization logic",
+      "description": "As a developer, I need the ledger schema defined so that all components agree on the data format.",
+      "acceptanceCriteria": [
+        "Create .claude/schemas/test-fix-ledger.schema.json with JSON Schema for the ledger",
+        "Schema defines entry fields: id, file, test, priority, status, attempt_count, max_attempts, diagnosis, fix_applied, escalation_reason, modified_files",
+        "Schema defines status enum: discovered, attempted, fixed, escalated",
+        "Schema defines escalation_reason enum: design_decision, external_dependency, flaky, circular_regression, max_attempts_exceeded, out_of_scope",
+        "Schema defines top-level fields: session_id, created_at, updated_at, initial_failure_count, entries[]",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Create /test-fix-round skill scaffold",
+      "description": "As an AI Agent, I need the single-round fix skill so that each invocation performs exactly one fix cycle.",
+      "acceptanceCriteria": [
+        "Create .claude/skills/test-fix-round/ directory",
+        "Create .claude/skills/test-fix-round/SKILL.md with skill metadata",
+        "SKILL.md defines --ledger <path> argument as required",
+        "SKILL.md instructs agent to read ledger, select ONE highest-priority discovered entry, and fix it",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Add diagnosis logic to /test-fix-round skill",
+      "description": "As an AI Agent, I need the fix round skill to include diagnosis instructions so that root causes are correctly identified.",
+      "acceptanceCriteria": [
+        "SKILL.md includes step: read failing test file and understand describe/test block intent",
+        "SKILL.md includes step: locate source file and line from stack trace",
+        "SKILL.md includes step: read source code and compare expected vs actual behavior",
+        "SKILL.md includes decision tree: source bug -> fix source, API change -> adapt, test bug -> fix test with comment, env issue -> fix setup",
+        "SKILL.md requires following CLAUDE.md code conventions when fixing source code",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Add ledger update logic to /test-fix-round skill",
+      "description": "As an AI Agent, I need the fix round skill to update the ledger after each fix so that state is persisted.",
+      "acceptanceCriteria": [
+        "SKILL.md includes step: after fix, run /test-analyze --file <path> for targeted verification",
+        "SKILL.md includes step: if test passes, update ledger entry status to 'fixed' with modified_files",
+        "SKILL.md includes step: if test still fails, increment attempt_count; escalate if attempt_count >= 3",
+        "SKILL.md includes step: run /test-analyze --scope all for regression check",
+        "SKILL.md includes step: if new failures found, add them as new 'discovered' entries in ledger",
+        "SKILL.md includes step: write updated ledger to disk as final action before exit",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Create test-fix-driver.sh shell script scaffold",
+      "description": "As a developer, I need the outer loop driver script so that the workflow survives Agent crashes and runs to completion.",
+      "acceptanceCriteria": [
+        "Create .claude/scripts/test-fix-driver.sh with executable permissions",
+        "Script accepts --max-rounds (default 10), --round-timeout (default 600), --ledger-path arguments",
+        "Script prints usage help with --help flag",
+        "Script checks for required dependencies: claude CLI, jq, flock",
+        "Script creates .claude/logs/ directory if it does not exist",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Created .claude/scripts/test-fix-driver.sh with executable permissions. Script accepts --max-rounds, --round-timeout, --ledger-path arguments with proper defaults. --help prints usage. Dependency check validates claude CLI, jq, and flock are installed. Creates .claude/logs/ directory. Typecheck passes."
+    },
+    {
+      "id": "US-010",
+      "title": "Implement driver INIT state: ledger initialization",
+      "description": "As a developer, I need the driver to initialize the ledger on first run using /test-analyze output.",
+      "acceptanceCriteria": [
+        "If ledger file does not exist, driver invokes claude -p '/test-analyze --scope bun --output <temp-file>'",
+        "Driver parses the /test-analyze output and creates initial ledger JSON with all entries in 'discovered' status",
+        "Driver writes ledger to the configured ledger-path",
+        "Driver initializes round counter file to 0",
+        "If ledger already exists, driver skips initialization and proceeds to LOOP",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Implemented INIT state in test-fix-driver.sh. If ledger doesn't exist, invokes claude -p '/test-analyze --scope bun --output <temp>' and parses the Markdown failure table rows to create initial ledger JSON with all entries in 'discovered' status. Writes ledger to configured path and initializes round counter file to 0. If ledger already exists, validates JSON and prints status summary. Typecheck passes."
+    },
+    {
+      "id": "US-011",
+      "title": "Implement driver LOOP state: round invocation with timeout",
+      "description": "As a developer, I need the driver to invoke the Agent per round with timeout enforcement.",
+      "acceptanceCriteria": [
+        "Driver reads ledger and counts non-terminal entries (status != fixed and status != escalated)",
+        "If count = 0, driver transitions to REPORT state",
+        "If round > max-rounds, driver transitions to FORCE_ESCALATE state",
+        "Otherwise, driver invokes: timeout <round-timeout> claude -p '/test-fix-round --ledger <path>'",
+        "Agent stdout/stderr redirected to .claude/logs/test-fix-round-<N>.log",
+        "On success (exit 0): increment round counter, loop",
+        "On timeout (exit 124): log warning, loop (retry same ledger state)",
+        "On crash (other exit): log warning, loop (retry same ledger state)",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Implemented LOOP state in test-fix-driver.sh. Added helper functions: count_non_terminal (jq query for non-terminal entries), read_round/increment_round (counter file management). The while-true loop reads ledger, checks termination conditions (count=0 → REPORT, round>=max → FORCE_ESCALATE), then invokes claude -p with timeout. Agent output redirected to per-round log files. Exit code handling: 0=success, 124=timeout, other=crash — all increment round counter and loop. Placeholder functions for FORCE_ESCALATE and REPORT (US-012). Typecheck passes."
+    },
+    {
+      "id": "US-012",
+      "title": "Implement driver FORCE_ESCALATE and REPORT states",
+      "description": "As a developer, I need the driver to force-escalate remaining failures and generate the final report.",
+      "acceptanceCriteria": [
+        "FORCE_ESCALATE: use jq to set all non-terminal ledger entries to status='escalated', escalation_reason='max_attempts_exceeded'",
+        "FORCE_ESCALATE: write updated ledger, then transition to REPORT",
+        "REPORT: invoke claude -p '/test-fix-report --ledger <path>' to generate final Markdown report",
+        "Driver exits with code 0 if all entries are 'fixed'",
+        "Driver exits with code 1 if any entries are 'escalated'",
+        "Driver exits with code 2 on internal error",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Implemented FORCE_ESCALATE and REPORT states in test-fix-driver.sh. force_escalate() uses jq to set all non-terminal entries to status='escalated' with escalation_reason='max_attempts_exceeded', validates ledger integrity after write. generate_report() invokes claude -p '/test-fix-report --ledger <path>' with timeout, prints ledger summary. Exit codes: 0 if all fixed, 1 if any escalated, 2 on internal error. Typecheck passes."
+    },
+    {
+      "id": "US-013",
+      "title": "Add staleness detection to driver",
+      "description": "As a developer, I need the driver to detect when no progress is being made so that it stops wasting resources.",
+      "acceptanceCriteria": [
+        "Before each round, driver records count of terminal entries (fixed + escalated)",
+        "After each round, driver compares new terminal count with previous",
+        "If terminal count did not increase, increment stale_rounds counter",
+        "If terminal count increased, reset stale_rounds to 0",
+        "If stale_rounds >= 3, driver transitions to FORCE_ESCALATE",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Added staleness detection to test-fix-driver.sh. New count_terminal() helper function. stale_rounds counter initialized to 0 before the loop. Before each round, terminal count is recorded; after each round, it's compared. If no increase, stale_rounds increments. If stale_rounds >= 3, transitions to FORCE_ESCALATE. Also refactored increment_round to be called once after the if/elif/else exit code block (was duplicated in all three branches). Typecheck passes."
+    },
+    {
+      "id": "US-014",
+      "title": "Add signal handling and concurrency safety to driver",
+      "description": "As a developer, I need the driver to handle interrupts gracefully and prevent concurrent runs.",
+      "acceptanceCriteria": [
+        "Driver acquires flock on ledger file at startup; exits with error if lock already held",
+        "Driver traps SIGINT and SIGTERM: sets a flag to exit after current round completes",
+        "On graceful exit, driver releases flock and prints current ledger status summary",
+        "Driver does not kill Agent mid-round on SIGINT — waits for completion",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Added signal handling and concurrency safety to test-fix-driver.sh. flock on ${LEDGER_PATH}.lock with non-blocking acquire (exits with error if already held). SIGINT/SIGTERM trapped via handle_shutdown() which sets SHUTDOWN_REQUESTED flag. Agent invocation uses signal-safe pattern: temporarily set 'ignore' disposition before forking so child inherits it, then restore handler in parent + re-wait loop. Cleanup EXIT trap releases flock, removes lock file, prints ledger summary. Typecheck passes."
+    },
+    {
+      "id": "US-015",
+      "title": "Create /test-fix-report skill for final report generation",
+      "description": "As an AI Agent, I need a skill to generate the final fix report from the ledger so that the developer gets a clear summary.",
+      "acceptanceCriteria": [
+        "Create .claude/skills/test-fix-report/ directory",
+        "Create .claude/skills/test-fix-report/SKILL.md with skill metadata",
+        "SKILL.md defines --ledger <path> argument as required",
+        "SKILL.md instructs agent to read ledger and generate Markdown report with: Summary, Fixes Applied table, Escalated Failures table, Iteration History, Changes by File",
+        "SKILL.md instructs agent to verify ledger integrity: fixed + escalated = initial_failure_count",
+        "SKILL.md instructs agent to save report to tasks/test-fix-report.md",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Created .claude/skills/test-fix-report/ directory and SKILL.md. Skill defines --ledger <path> argument as required. Instructs agent to: read ledger, verify integrity (no-orphan check + arithmetic invariant), generate Markdown report with Summary, Fixes Applied, Escalated Failures, Iteration History, Changes by File sections (+ conditional Orphaned Entries), verify fixed+escalated=initial_failure_count, and save to tasks/test-fix-report.md. Typecheck passes."
+    }
+  ]
+}

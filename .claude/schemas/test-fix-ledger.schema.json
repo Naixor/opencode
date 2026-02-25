@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "test-fix-ledger.schema.json",
+  "title": "Test Fix Ledger",
+  "description": "Tracks the state of test failures through the automated test-fix workflow. Each entry represents a single test failure progressing through discovery, diagnosis, fix attempts, and resolution.",
+  "type": "object",
+  "required": ["session_id", "created_at", "updated_at", "initial_failure_count", "entries"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Unique identifier for this test-fix session (UUID v4)"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the ledger was created"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the last ledger update"
+    },
+    "initial_failure_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of test failures discovered in the initial /test-analyze run"
+    },
+    "entries": {
+      "type": "array",
+      "description": "List of test failure entries tracked by the ledger",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["id", "file", "test", "priority", "status", "attempt_count", "max_attempts"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this entry (e.g., 'F-001')"
+        },
+        "file": {
+          "type": "string",
+          "description": "Path to the test file containing the failure"
+        },
+        "test": {
+          "type": "string",
+          "description": "Full test name including describe block (e.g., 'describe > test name')"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["P0", "P1", "P2", "P3", "P4", "P5"],
+          "description": "Priority level assigned by /test-analyze (P0 = highest)"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["discovered", "attempted", "fixed", "escalated"],
+          "description": "Current status of this failure entry"
+        },
+        "attempt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of fix attempts made so far"
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Maximum fix attempts before auto-escalation"
+        },
+        "diagnosis": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Root cause diagnosis from the fix agent"
+        },
+        "fix_applied": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Description of the fix that was applied"
+        },
+        "escalation_reason": {
+          "type": ["string", "null"],
+          "enum": [
+            "design_decision",
+            "external_dependency",
+            "flaky",
+            "circular_regression",
+            "max_attempts_exceeded",
+            "out_of_scope",
+            "timeout",
+            null
+          ],
+          "default": null,
+          "description": "Reason for escalation if status is 'escalated'"
+        },
+        "modified_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of file paths modified to fix this failure"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

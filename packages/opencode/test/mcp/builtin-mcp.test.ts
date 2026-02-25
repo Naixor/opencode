@@ -1,21 +1,24 @@
-import { describe, expect, test, beforeEach, mock } from "bun:test"
-
-// Mock SecurityConfig before importing BuiltinMcp
-let mockMcpPolicy = "trusted"
-mock.module("../../src/security/config", () => ({
-  SecurityConfig: {
-    getMcpPolicy: mock((serverName: string) => mockMcpPolicy),
-    getSecurityConfig: mock(() => ({})),
-    loadSecurityConfig: mock(() => ({})),
-    resetConfig: mock(() => {}),
-  },
-}))
-
+import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test"
+import { SecurityConfig } from "../../src/security/config"
 import { BuiltinMcp } from "../../src/mcp/builtin"
+
+let mockMcpPolicy = "trusted"
+const spies: Array<ReturnType<typeof spyOn>> = []
 
 describe("BuiltinMcp", () => {
   beforeEach(() => {
     mockMcpPolicy = "trusted"
+    spies.push(
+      spyOn(SecurityConfig, "getMcpPolicy").mockImplementation(() => mockMcpPolicy as "trusted" | "enforced" | "blocked"),
+      spyOn(SecurityConfig, "getSecurityConfig").mockImplementation(() => ({ version: "1.0", roles: [], rules: [] })),
+      spyOn(SecurityConfig, "loadSecurityConfig").mockImplementation(async () => ({ version: "1.0", roles: [], rules: [] })),
+      spyOn(SecurityConfig, "resetConfig").mockImplementation(() => {}),
+    )
+  })
+
+  afterEach(() => {
+    spies.forEach((s) => s.mockRestore())
+    spies.length = 0
   })
 
   test("all 3 servers have valid configs", () => {
