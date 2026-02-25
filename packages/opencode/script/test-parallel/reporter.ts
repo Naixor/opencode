@@ -24,6 +24,7 @@ export const printSummary = (results: WorkerResult[], wallTime: number, config: 
 
   console.log("")
   console.log("─".repeat(60))
+  if (config.shard) console.log(`Shard:   ${config.shard.index}/${config.shard.total}`)
   console.log(`Files:   ${results.length}`)
   console.log(`Pass:    ${totalPass}`)
   console.log(`Fail:    ${totalFail}`)

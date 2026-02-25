@@ -22,4 +22,5 @@ export interface RunnerConfig {
   verbose: boolean
   pattern?: string
   reporter?: "json" | "junit"
+  shard?: { index: number; total: number }
 }

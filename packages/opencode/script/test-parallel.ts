@@ -20,6 +20,7 @@ if (args.includes("--help") || args.includes("-h")) {
       "  --pattern <glob>             Filter test files by glob pattern",
       "  --timeout N                  Per-file timeout in seconds (default: 60)",
       "  --reporter json|junit        Write test-results.json or test-results.xml",
+      "  --shard N/M                  Run shard N of M (env: TEST_SHARD_INDEX/TEST_SHARD_TOTAL)",
       "  --silent                     Suppress per-file output",
       "  --verbose                    Enable verbose output",
       "  --stop-on-failure            Stop after first failing file",
@@ -47,7 +48,23 @@ const silent = args.includes("--silent")
 const verbose = args.includes("--verbose")
 const stopOnFailure = args.includes("--stop-on-failure")
 
-const config: RunnerConfig = { maxWorkers, timeout, stopOnFailure, silent, verbose, pattern, reporter }
+const rawShard =
+  getArg("--shard") ??
+  (process.env.TEST_SHARD_INDEX && process.env.TEST_SHARD_TOTAL
+    ? `${process.env.TEST_SHARD_INDEX}/${process.env.TEST_SHARD_TOTAL}`
+    : undefined)
+
+const parseShard = (raw: string | undefined) => {
+  if (!raw) return undefined
+  const parts = raw.split("/")
+  const index = parseInt(parts[0], 10)
+  const total = parseInt(parts[1], 10)
+  return Number.isNaN(index) || Number.isNaN(total) ? undefined : { index, total }
+}
+
+const shard = parseShard(rawShard)
+
+const config: RunnerConfig = { maxWorkers, timeout, stopOnFailure, silent, verbose, pattern, reporter, shard }
 
 const testDir = resolve(import.meta.dir, "../test")
 const timingPath = resolve(import.meta.dir, "../.test-timing.json")
@@ -56,9 +73,10 @@ const reportsDir = resolve(import.meta.dir, "../test-results")
 const timing = await readTiming(timingPath)
 const files = discoverFiles(testDir, pattern)
 const queue = buildQueue(files, timing)
+const sharded = shard ? queue.filter((_, i) => i % shard.total === shard.index - 1) : queue
 
 const wallStart = Date.now()
-const results = await runAll(queue, config, (result, index, total) => {
+const results = await runAll(sharded, config, (result, index, total) => {
   printFileResult(result, index, total, config)
 })
 const wallTime = Date.now() - wallStart
