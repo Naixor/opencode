@@ -1,0 +1,494 @@
+{
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/session-lifecycle.test.ts": {
+    "avg": 5063.466899999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/hook-chain.test.ts": {
+    "avg": 5139.830999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/error-recovery.test.ts": {
+    "avg": 5234.3919,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/output-management.test.ts": {
+    "avg": 5397.585,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/context-injection.test.ts": {
+    "avg": 5610.7020999999995,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/detection-checking.test.ts": {
+    "avg": 6256.9491,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/mcp/oauth-browser.test.ts": {
+    "avg": 6312.4392,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/sisyphus.test.ts": {
+    "avg": 7022.7961,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/agent-enforcement.test.ts": {
+    "avg": 3443.255,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/llm-parameters.test.ts": {
+    "avg": 3375.46,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/retry.test.ts": {
+    "avg": 8110.347199999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/llm.test.ts": {
+    "avg": 5049.6440999999995,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/skill/builtin-skills.test.ts": {
+    "avg": 9266.8721,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/skill/skill.test.ts": {
+    "avg": 9415.2011,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/omo-explore.test.ts": {
+    "avg": 4794.3411,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/apply_patch.test.ts": {
+    "avg": 9712.454,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/optional-agents.test.ts": {
+    "avg": 5377.732999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/compaction.test.ts": {
+    "avg": 4695.622899999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/memory/abort-leak.test.ts": {
+    "avg": 10691.215,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/persistent-task.test.ts": {
+    "avg": 3469.9368999999997,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/background/categories.test.ts": {
+    "avg": 4780.717,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/skill-enhanced.test.ts": {
+    "avg": 11034.1401,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/config/omo-config.test.ts": {
+    "avg": 4428.151,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/registry.test.ts": {
+    "avg": 4080.3540999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/prompt-variant.test.ts": {
+    "avg": 3785.0541999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/revert-compact.test.ts": {
+    "avg": 2536.0231999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/background/manager.test.ts": {
+    "avg": 2650.7149999999997,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/permission-task.test.ts": {
+    "avg": 3581.7877,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/oracle.test.ts": {
+    "avg": 3687.1218999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/access-guard-integration.test.ts": {
+    "avg": 3803.8580999999995,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/optional-agents-batch2.test.ts": {
+    "avg": 3191.6227999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/provider/provider.test.ts": {
+    "avg": 1782.5674,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/look-at.test.ts": {
+    "avg": 3750.4741999999997,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/plugin/auth-override.test.ts": {
+    "avg": 3701.0941,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/hooks/hooks-bench.test.ts": {
+    "avg": 2404.0640999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/acp/event-subscription.test.ts": {
+    "avg": 3398.1259999999993,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/skill.test.ts": {
+    "avg": 2352.4291,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/server/session-list.test.ts": {
+    "avg": 2805.22,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/optional-agents-batch3.test.ts": {
+    "avg": 3131.048,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/bash.test.ts": {
+    "avg": 14014.317299999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/session.test.ts": {
+    "avg": 2052.3678999999997,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/config/agent-color.test.ts": {
+    "avg": 1775.0893999999998,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/lsp/client.test.ts": {
+    "avg": 1602.9770999999998,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/mcp/headers.test.ts": {
+    "avg": 1763.8811999999998,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/server/session-select.test.ts": {
+    "avg": 1870.0039,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/integration/security-audit-integration.test.ts": {
+    "avg": 1419.6848,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/instruction.test.ts": {
+    "avg": 1898.0560999999998,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/integration/context-injection-security.test.ts": {
+    "avg": 1358.7081999999998,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/interactive-bash.test.ts": {
+    "avg": 1328.7241,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/delegate-task.test.ts": {
+    "avg": 15135.353299999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/provider/gitlab-duo.test.ts": {
+    "avg": 1081.1446999999998,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/permission/next.test.ts": {
+    "avg": 1232.1390999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/question/question.test.ts": {
+    "avg": 1523.1839,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/lsp-tools.test.ts": {
+    "avg": 1480.8501999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/glob.test.ts": {
+    "avg": 1650.5770999999997,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/lsp-tools-extended.test.ts": {
+    "avg": 2231.5771,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/skill-subagent-bypass.test.ts": {
+    "avg": 439.73589999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/grep.test.ts": {
+    "avg": 355.3639,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/skill-mcp.test.ts": {
+    "avg": 454.65349999999995,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/integration/background-agent-security.test.ts": {
+    "avg": 367.92609999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/ast-grep.test.ts": {
+    "avg": 416.64509999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/scheduler.test.ts": {
+    "avg": 603.632,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/audit-evasion.test.ts": {
+    "avg": 546.4024,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/integration/delegate-task-security.test.ts": {
+    "avg": 601.2081,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/file/path-traversal.test.ts": {
+    "avg": 777.2069999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/integration/output-truncator-security.test.ts": {
+    "avg": 1210.0842,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/integration/ast-grep-security.test.ts": {
+    "avg": 322.2090999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/grep-glob-bypass.test.ts": {
+    "avg": 306.64009999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/integration/interactive-bash-security.test.ts": {
+    "avg": 249.5621,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/mcp-bypass.test.ts": {
+    "avg": 289.614,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/read-bypass.test.ts": {
+    "avg": 250.33529999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/write-edit-bypass.test.ts": {
+    "avg": 311.87879999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/cli/github-remote.test.ts": {
+    "avg": 1126.6013,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/cli/github-action.test.ts": {
+    "avg": 1154.8509,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/session/message-v2.test.ts": {
+    "avg": 228.80389999999997,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/segment-evasion.test.ts": {
+    "avg": 245.081,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/config-manipulation.test.ts": {
+    "avg": 183.1671,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/llm-leakage.test.ts": {
+    "avg": 285.95719999999994,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/acp/agent-interface.test.ts": {
+    "avg": 1044.008,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/provider/amazon-bedrock.test.ts": {
+    "avg": 1259.8662,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/grep-enhanced.test.ts": {
+    "avg": 1053.6682,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/project/project.test.ts": {
+    "avg": 1276.7211,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/question.test.ts": {
+    "avg": 127.93709999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/file/ripgrep.test.ts": {
+    "avg": 130.5271,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/inheritance-bypass.test.ts": {
+    "avg": 175.8364,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/race-condition.test.ts": {
+    "avg": 152.50009999999997,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/role-authentication.test.ts": {
+    "avg": 177.04109999999997,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/script/omo-diff.test.ts": {
+    "avg": 121.59909999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/agent-interaction.test.ts": {
+    "avg": 196.99929999999998,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/provider/copilot/copilot-chat-model.test.ts": {
+    "avg": 124.54529999999998,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/truncation.test.ts": {
+    "avg": 131.4999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/config/markdown.test.ts": {
+    "avg": 120.911,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/patch/patch.test.ts": {
+    "avg": 138.6901,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/allowlist.test.ts": {
+    "avg": 191.5718,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/path-traversal.test.ts": {
+    "avg": 197.7044,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/keybind.test.ts": {
+    "avg": 80.26429999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/script/omo-baseline.test.ts": {
+    "avg": 72.0359,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/external-directory.test.ts": {
+    "avg": 90.56309999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/security/access_control_cases/unit/bash-bypass.test.ts": {
+    "avg": 116.23899999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/permission/arity.test.ts": {
+    "avg": 66.7829,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/cli/tui/transcript.test.ts": {
+    "avg": 76.35629999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/ide/ide.test.ts": {
+    "avg": 75.443,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/mcp/builtin-mcp.test.ts": {
+    "avg": 78.1682,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tui/textarea-keybindings.test.ts": {
+    "avg": 96.87299999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/plugin/codex.test.ts": {
+    "avg": 91.96029999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/provider/transform.test.ts": {
+    "avg": 138.2538,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/util/timeout.test.ts": {
+    "avg": 142.779,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/provider/copilot/convert-to-copilot-messages.test.ts": {
+    "avg": 117.5688,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/util/wildcard.test.ts": {
+    "avg": 78.64179999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/util/lock.test.ts": {
+    "avg": 61.011999999999986,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/util/iife.test.ts": {
+    "avg": 59.8917,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/util/format.test.ts": {
+    "avg": 54.4159,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/util/lazy.test.ts": {
+    "avg": 56.75599999999999,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/file/ignore.test.ts": {
+    "avg": 56.411199999999994,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/bun.test.ts": {
+    "avg": 61.768299999999996,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/util/filesystem.test.ts": {
+    "avg": 65.3849,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/script/test-parallel/timing.test.ts": {
+    "avg": 52,
+    "runs": 1
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/script/test-parallel/discover.test.ts": {
+    "avg": 78,
+    "runs": 1
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/script/test-parallel/runner.test.ts": {
+    "avg": 241,
+    "runs": 1
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/tool/read.test.ts": {
+    "avg": 16938.0213,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/agent/agent.test.ts": {
+    "avg": 20263.352,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/config/config.test.ts": {
+    "avg": 25064.0162,
+    "runs": 5
+  },
+  "/Users/larkmobileinfra/Stormspirit/opencode/packages/opencode/test/snapshot/snapshot.test.ts": {
+    "avg": 32957.382,
+    "runs": 5
+  }
+}

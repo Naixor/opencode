@@ -35,14 +35,41 @@ Run the project test suite, parse all output, and produce a structured Markdown 
 
 Based on the `--scope` argument, run the appropriate test command:
 
-- **`bun` (default):** `bun test --cwd packages/opencode`
+- **`bun` (default):** `bun run --cwd packages/opencode test:parallel 2>&1`
+  Uses all available CPU cores by default. Pass `--workers N` to limit concurrency.
 - **`e2e`:** `bun run --cwd packages/app test:e2e`
 - **`all`:** Run both commands sequentially
 
-If `--file` is provided, append the file path to the bun test command:
+If `--file` is provided, run a single file directly (no parallelism benefit for one file):
 - `bun test --cwd packages/opencode -- <file>`
 
-Capture ALL stdout and stderr output. If `--output` is provided, save the raw output to that path.
+Capture ALL stdout and stderr combined (`2>&1`). If `--output` is provided, save the raw output to that path.
+
+### test:parallel output format
+
+`test:parallel` emits two types of lines:
+
+1. **Per-file result line** (one per file, always present):
+   ```
+   [N/M] ✓ /abs/path/test/foo.test.ts (X pass, Y fail, Z skip, T.Ts)
+   [N/M] ✗ /abs/path/test/bar.test.ts (A pass, B fail, C skip, T.Ts)
+   ```
+2. **Per-test failure detail** (only for failing files, printed immediately after the per-file line): the full `bun test` stderr of the failing file, in the same format as standard `bun test` output.
+
+The final summary block appears after all per-file lines:
+```
+────────────────────────────────────────────────────────────
+Files:   120
+Pass:    847
+Fail:    2
+Skip:    0
+Wall:    8.40s
+Serial:  47.20s
+Speedup: 5.62x
+
+Failed files:
+  ✗ /abs/path/test/bar.test.ts (2 fail)
+```
 
 ---
 
@@ -50,11 +77,13 @@ Capture ALL stdout and stderr output. If `--output` is provided, save the raw ou
 
 Extract the following from the raw output:
 
-- **Total test count**
-- **Pass count**
-- **Fail count**
-- **Skip count**
-- **Per-test results:** file path, test name, pass/fail/skip status, error message (if any), stack trace (if any)
+- **Total test count** (sum of all per-file counts, or from the final `Files:` summary)
+- **Pass count** (from the final `Pass:` summary line)
+- **Fail count** (from the final `Fail:` summary line)
+- **Skip count** (from the final `Skip:` summary line)
+- **Speedup** (from the final `Speedup:` summary line, if present)
+- **Per-file results:** parse each `[N/M] ✓/✗ <path> (X pass, Y fail, Z skip, T.Ts)` line for file-level counts
+- **Per-test results for failing files:** parse the `bun test` stderr block that immediately follows each `[N/M] ✗` line, extracting test name, pass/fail/skip status, error message, and stack trace in the same way as standard `bun test` output
 
 ---
 
@@ -66,39 +95,55 @@ Use TWO independent extraction methods to count failures, then cross-check with 
 
 ### Source A: Summary Line Extraction
 
-Extract failure count from the bun test summary line. Follow these steps exactly:
+The summary format depends on which command was used:
 
-1. Search the raw output for the bun test summary line. It appears near the end and matches the pattern:
-   ```
-   N pass, N fail, N skip, N expect() calls
-   ```
-   or a subset (e.g., `N pass` only if there are no failures).
-2. Extract the integer before `fail` as `source_a_fail`.
-3. Also extract the integers for `pass` and `skip` as `source_a_pass` and `source_a_skip`.
-4. If the summary line is missing or unparseable, set `source_a_fail = UNKNOWN` and flag for `COMPLETENESS_WARNING`.
+**`bun test:parallel` summary** (default `bun` scope, at end of output):
+```
+Pass:    N
+Fail:    N
+Skip:    N
+```
+1. Search for `^Fail:\s+(\d+)` → `source_a_fail`
+2. Search for `^Pass:\s+(\d+)` → `source_a_pass`
+3. Search for `^Skip:\s+(\d+)` → `source_a_skip`
+
+**`bun test` summary** (used when `--file` is provided):
+```
+N pass, N fail, N skip, N expect() calls
+```
+1. Extract the integer before `fail` → `source_a_fail`
+2. Extract the integers for `pass` and `skip`
+
+If the summary block is missing or unparseable for either format, set `source_a_fail = UNKNOWN` and flag for `COMPLETENESS_WARNING`.
 
 ---
 
 ### Source B: Individual Failure Counting
 
-Independently count failure markers in the raw output. Follow these steps exactly:
+The counting method depends on which command was used:
 
-**bun test failure markers vary by output mode:**
-- **Non-TTY / piped output** (what Claude's Bash tool captures): `(fail) test name [Xms]`
-- **TTY / interactive terminal**: `✗ test name [Xms]` (U+2717 BALLOT X)
+**`bun test:parallel` (default `bun` scope):**
 
-Check for BOTH patterns and take the maximum count to handle either mode:
+Count per-file failure markers — lines matching the `[N/M] ✗` pattern:
+```
+grep -c '^\[.*\] ✗' <raw-output-file>
+```
+Each `[N/M] ✗` line represents one failing test **file** (not one failing test case). Cross-check by summing the `Y fail` values from all `[N/M] ✗ <path> (X pass, Y fail, Z skip, T.Ts)` lines; the sum must equal `source_a_fail`. If they differ, flag for `COMPLETENESS_WARNING`.
 
-1. Count lines matching `^(fail)` (non-TTY format):
+**`bun test` (used when `--file` is provided):**
+
+Check for BOTH non-TTY and TTY patterns and take the maximum:
+1. Count `^(fail)` lines (non-TTY):
    ```
    grep -c '^(fail)' <raw-output-file>
    ```
-2. Count lines matching `✗` (TTY format):
+2. Count `✗` lines (TTY):
    ```
    grep -c '✗' <raw-output-file>
    ```
-3. Set `source_b_fail = max(count_from_step1, count_from_step2)`.
-4. If `source_b_fail` differs from `source_a_fail`, this is a discrepancy — flag for `COMPLETENESS_WARNING`.
+3. `source_b_fail = max(count_from_step1, count_from_step2)`
+
+If `source_b_fail` differs from `source_a_fail`, flag for `COMPLETENESS_WARNING`.
 
 ---
 
@@ -293,10 +338,13 @@ Always include this section. Fill in actual values from Steps 2–3.
 | Metric | Value |
 |--------|-------|
 | **Scope** | bun / e2e / all |
+| **Runner** | test:parallel / bun test |
 | **Total** | N |
 | **Pass** | N |
 | **Fail** | N |
 | **Skip** | N |
+| **Wall Time** | N.NNs |
+| **Speedup** | N.NNx (serial: N.NNs) |
 | **Dual Verification** | PASS / FAIL |
 
 ### Verification Details
@@ -306,6 +354,10 @@ Always include this section. Fill in actual values from Steps 2–3.
 - **Arithmetic check:** pass(X) + fail(Y) + skip(Z) = W — PASS / FAIL (expected T)
 - **Silent skip check:** PASS / FAIL (N file(s) not executed)
 ```
+
+Rules:
+- **Runner** is `test:parallel` when the `bun` scope is used without `--file`; `bun test` when `--file` is provided or scope is `e2e`.
+- **Wall Time** and **Speedup** are only shown for `test:parallel` runs; omit both rows for plain `bun test`.
 
 Rules:
 - `Dual Verification` is **PASS** only if **all four** checks pass (Source A/B match, arithmetic, silent skip).

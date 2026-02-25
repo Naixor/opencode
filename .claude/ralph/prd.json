@@ -1,0 +1,96 @@
+{
+  "project": "opencode",
+  "branchName": "ralph/parallel-test-runner",
+  "description": "Bun file-level parallel test runner - LPT-scheduled concurrent execution of test files with real-time output, timing history, and optional distributed sharding",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Core type definitions and timing data module",
+      "description": "As a developer, I need shared TypeScript types and a timing-data module so all other modules have a stable foundation to build on.",
+      "acceptanceCriteria": [
+        "Create packages/opencode/script/test-parallel/types.ts with interfaces: WorkerResult { file, pass, fail, skip, duration, error? }, TimingEntry { avg: number, runs: number }, TimingData = Record<string, TimingEntry>, RunnerConfig { maxWorkers, timeout, stopOnFailure, silent, verbose, pattern?, reporter? }",
+        "Create packages/opencode/script/test-parallel/timing.ts with readTiming(path: string): TimingData that reads .test-timing.json and returns {} if file not found",
+        "writeTiming(path, existing, results: WorkerResult[]) updates each file's entry using EMA: new_avg = 0.7 * actual + 0.3 * old_avg, increments runs, removes entries for files no longer in results",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Fixed pre-existing typecheck errors in security test mocks (missing resolvedAllowlist)"
+    },
+    {
+      "id": "US-002",
+      "title": "Test file discovery and LPT queue builder",
+      "description": "As a developer, I want the runner to discover all test files and sort them slowest-first so the LPT scheduler can minimise total wall time.",
+      "acceptanceCriteria": [
+        "Create packages/opencode/script/test-parallel/discover.ts",
+        "discoverFiles(root: string, pattern?: string): string[] recursively globs *.test.ts under root; if pattern provided, filters results using minimatch",
+        "buildQueue(files: string[], timing: TimingData): string[] returns files sorted descending by timing[file].avg (LPT order); files with no timing entry sort last in alphabetical order",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Used Bun.Glob.scanSync with absolute:true; minimatch filters by pattern; buildQueue sorts timed desc then untimed alpha"
+    },
+    {
+      "id": "US-003",
+      "title": "Worker process runner with concurrency pool",
+      "description": "As a developer, I want each test file to run in its own isolated bun test process, with a concurrency cap and optional fail-fast behaviour.",
+      "acceptanceCriteria": [
+        "Create packages/opencode/script/test-parallel/runner.ts",
+        "runWorker(file: string, config: RunnerConfig): Promise<WorkerResult> spawns Bun.spawn(['bun', 'test', '--reporter', 'json', file]), writes stdout to a temp file worker-<pid>.json, records duration, kills process and returns failure result if timeout exceeded",
+        "runAll(files: string[], config: RunnerConfig, onComplete: (r: WorkerResult, index: number, total: number) => void): Promise<WorkerResult[]> runs up to config.maxWorkers processes concurrently using a promise pool; calls onComplete after each file finishes; if config.stopOnFailure and a result has fail > 0, kills all remaining running processes and resolves immediately",
+        "Temp worker JSON files are deleted after being read",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "spawnWorker internal helper returns { resultPromise, kill }; runWorker is a thin wrapper; runAll uses const stopped={value} for mutable flag; Promise.race for timeout; activeFns Set tracks kill handles for stopOnFailure"
+    },
+    {
+      "id": "US-004",
+      "title": "Real-time output formatter and summary reporter",
+      "description": "As a developer, I want to see each file's result immediately as it finishes, and a clear summary at the end with speedup ratio and optional machine-readable output.",
+      "acceptanceCriteria": [
+        "Create packages/opencode/script/test-parallel/reporter.ts",
+        "printFileResult(result: WorkerResult, index: number, total: number, config: RunnerConfig) prints: [N/total] ✓ or ✗ file (X pass, Y fail, Z.Xs); if fail > 0 and not silent, also prints result.error verbatim; suppresses all per-file output when config.silent is true",
+        "printSummary(results: WorkerResult[], wallTime: number, config: RunnerConfig) prints a summary block: total files, total pass/fail/skip, wall time, serial time (sum of all durations), speedup ratio (serial/wall); lists all failed files with their fail counts",
+        "writeReport(results: WorkerResult[], format: 'json' | 'junit', outDir: string) writes test-results.json (array of WorkerResult) or test-results.xml (JUnit XML with one testsuite per file)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "printFileResult suppresses output when silent; printSummary uses reduce for totals, speedup = serialTime/wallTime; writeReport: json branch returns early, xml uses escapeXml helper for JUnit; mkdir with recursive:true + .catch for idempotency"
+    },
+    {
+      "id": "US-005",
+      "title": "CLI entry point and package.json integration",
+      "description": "As a developer, I want a single bun run test:parallel command that wires all modules together so I can replace bun test with one command.",
+      "acceptanceCriteria": [
+        "Create packages/opencode/script/test-parallel.ts that parses process.argv for: --workers N (alias --max-workers N, default os.cpus().length), --pattern <glob>, --timeout N (seconds, default 60), --reporter json|junit, --silent, --verbose, --stop-on-failure, --help",
+        "--help prints a usage summary listing all flags and exits with code 0",
+        "Entry point: discovers files under packages/opencode/test/, builds LPT queue, runs all with concurrency pool, prints real-time output via reporter, writes timing file, writes report if --reporter set, exits with code 1 if any failure else 0",
+        "Add to packages/opencode/package.json scripts: \"test:parallel\": \"bun run script/test-parallel.ts\"",
+        "Running bun run test:parallel --help exits 0 and prints usage",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Manual arg parser with getArg helper; import.meta.dir for Bun-idiomatic path resolution; --help exits 0; pattern passed to discoverFiles; reporter type narrowed from string; process.exit(results.some(r => r.fail > 0) ? 1 : 0)"
+    },
+    {
+      "id": "US-006",
+      "title": "Distributed sharding via --shard N/M",
+      "description": "As a CI engineer, I want to split test files across multiple machines using --shard N/M so large suites can run on GitHub Actions matrix jobs without any network coordination.",
+      "acceptanceCriteria": [
+        "Update packages/opencode/script/test-parallel.ts to parse --shard <index>/<total> (e.g. --shard 1/4); also read TEST_SHARD_INDEX and TEST_SHARD_TOTAL env vars as fallback",
+        "After buildQueue returns the full sorted file list, slice it: shard index i of total M takes files at positions where (fileIndex % M) === (i - 1), preserving LPT order within the shard",
+        "Same file set + same N/M always produces the same shard assignment (deterministic)",
+        "If --shard is provided, summary output includes 'Shard N/M' in the header line",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Added shard?: {index, total} to RunnerConfig; parseShard helper parses N/M string; rawShard falls back to TEST_SHARD_INDEX/TEST_SHARD_TOTAL env vars; queue.filter((_, i) => i % total === index - 1) applies deterministic modular sharding; reporter.ts printSummary prints 'Shard: N/M' line when config.shard is set"
+    }
+  ]
+}
