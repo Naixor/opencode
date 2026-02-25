@@ -49,10 +49,10 @@ beforeEach(() => {
   resetMcpMocks()
   spies.push(
     spyOn(SecurityConfig, "getMcpPolicy").mockImplementation(() => "trusted"),
-    spyOn(MCP, "status").mockImplementation(async () => ({ ...mockMcpStatuses }) as ReturnType<typeof MCP.status>),
-    spyOn(MCP, "tools").mockImplementation(async () => ({ ...mockMcpTools }) as ReturnType<typeof MCP.tools>),
-    spyOn(MCP, "resources").mockImplementation(async () => ({ ...mockMcpResources }) as ReturnType<typeof MCP.resources>),
-    spyOn(MCP, "prompts").mockImplementation(async () => ({ ...mockMcpPrompts }) as ReturnType<typeof MCP.prompts>),
+    spyOn(MCP, "status").mockImplementation(async () => ({ ...mockMcpStatuses }) as unknown as Awaited<ReturnType<typeof MCP.status>>),
+    spyOn(MCP, "tools").mockImplementation(async () => ({ ...mockMcpTools }) as unknown as Awaited<ReturnType<typeof MCP.tools>>),
+    spyOn(MCP, "resources").mockImplementation(async () => ({ ...mockMcpResources }) as unknown as Awaited<ReturnType<typeof MCP.resources>>),
+    spyOn(MCP, "prompts").mockImplementation(async () => ({ ...mockMcpPrompts }) as unknown as Awaited<ReturnType<typeof MCP.prompts>>),
   )
 })
 

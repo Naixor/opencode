@@ -61,10 +61,10 @@ const spies: Array<ReturnType<typeof spyOn>> = []
 describe("look_at tool", () => {
   beforeEach(() => {
     spies.push(
-      spyOn(Provider, "getModel").mockImplementation(mockGetModel as typeof Provider.getModel),
-      spyOn(Provider, "getLanguage").mockImplementation(mockGetLanguage as typeof Provider.getLanguage),
+      spyOn(Provider, "getModel").mockImplementation(mockGetModel as unknown as typeof Provider.getModel),
+      spyOn(Provider, "getLanguage").mockImplementation(mockGetLanguage as unknown as typeof Provider.getLanguage),
       spyOn(Provider, "parseModel").mockImplementation(mockParseModel as typeof Provider.parseModel),
-      spyOn(Provider, "list").mockImplementation(mockProviderList as typeof Provider.list),
+      spyOn(Provider, "list").mockImplementation(mockProviderList as unknown as typeof Provider.list),
       spyOn(Provider, "defaultModel").mockImplementation(async () => ({ providerID: "google", modelID: "gemini-2.5-flash" }) as Awaited<ReturnType<typeof Provider.defaultModel>>),
     )
   })

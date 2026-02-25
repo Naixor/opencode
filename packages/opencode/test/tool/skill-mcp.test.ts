@@ -45,12 +45,12 @@ describe("skill_mcp tool", () => {
     spies.push(
       spyOn(SecurityConfig, "getMcpPolicy").mockImplementation(() => mockMcpPolicy as "trusted" | "enforced" | "blocked"),
       spyOn(SecurityConfig, "getSecurityConfig").mockImplementation(() => ({ version: "1.0", roles: [], rules: [] }) as ReturnType<typeof SecurityConfig.getSecurityConfig>),
-      spyOn(SecurityConfig, "loadSecurityConfig").mockImplementation(async () => ({ version: "1.0", roles: [], rules: [] }) as ReturnType<Awaited<typeof SecurityConfig.loadSecurityConfig>>),
+      spyOn(SecurityConfig, "loadSecurityConfig").mockImplementation(async () => ({ version: "1.0", roles: [], rules: [] }) as unknown as Awaited<ReturnType<typeof SecurityConfig.loadSecurityConfig>>),
       spyOn(SecurityAudit, "logSecurityEvent").mockImplementation(mockLogSecurityEvent),
-      spyOn(MCP, "tools").mockImplementation(async () => ({ ...mockTools }) as ReturnType<typeof MCP.tools>),
-      spyOn(MCP, "status").mockImplementation(async () => ({ ...mockStatuses }) as ReturnType<typeof MCP.status>),
-      spyOn(MCP, "resources").mockImplementation(async () => ({ ...mockResources }) as ReturnType<typeof MCP.resources>),
-      spyOn(MCP, "prompts").mockImplementation(async () => ({ ...mockPrompts }) as ReturnType<typeof MCP.prompts>),
+      spyOn(MCP, "tools").mockImplementation(async () => ({ ...mockTools }) as unknown as Awaited<ReturnType<typeof MCP.tools>>),
+      spyOn(MCP, "status").mockImplementation(async () => ({ ...mockStatuses }) as unknown as Awaited<ReturnType<typeof MCP.status>>),
+      spyOn(MCP, "resources").mockImplementation(async () => ({ ...mockResources }) as unknown as Awaited<ReturnType<typeof MCP.resources>>),
+      spyOn(MCP, "prompts").mockImplementation(async () => ({ ...mockPrompts }) as unknown as Awaited<ReturnType<typeof MCP.prompts>>),
       spyOn(MCP, "getPrompt").mockImplementation(async () => mockGetPromptResult as Awaited<ReturnType<typeof MCP.getPrompt>>),
       spyOn(MCP, "readResource").mockImplementation(async () => mockReadResourceResult as Awaited<ReturnType<typeof MCP.readResource>>),
     )
