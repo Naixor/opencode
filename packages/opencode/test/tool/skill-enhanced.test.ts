@@ -1,9 +1,11 @@
-import { describe, expect, test, mock, beforeEach } from "bun:test"
+import { describe, expect, test, mock, beforeEach, afterEach, spyOn } from "bun:test"
 import path from "path"
 import { Instance } from "../../src/project/instance"
 import { SkillTool } from "../../src/tool/skill"
 import { Skill } from "../../src/skill"
 import { tmpdir } from "../fixture/fixture"
+import { SecurityConfig } from "../../src/security/config"
+import { MCP } from "../../src/mcp"
 import type { PermissionNext } from "../../src/permission/next"
 import type { Tool } from "../../src/tool/tool"
 import type { Agent } from "../../src/agent/agent"
@@ -28,26 +30,11 @@ function makeAgent(overrides: Partial<Agent.Info> = {}): Agent.Info {
   } as Agent.Info
 }
 
-// Mock MCP module to simulate MCP server info
+// Mock MCP state
 const mockMcpTools: Record<string, unknown> = {}
 const mockMcpResources: Record<string, unknown> = {}
 const mockMcpPrompts: Record<string, unknown> = {}
 const mockMcpStatuses: Record<string, { status: string; error?: string }> = {}
-
-mock.module("../../src/mcp/index", () => ({
-  MCP: {
-    status: async () => mockMcpStatuses,
-    tools: async () => mockMcpTools,
-    resources: async () => mockMcpResources,
-    prompts: async () => mockMcpPrompts,
-  },
-}))
-
-mock.module("../../src/security/config", () => ({
-  SecurityConfig: {
-    getMcpPolicy: () => "trusted",
-  },
-}))
 
 function resetMcpMocks() {
   for (const key of Object.keys(mockMcpTools)) delete mockMcpTools[key]
@@ -56,8 +43,22 @@ function resetMcpMocks() {
   for (const key of Object.keys(mockMcpStatuses)) delete mockMcpStatuses[key]
 }
 
+const spies: Array<ReturnType<typeof spyOn>> = []
+
 beforeEach(() => {
   resetMcpMocks()
+  spies.push(
+    spyOn(SecurityConfig, "getMcpPolicy").mockImplementation(() => "trusted"),
+    spyOn(MCP, "status").mockImplementation(async () => ({ ...mockMcpStatuses }) as unknown as Awaited<ReturnType<typeof MCP.status>>),
+    spyOn(MCP, "tools").mockImplementation(async () => ({ ...mockMcpTools }) as unknown as Awaited<ReturnType<typeof MCP.tools>>),
+    spyOn(MCP, "resources").mockImplementation(async () => ({ ...mockMcpResources }) as unknown as Awaited<ReturnType<typeof MCP.resources>>),
+    spyOn(MCP, "prompts").mockImplementation(async () => ({ ...mockMcpPrompts }) as unknown as Awaited<ReturnType<typeof MCP.prompts>>),
+  )
+})
+
+afterEach(() => {
+  spies.forEach((s) => s.mockRestore())
+  spies.length = 0
 })
 
 describe("US-027: Enhance Skill tool", () => {

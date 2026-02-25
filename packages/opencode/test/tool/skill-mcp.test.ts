@@ -1,7 +1,10 @@
-import { describe, expect, test, afterEach, mock, beforeEach } from "bun:test"
+import { describe, expect, test, afterEach, mock, beforeEach, spyOn } from "bun:test"
 import { SkillMcpTool } from "../../src/tool/skill-mcp"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
+import { SecurityConfig } from "../../src/security/config"
+import { SecurityAudit } from "../../src/security/audit"
+import { MCP } from "../../src/mcp"
 
 const ctx = {
   sessionID: "test",
@@ -22,37 +25,9 @@ let mockPrompts: Record<string, { name: string; client: string }> = {}
 let mockGetPromptResult: unknown = null
 let mockReadResourceResult: unknown = null
 
-mock.module("../../src/mcp/index", () => ({
-  MCP: {
-    tools: mock(() => Promise.resolve({ ...mockTools })),
-    status: mock(() => Promise.resolve({ ...mockStatuses })),
-    resources: mock(() => Promise.resolve({ ...mockResources })),
-    prompts: mock(() => Promise.resolve({ ...mockPrompts })),
-    getPrompt: mock((clientName: string, name: string, args?: Record<string, string>) =>
-      Promise.resolve(mockGetPromptResult),
-    ),
-    readResource: mock((clientName: string, uri: string) =>
-      Promise.resolve(mockReadResourceResult),
-    ),
-  },
-}))
-
-// Mock security config
 let mockMcpPolicy = "trusted"
-mock.module("../../src/security/config", () => ({
-  SecurityConfig: {
-    getMcpPolicy: mock((serverName: string) => mockMcpPolicy),
-    getSecurityConfig: mock(() => ({})),
-    loadSecurityConfig: mock(() => ({})),
-  },
-}))
-
 const mockLogSecurityEvent = mock(() => {})
-mock.module("../../src/security/audit", () => ({
-  SecurityAudit: {
-    logSecurityEvent: mockLogSecurityEvent,
-  },
-}))
+const spies: Array<ReturnType<typeof spyOn>> = []
 
 describe("skill_mcp tool", () => {
   beforeEach(() => {
@@ -65,9 +40,26 @@ describe("skill_mcp tool", () => {
     mockReadResourceResult = null
     mockMcpPolicy = "trusted"
     mockLogSecurityEvent.mockClear()
+
+    // Use spyOn instead of mock.module to avoid leaking mocks to other test files
+    spies.push(
+      spyOn(SecurityConfig, "getMcpPolicy").mockImplementation(() => mockMcpPolicy as "trusted" | "enforced" | "blocked"),
+      spyOn(SecurityConfig, "getSecurityConfig").mockImplementation(() => ({ version: "1.0", roles: [], rules: [] }) as ReturnType<typeof SecurityConfig.getSecurityConfig>),
+      spyOn(SecurityConfig, "loadSecurityConfig").mockImplementation(async () => ({ version: "1.0", roles: [], rules: [] }) as unknown as Awaited<ReturnType<typeof SecurityConfig.loadSecurityConfig>>),
+      spyOn(SecurityAudit, "logSecurityEvent").mockImplementation(mockLogSecurityEvent),
+      spyOn(MCP, "tools").mockImplementation(async () => ({ ...mockTools }) as unknown as Awaited<ReturnType<typeof MCP.tools>>),
+      spyOn(MCP, "status").mockImplementation(async () => ({ ...mockStatuses }) as unknown as Awaited<ReturnType<typeof MCP.status>>),
+      spyOn(MCP, "resources").mockImplementation(async () => ({ ...mockResources }) as unknown as Awaited<ReturnType<typeof MCP.resources>>),
+      spyOn(MCP, "prompts").mockImplementation(async () => ({ ...mockPrompts }) as unknown as Awaited<ReturnType<typeof MCP.prompts>>),
+      spyOn(MCP, "getPrompt").mockImplementation(async () => mockGetPromptResult as Awaited<ReturnType<typeof MCP.getPrompt>>),
+      spyOn(MCP, "readResource").mockImplementation(async () => mockReadResourceResult as Awaited<ReturnType<typeof MCP.readResource>>),
+    )
   })
 
-  afterEach(() => {})
+  afterEach(() => {
+    spies.forEach((s) => s.mockRestore())
+    spies.length = 0
+  })
 
   test("tool invocation with tool_name -> MCP tool called", async () => {
     // Set up mock MCP server with a tool
