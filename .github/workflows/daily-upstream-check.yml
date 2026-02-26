@@ -162,6 +162,7 @@ jobs:
         if: ${{ secrets.FEISHU_WEBHOOK_URL != '' }}
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_SIGN_KEY: ${{ secrets.FEISHU_SIGN_KEY }}
           TOTAL: ${{ steps.diff.outputs.total }}
           RECENT: ${{ steps.diff.outputs.recent }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -175,93 +176,79 @@ jobs:
           # 合并建议（report.md 最后一个非空行）
           ADVICE=$(grep -v '^$' report.md | tail -1 | sed 's/\*\*//g')
 
-          # 用 jq 安全构建 JSON，避免特殊字符破坏结构
-          # 如果没有 jq 则用 python
-          if command -v jq &>/dev/null; then
-            JSON_TOOL="jq"
-          elif command -v python3 &>/dev/null; then
-            JSON_TOOL="python3"
-          else
-            JSON_TOOL="none"
-          fi
-
-          if [ "$JSON_TOOL" = "python3" ] || [ "$JSON_TOOL" = "none" ]; then
-            python3 -c "
-          import json, sys, os
+          # 用 python3 构建 JSON 并计算签名
+          python3 << 'PYEOF'
+          import json, os, time, hmac, hashlib, base64
 
           total = os.environ.get('TOTAL', '?')
           recent = os.environ.get('RECENT', '?')
           run_url = os.environ.get('RUN_URL', '')
-          commits = '''${RECENT_COMMITS}'''
-          advice = '''${ADVICE}'''
+          sign_key = os.environ.get('FEISHU_SIGN_KEY', '')
 
+          # 读取 shell 变量写入的临时文件
+          import subprocess
+          commits_result = subprocess.run(
+              ["git", "log", "master..upstream/dev", "--format=• %s", "--since=1 day ago"],
+              capture_output=True, text=True
+          )
+          commits = "\n".join(commits_result.stdout.strip().split("\n")[:5])
+          if not commits:
+              commits = "最近 24h 无新提交"
+
+          # 读取合并建议
+          with open("report.md") as f:
+              lines = [l.strip() for l in f if l.strip()]
+              advice = lines[-1].replace("**", "") if lines else "请查看完整报告"
+
+          # 构建卡片消息
           payload = {
-              'msg_type': 'interactive',
-              'card': {
-                  'header': {
-                      'title': {'tag': 'plain_text', 'content': '📊 OpenCode Upstream 日报'},
-                      'template': 'blue'
+              "msg_type": "interactive",
+              "card": {
+                  "header": {
+                      "title": {"tag": "plain_text", "content": "📊 OpenCode Upstream 日报"},
+                      "template": "blue"
                   },
-                  'elements': [
+                  "elements": [
                       {
-                          'tag': 'div',
-                          'fields': [
-                              {'is_short': True, 'text': {'tag': 'lark_md', 'content': f'**累计落后**\n{total} commits'}},
-                              {'is_short': True, 'text': {'tag': 'lark_md', 'content': f'**24h 新增**\n{recent} commits'}}
+                          "tag": "div",
+                          "fields": [
+                              {"is_short": True, "text": {"tag": "lark_md", "content": f"**累计落后**\n{total} commits"}},
+                              {"is_short": True, "text": {"tag": "lark_md", "content": f"**24h 新增**\n{recent} commits"}}
                           ]
                       },
-                      {'tag': 'hr'},
-                      {'tag': 'div', 'text': {'tag': 'lark_md', 'content': f'**最近提交：**\n{commits}'}},
-                      {'tag': 'hr'},
-                      {'tag': 'div', 'text': {'tag': 'lark_md', 'content': f'**合并建议：** {advice}'}},
+                      {"tag": "hr"},
+                      {"tag": "div", "text": {"tag": "lark_md", "content": f"**最近提交：**\n{commits}"}},
+                      {"tag": "hr"},
+                      {"tag": "div", "text": {"tag": "lark_md", "content": f"**合并建议：** {advice}"}},
                       {
-                          'tag': 'action',
-                          'actions': [{
-                              'tag': 'button',
-                              'text': {'tag': 'plain_text', 'content': '查看完整报告'},
-                              'type': 'primary',
-                              'url': run_url
+                          "tag": "action",
+                          "actions": [{
+                              "tag": "button",
+                              "text": {"tag": "plain_text", "content": "查看完整报告"},
+                              "type": "primary",
+                              "url": run_url
                           }]
                       }
                   ]
               }
           }
-          with open('feishu_payload.json', 'w') as f:
+
+          # 计算签名（如果有签名密钥）
+          if sign_key:
+              timestamp = str(int(time.time()))
+              string_to_sign = f"{timestamp}\n{sign_key}"
+              hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+              sign = base64.b64encode(hmac_code).decode("utf-8")
+              payload["timestamp"] = timestamp
+              payload["sign"] = sign
+
+          with open("feishu_payload.json", "w") as f:
               json.dump(payload, f, ensure_ascii=False)
-          "
-          else
-            jq -n \
-              --arg total "$TOTAL" \
-              --arg recent "$RECENT" \
-              --arg commits "$RECENT_COMMITS" \
-              --arg advice "$ADVICE" \
-              --arg run_url "$RUN_URL" \
-              '{
-                msg_type: "interactive",
-                card: {
-                  header: {
-                    title: {tag: "plain_text", content: "📊 OpenCode Upstream 日报"},
-                    template: "blue"
-                  },
-                  elements: [
-                    {tag: "div", fields: [
-                      {is_short: true, text: {tag: "lark_md", content: ("**累计落后**\n" + $total + " commits")}},
-                      {is_short: true, text: {tag: "lark_md", content: ("**24h 新增**\n" + $recent + " commits")}}
-                    ]},
-                    {tag: "hr"},
-                    {tag: "div", text: {tag: "lark_md", content: ("**最近提交：**\n" + $commits)}},
-                    {tag: "hr"},
-                    {tag: "div", text: {tag: "lark_md", content: ("**合并建议：** " + $advice)}},
-                    {tag: "action", actions: [{
-                      tag: "button",
-                      text: {tag: "plain_text", content: "查看完整报告"},
-                      type: "primary",
-                      url: $run_url
-                    }]}
-                  ]
-                }
-              }' > feishu_payload.json
-          fi
+
+          print("Payload built successfully")
+          print(f"Timestamp: {payload.get('timestamp', 'N/A')}")
+          print(f"Sign present: {'sign' in payload}")
+          PYEOF
 
           echo "=== Feishu Payload ==="
           cat feishu_payload.json
