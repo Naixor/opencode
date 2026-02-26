@@ -159,13 +159,17 @@ jobs:
           echo "recent=${RECENT}" >> $GITHUB_OUTPUT
 
       - name: Build and send Feishu message
-        if: ${{ secrets.FEISHU_WEBHOOK_URL != '' }}
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
           TOTAL: ${{ steps.diff.outputs.total }}
           RECENT: ${{ steps.diff.outputs.recent }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if [ -z "$FEISHU_WEBHOOK_URL" ]; then
+            echo "FEISHU_WEBHOOK_URL not set, skipping Feishu notification"
+            exit 0
+          fi
+
           # 最近提交摘要（最多5条）
           RECENT_COMMITS=$(git log master..upstream/dev --format='• %s' --since='1 day ago' | head -5)
           if [ -z "$RECENT_COMMITS" ]; then
