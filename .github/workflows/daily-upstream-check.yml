@@ -158,100 +158,123 @@ jobs:
           echo "total=${TOTAL}" >> $GITHUB_OUTPUT
           echo "recent=${RECENT}" >> $GITHUB_OUTPUT
 
-      - name: Build Feishu message
-        id: feishu_msg
+      - name: Build and send Feishu message
+        if: ${{ secrets.FEISHU_WEBHOOK_URL != '' }}
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          TOTAL: ${{ steps.diff.outputs.total }}
+          RECENT: ${{ steps.diff.outputs.recent }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          TOTAL=$(cat $GITHUB_OUTPUT 2>/dev/null | grep total | cut -d= -f2 || git rev-list master..upstream/dev --count)
-          RECENT=$(cat $GITHUB_OUTPUT 2>/dev/null | grep recent | cut -d= -f2 || git rev-list master..upstream/dev --since='1 day ago' --count)
-
-          # 提取合并建议（report.md 最后一段）
-          ADVICE=$(tail -1 report.md | sed 's/^.*\*\*//;s/\*\*.*$//' || echo "请查看完整报告")
-
           # 最近提交摘要（最多5条）
-          RECENT_COMMITS=$(git log master..upstream/dev --format='• %s' --since='1 day ago' | head -5 | tr '\n' '\n')
+          RECENT_COMMITS=$(git log master..upstream/dev --format='• %s' --since='1 day ago' | head -5)
           if [ -z "$RECENT_COMMITS" ]; then
             RECENT_COMMITS="最近 24h 无新提交"
           fi
 
-          # 构建飞书富文本消息 JSON
-          cat > feishu_payload.json << PAYLOAD
-          {
-            "msg_type": "interactive",
-            "card": {
-              "header": {
-                "title": {
-                  "tag": "plain_text",
-                  "content": "📊 OpenCode Upstream 日报"
-                },
-                "template": "blue"
-              },
-              "elements": [
-                {
-                  "tag": "div",
-                  "fields": [
-                    {
-                      "is_short": true,
-                      "text": {
-                        "tag": "lark_md",
-                        "content": "**累计落后**\n${TOTAL} commits"
-                      }
-                    },
-                    {
-                      "is_short": true,
-                      "text": {
-                        "tag": "lark_md",
-                        "content": "**24h 新增**\n${RECENT} commits"
-                      }
-                    }
-                  ]
-                },
-                {
-                  "tag": "hr"
-                },
-                {
-                  "tag": "div",
-                  "text": {
-                    "tag": "lark_md",
-                    "content": "**最近提交：**\n${RECENT_COMMITS}"
-                  }
-                },
-                {
-                  "tag": "hr"
-                },
-                {
-                  "tag": "div",
-                  "text": {
-                    "tag": "lark_md",
-                    "content": "**合并建议：** $(tail -1 report.md)"
-                  }
-                },
-                {
-                  "tag": "action",
-                  "actions": [
-                    {
-                      "tag": "button",
-                      "text": {
-                        "tag": "plain_text",
-                        "content": "查看完整报告"
+          # 合并建议（report.md 最后一个非空行）
+          ADVICE=$(grep -v '^$' report.md | tail -1 | sed 's/\*\*//g')
+
+          # 用 jq 安全构建 JSON，避免特殊字符破坏结构
+          # 如果没有 jq 则用 python
+          if command -v jq &>/dev/null; then
+            JSON_TOOL="jq"
+          elif command -v python3 &>/dev/null; then
+            JSON_TOOL="python3"
+          else
+            JSON_TOOL="none"
+          fi
+
+          if [ "$JSON_TOOL" = "python3" ] || [ "$JSON_TOOL" = "none" ]; then
+            python3 -c "
+          import json, sys, os
+
+          total = os.environ.get('TOTAL', '?')
+          recent = os.environ.get('RECENT', '?')
+          run_url = os.environ.get('RUN_URL', '')
+          commits = '''${RECENT_COMMITS}'''
+          advice = '''${ADVICE}'''
+
+          payload = {
+              'msg_type': 'interactive',
+              'card': {
+                  'header': {
+                      'title': {'tag': 'plain_text', 'content': '📊 OpenCode Upstream 日报'},
+                      'template': 'blue'
+                  },
+                  'elements': [
+                      {
+                          'tag': 'div',
+                          'fields': [
+                              {'is_short': True, 'text': {'tag': 'lark_md', 'content': f'**累计落后**\n{total} commits'}},
+                              {'is_short': True, 'text': {'tag': 'lark_md', 'content': f'**24h 新增**\n{recent} commits'}}
+                          ]
                       },
-                      "type": "primary",
-                      "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-                    }
+                      {'tag': 'hr'},
+                      {'tag': 'div', 'text': {'tag': 'lark_md', 'content': f'**最近提交：**\n{commits}'}},
+                      {'tag': 'hr'},
+                      {'tag': 'div', 'text': {'tag': 'lark_md', 'content': f'**合并建议：** {advice}'}},
+                      {
+                          'tag': 'action',
+                          'actions': [{
+                              'tag': 'button',
+                              'text': {'tag': 'plain_text', 'content': '查看完整报告'},
+                              'type': 'primary',
+                              'url': run_url
+                          }]
+                      }
+                  ]
+              }
+          }
+          with open('feishu_payload.json', 'w') as f:
+              json.dump(payload, f, ensure_ascii=False)
+          "
+          else
+            jq -n \
+              --arg total "$TOTAL" \
+              --arg recent "$RECENT" \
+              --arg commits "$RECENT_COMMITS" \
+              --arg advice "$ADVICE" \
+              --arg run_url "$RUN_URL" \
+              '{
+                msg_type: "interactive",
+                card: {
+                  header: {
+                    title: {tag: "plain_text", content: "📊 OpenCode Upstream 日报"},
+                    template: "blue"
+                  },
+                  elements: [
+                    {tag: "div", fields: [
+                      {is_short: true, text: {tag: "lark_md", content: ("**累计落后**\n" + $total + " commits")}},
+                      {is_short: true, text: {tag: "lark_md", content: ("**24h 新增**\n" + $recent + " commits")}}
+                    ]},
+                    {tag: "hr"},
+                    {tag: "div", text: {tag: "lark_md", content: ("**最近提交：**\n" + $commits)}},
+                    {tag: "hr"},
+                    {tag: "div", text: {tag: "lark_md", content: ("**合并建议：** " + $advice)}},
+                    {tag: "action", actions: [{
+                      tag: "button",
+                      text: {tag: "plain_text", content: "查看完整报告"},
+                      type: "primary",
+                      url: $run_url
+                    }]}
                   ]
                 }
-              ]
-            }
-          }
-          PAYLOAD
+              }' > feishu_payload.json
+          fi
 
-      - name: Send Feishu notification
-        if: env.FEISHU_WEBHOOK_URL != ''
-        env:
-          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-        run: |
-          curl -s -X POST "$FEISHU_WEBHOOK_URL" \
+          echo "=== Feishu Payload ==="
+          cat feishu_payload.json
+          echo ""
+          echo "=== Sending to Feishu ==="
+          RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "$FEISHU_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d @feishu_payload.json
+            -d @feishu_payload.json)
+          echo "$RESPONSE"
+          HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE" | cut -d: -f2)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::warning::Feishu notification failed with HTTP $HTTP_CODE"
+          fi
 
       - name: Upload report as artifact
         uses: actions/upload-artifact@v4
