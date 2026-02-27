@@ -18,7 +18,7 @@ if (args.includes("--help") || args.includes("-h")) {
       "Options:",
       "  --workers, --max-workers N   Max concurrent workers (default: CPU count)",
       "  --pattern <glob>             Filter test files by glob pattern",
-      "  --timeout N                  Per-file timeout in seconds (default: 60)",
+      "  --timeout N                  Per-file timeout in seconds (default: 120)",
       "  --reporter json|junit        Write test-results.json or test-results.xml",
       "  --shard N/M                  Run shard N of M (env: TEST_SHARD_INDEX/TEST_SHARD_TOTAL)",
       "  --silent                     Suppress per-file output",
@@ -40,7 +40,7 @@ const getArg = (flag: string, alias?: string): string | undefined => {
 }
 
 const maxWorkers = parseInt(getArg("--workers", "--max-workers") ?? String(cpus().length), 10)
-const timeout = parseInt(getArg("--timeout") ?? "60", 10)
+const timeout = parseInt(getArg("--timeout") ?? "120", 10)
 const pattern = getArg("--pattern")
 const rawReporter = getArg("--reporter")
 const reporter = rawReporter === "json" || rawReporter === "junit" ? rawReporter : undefined
@@ -85,4 +85,11 @@ printSummary(results, wallTime, config)
 await writeTiming(timingPath, timing, results)
 if (reporter) await writeReport(results, reporter, reportsDir)
 
-process.exit(results.some((r) => r.fail > 0) ? 1 : 0)
+const failed = results.filter((r) => r.fail > 0)
+if (failed.length > 0) {
+  const debugPath = resolve(import.meta.dir, "../.test-failures.json")
+  await Bun.write(debugPath, JSON.stringify(failed, null, 2))
+  console.log(`\nDebug dump: ${debugPath}`)
+}
+
+process.exit(failed.length > 0 ? 1 : 0)

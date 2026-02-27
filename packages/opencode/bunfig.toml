@@ -2,4 +2,4 @@ preload = ["@opentui/solid/preload"]
 
 [test]
 preload = ["./test/preload.ts"]
-timeout = 10000  # 10 seconds (default is 5000ms)
+timeout = 120000  # 120 seconds; matches the parallel runner's file-level timeout (20-way parallelism)

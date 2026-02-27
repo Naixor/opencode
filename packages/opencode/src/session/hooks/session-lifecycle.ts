@@ -76,16 +76,13 @@ export namespace SessionLifecycleHooks {
     if (platform === "darwin") {
       const soundClause = notificationConfig.sound ? ' sound name "Submarine"' : ""
       const script = `display notification "${message.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}"${soundClause}`
-      const proc = Bun.spawn(["osascript", "-e", script], { stdout: "ignore", stderr: "ignore" })
-      await proc.exited.catch(() => {})
+      Bun.spawn(["osascript", "-e", script], { stdout: "ignore", stderr: "ignore" }).exited.catch(() => {})
       log.info("notification sent via osascript", { title })
       return
     }
 
     if (platform === "linux") {
-      const args = ["notify-send", title, message]
-      const proc = Bun.spawn(args, { stdout: "ignore", stderr: "ignore" })
-      await proc.exited.catch(() => {})
+      Bun.spawn(["notify-send", title, message], { stdout: "ignore", stderr: "ignore" }).exited.catch(() => {})
       log.info("notification sent via notify-send", { title })
       return
     }
