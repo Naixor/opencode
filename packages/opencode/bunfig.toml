@@ -5,3 +5,4 @@ preload = ["./test/preload.ts"]
 # timeout is not actually parsed from bunfig.toml (see src/bunfig.zig in oven-sh/bun)
 # using --timeout in package.json scripts instead
 # https://github.com/oven-sh/bun/issues/7789
+timeout = 120000  # 120 seconds; matches the parallel runner's file-level timeout (20-way parallelism)

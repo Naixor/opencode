@@ -58,6 +58,19 @@ Execute a single test-fix cycle. Read the ledger, select the highest-priority `d
 
 Follow these sub-steps in order to identify the root cause. Do not skip ahead — each sub-step builds on the previous one.
 
+### 3.0 Check `.test-failures.json` (Parallel Runner Artifact)
+
+Before reading the test file, check if `packages/opencode/.test-failures.json` exists.
+
+This file is written by `script/test-parallel.ts` whenever any file reports failures. It contains an array of `WorkerResult` objects with fields: `file`, `pass`, `fail`, `skip`, `duration`, and `error` (the combined stdout + stderr from `bun test`).
+
+1. Read the file if it exists.
+2. Find the entry whose `file` path matches the current ledger entry's `file` field.
+3. If found, read the `error` field — it contains the raw bun test output (banner, per-test lines, and summary). This is the most reliable source of the actual failure message.
+4. Note: if `pass` and `fail` counts look wrong (e.g., `fail: 2` but the `error` text shows "0 fail"), suspect a regex false-positive in `parseOutput` rather than a real test failure.
+
+Use this data to pre-populate your understanding of the error before reading the test source.
+
 ### 3.1 Read the Failing Test
 
 1. Open the test file at the entry's `file` path.

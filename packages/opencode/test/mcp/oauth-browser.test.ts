@@ -138,8 +138,11 @@ test("BrowserOpenFailed event is published when open() throws", async () => {
       // don't show up as unhandled between tests.
       const authPromise = MCP.authenticate("test-oauth-server").catch(() => undefined)
 
-      // Config.get() can be slow in tests, so give it plenty of time.
-      await new Promise((resolve) => setTimeout(resolve, 2_000))
+      // Poll until the event fires (Config.get() can be slow under parallel load).
+      const deadline = Date.now() + 8_000
+      while (events.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
 
       // Stop the callback server and cancel any pending auth
       await McpOAuthCallback.stop()
@@ -187,8 +190,13 @@ test("BrowserOpenFailed event is NOT published when open() succeeds", async () =
       // Run authenticate with a timeout to avoid waiting forever for the callback
       const authPromise = MCP.authenticate("test-oauth-server-2").catch(() => undefined)
 
-      // Config.get() can be slow in tests; also covers the ~500ms open() error-detection window.
-      await new Promise((resolve) => setTimeout(resolve, 2_000))
+      // Poll until open() has been called (Config.get() can be slow under parallel load),
+      // then wait an extra 600ms to cover the ~500ms error-detection window.
+      const deadline = Date.now() + 8_000
+      while (openCalledWith === undefined && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      await new Promise((resolve) => setTimeout(resolve, 600))
 
       // Stop the callback server and cancel any pending auth
       await McpOAuthCallback.stop()
@@ -232,8 +240,16 @@ test("open() is called with the authorization URL", async () => {
       // Run authenticate with a timeout to avoid waiting forever for the callback
       const authPromise = MCP.authenticate("test-oauth-server-3").catch(() => undefined)
 
-      // Config.get() can be slow in tests; also covers the ~500ms open() error-detection window.
-      await new Promise((resolve) => setTimeout(resolve, 2_000))
+      // Poll until open() has been called (Config.get() can be slow under parallel load).
+      const deadline = Date.now() + 8_000
+      while (openCalledWith === undefined && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      // Wait for authenticate()'s 500ms browser-error-detection window to elapse so that
+      // callbackPromise is already being awaited before stop() rejects it. Without this,
+      // stop() rejects the promise before MCP.authenticate() reaches `await callbackPromise`,
+      // which Bun treats as an unhandled rejection and fails the test.
+      await new Promise((resolve) => setTimeout(resolve, 600))
 
       // Stop the callback server and cancel any pending auth
       await McpOAuthCallback.stop()

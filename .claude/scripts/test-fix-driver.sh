@@ -26,6 +26,12 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LOG_DIR="$PROJECT_ROOT/.claude/logs"
 COUNTER_FILE="$LOG_DIR/test-fix-round-counter"
 
+# ── Timestamp & Logging ───────────────────────────────────────────────
+# ts: ISO-8601 wall-clock timestamp for every log line.
+ts() { date +"%Y-%m-%dT%H:%M:%S"; }
+# log: timestamped echo — use instead of bare echo everywhere.
+log() { echo "[$(ts)] $*"; }
+
 # ── Usage ─────────────────────────────────────────────────────────────
 usage() {
   cat <<'EOF'
@@ -175,13 +181,13 @@ print_ledger_summary() {
     escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
     discovered=$(jq '[.entries[] | select(.status == "discovered")] | length' "$LEDGER_PATH")
     attempted=$(jq '[.entries[] | select(.status == "attempted")] | length' "$LEDGER_PATH")
-    echo "[STATUS] Ledger: $total total, $fixed fixed, $escalated escalated, $discovered discovered, $attempted attempted"
+    log "[STATUS] Ledger: $total total, $fixed fixed, $escalated escalated, $discovered discovered, $attempted attempted"
   fi
 }
 
 handle_shutdown() {
   echo ""
-  echo "[SIGNAL] Shutdown requested — will exit after current round completes"
+  log "[SIGNAL] Shutdown requested — will exit after current round completes"
   SHUTDOWN_REQUESTED=1
 }
 
@@ -203,7 +209,7 @@ acquire_lock() {
     local lock_pid
     lock_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")
     if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
-      echo "[WARN] Removing stale lock (PID $lock_pid no longer running)" >&2
+      log "[WARN] Removing stale lock (PID $lock_pid no longer running)" >&2
       rm -rf "$LOCK_DIR"
       if mkdir "$LOCK_DIR" 2>/dev/null; then
         echo $$ >"$LOCK_DIR/pid"
@@ -222,7 +228,7 @@ acquire_lock
 cleanup() {
   rm -rf "$LOCK_DIR" 2>/dev/null || true
   print_ledger_summary
-  echo "[EXIT] Driver stopped."
+  log "[EXIT] Driver stopped."
 }
 
 trap 'handle_shutdown' SIGINT SIGTERM
@@ -243,8 +249,8 @@ echo ""
 # If the ledger already exists (crash recovery), skip to LOOP.
 
 init_ledger() {
-  echo "[INIT] No ledger found at $LEDGER_PATH"
-  echo "[INIT] Invoking /test-analyze to discover test failures..."
+  log "[INIT] No ledger found at $LEDGER_PATH"
+  log "[INIT] Invoking /test-analyze to discover test failures..."
 
   local raw_output="/tmp/test-fix-raw-output-$$.txt"
   local report_file="$LOG_DIR/test-analyze-init.log"
@@ -255,16 +261,16 @@ init_ledger() {
     >"$report_file" 2>&1 || exit_code=$?
 
   if [[ $exit_code -eq 124 ]]; then
-    echo "[ERROR] /test-analyze timed out after ${ROUND_TIMEOUT}s" >&2
+    log "[ERROR] /test-analyze timed out after ${ROUND_TIMEOUT}s" >&2
     exit 2
   fi
 
   if [[ ! -s "$report_file" ]]; then
-    echo "[ERROR] /test-analyze produced no output. See $report_file" >&2
+    log "[ERROR] /test-analyze produced no output. See $report_file" >&2
     exit 2
   fi
 
-  echo "[INIT] /test-analyze complete. Parsing failure report..."
+  log "[INIT] /test-analyze complete. Parsing failure report..."
 
   # Cross-verify: count failure markers in raw bun test output as ground truth.
   # bun test uses (fail) prefix in non-TTY/piped mode and ✗ (U+2717) in TTY mode.
@@ -279,9 +285,9 @@ init_ledger() {
     else
       raw_fail_count="$count_x_marker"
     fi
-    echo "[INIT] Raw bun test output: $raw_fail_count failure marker(s) detected (fail-prefix=$count_fail_prefix, ✗=$count_x_marker)"
+    log "[INIT] Raw bun test output: $raw_fail_count failure marker(s) detected (fail-prefix=$count_fail_prefix, ✗=$count_x_marker)"
   else
-    echo "[WARN] Raw output file not found or empty — skipping raw failure cross-verification"
+    log "[WARN] Raw output file not found or empty — skipping raw failure cross-verification"
   fi
 
   # Parse failure table rows from the Markdown report.
@@ -331,8 +337,8 @@ init_ledger() {
 
   # Cross-check: if ✗ count > report table count, Claude missed failures — abort and warn.
   if [[ "$raw_fail_count" -gt "$count" ]]; then
-    echo "[WARN] COMPLETENESS MISMATCH: raw output has $raw_fail_count ✗ failure(s) but report table has only $count row(s)." >&2
-    echo "[WARN] Claude may have missed failures. Re-running /test-analyze with explicit ✗ hint..." >&2
+    log "[WARN] COMPLETENESS MISMATCH: raw output has $raw_fail_count ✗ failure(s) but report table has only $count row(s)." >&2
+    log "[WARN] Claude may have missed failures. Re-running /test-analyze with explicit ✗ hint..." >&2
 
     local exit_code2=0
     run_with_timeout "$ROUND_TIMEOUT" claude -p \
@@ -379,9 +385,9 @@ Make sure your Failure Table has exactly $raw_fail_count rows — do NOT skip an
             modified_files: []
           }]')
       done < <(grep -E '^\| *[0-9]' "$report_file" 2>/dev/null || true)
-      echo "[INIT] Retry complete: $count failure(s) parsed after re-run"
+      log "[INIT] Retry complete: $count failure(s) parsed after re-run"
     else
-      echo "[WARN] Retry /test-analyze failed with code $exit_code2 — proceeding with $count entries from first run" >&2
+      log "[WARN] Retry /test-analyze failed with code $exit_code2 — proceeding with $count entries from first run" >&2
     fi
   fi
 
@@ -407,38 +413,38 @@ Make sure your Failure Table has exactly $raw_fail_count rows — do NOT skip an
 
   # Validate the generated ledger is valid JSON
   if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
-    echo "[ERROR] Generated ledger is not valid JSON" >&2
+    log "[ERROR] Generated ledger is not valid JSON" >&2
     exit 2
   fi
 
-  echo "[INIT] Ledger initialized: $count failure(s) in 'discovered' state"
-  echo "[INIT] Ledger written to $LEDGER_PATH"
+  log "[INIT] Ledger initialized: $count failure(s) in 'discovered' state"
+  log "[INIT] Ledger written to $LEDGER_PATH"
 
   # Initialize round counter to 0
   echo "0" >"$COUNTER_FILE"
-  echo "[INIT] Round counter initialized at $COUNTER_FILE"
+  log "[INIT] Round counter initialized at $COUNTER_FILE"
 }
 
 # ── State Machine Entry Point ─────────────────────────────────────────
 if [[ -f "$LEDGER_PATH" ]]; then
-  echo "[INIT] Existing ledger found at $LEDGER_PATH — resuming"
+  log "[INIT] Existing ledger found at $LEDGER_PATH — resuming"
 
   # Validate existing ledger is valid JSON
   if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
-    echo "[ERROR] Existing ledger is not valid JSON — delete and re-run to reinitialize" >&2
+    log "[ERROR] Existing ledger is not valid JSON — delete and re-run to reinitialize" >&2
     exit 2
   fi
 
   # Ensure round counter exists (may have been lost if driver was killed)
   if [[ ! -f "$COUNTER_FILE" ]]; then
     echo "0" >"$COUNTER_FILE"
-    echo "[INIT] Round counter missing — reinitialized to 0"
+    log "[INIT] Round counter missing — reinitialized to 0"
   fi
 
   local_entries=$(jq '.entries | length' "$LEDGER_PATH")
   local_terminal=$(jq '[.entries[] | select(.status == "fixed" or .status == "escalated")] | length' "$LEDGER_PATH")
   local_remaining=$((local_entries - local_terminal))
-  echo "[INIT] Ledger status: $local_entries total, $local_terminal terminal, $local_remaining remaining"
+  log "[INIT] Ledger status: $local_entries total, $local_terminal terminal, $local_remaining remaining"
 else
   init_ledger
 fi
@@ -555,11 +561,11 @@ handle_timeout() {
   attempted_count=$(jq '[.entries[] | select(.status == "attempted")] | length' "$LEDGER_PATH" 2>/dev/null || echo "0")
 
   if [[ "$attempted_count" -eq 0 ]]; then
-    echo "[TIMEOUT] No in-progress entries found — ledger unchanged"
+    log "[TIMEOUT] No in-progress entries found — ledger unchanged"
     return
   fi
 
-  echo "[TIMEOUT] Found $attempted_count in-progress entry/entries — updating ledger"
+  log "[TIMEOUT] Found $attempted_count in-progress entry/entries — updating ledger"
 
   local now
   now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -589,20 +595,20 @@ handle_timeout() {
   echo "$updated" >"$LEDGER_PATH"
 
   if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
-    echo "[ERROR] Ledger corrupted during timeout handling" >&2
+    log "[ERROR] Ledger corrupted during timeout handling" >&2
     exit 2
   fi
 
   local escalated_count
   escalated_count=$(jq '[.entries[] | select(.escalation_reason == "timeout")] | length' "$LEDGER_PATH")
-  echo "[TIMEOUT] $attempted_count timed-out entry/entries processed ($escalated_count escalated with reason=timeout)"
+  log "[TIMEOUT] $attempted_count timed-out entry/entries processed ($escalated_count escalated with reason=timeout)"
 }
 
 # ── FORCE_ESCALATE State ──────────────────────────────────────────────
 # Set all non-terminal ledger entries to status='escalated' with
 # escalation_reason='max_attempts_exceeded', then transition to REPORT.
 force_escalate() {
-  echo "[FORCE_ESCALATE] Escalating all remaining non-terminal entries..."
+  log "[FORCE_ESCALATE] Escalating all remaining non-terminal entries..."
 
   local now
   now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -626,20 +632,20 @@ force_escalate() {
 
   # Validate the updated ledger
   if ! jq empty "$LEDGER_PATH" 2>/dev/null; then
-    echo "[ERROR] Ledger corrupted during force-escalate" >&2
+    log "[ERROR] Ledger corrupted during force-escalate" >&2
     exit 2
   fi
 
   local escalated_count
   escalated_count=$(jq '[.entries[] | select(.escalation_reason == "max_attempts_exceeded")] | length' "$LEDGER_PATH")
-  echo "[FORCE_ESCALATE] $escalated_count entry/entries force-escalated"
-  echo "[FORCE_ESCALATE] Transitioning to REPORT"
+  log "[FORCE_ESCALATE] $escalated_count entry/entries force-escalated"
+  log "[FORCE_ESCALATE] Transitioning to REPORT"
 }
 
 # ── REPORT State ──────────────────────────────────────────────────────
 # Invoke /test-fix-report to generate the final Markdown report from the ledger.
 generate_report() {
-  echo "[REPORT] Generating final report from ledger..."
+  log "[REPORT] Generating final report from ledger..."
 
   local report_log="$LOG_DIR/test-fix-report.log"
 
@@ -648,11 +654,11 @@ generate_report() {
     >"$report_log" 2>&1 || exit_code=$?
 
   if [[ $exit_code -eq 124 ]]; then
-    echo "[WARN] /test-fix-report timed out after ${ROUND_TIMEOUT}s — report may be incomplete" >&2
+    log "[WARN] /test-fix-report timed out after ${ROUND_TIMEOUT}s — report may be incomplete" >&2
   elif [[ $exit_code -ne 0 ]]; then
-    echo "[WARN] /test-fix-report exited with code $exit_code — report may be incomplete" >&2
+    log "[WARN] /test-fix-report exited with code $exit_code — report may be incomplete" >&2
   else
-    echo "[REPORT] Report generation complete. See $report_log"
+    log "[REPORT] Report generation complete. See $report_log"
   fi
 
   # Print ledger summary regardless of report generation outcome
@@ -660,12 +666,69 @@ generate_report() {
   total=$(jq '.entries | length' "$LEDGER_PATH")
   fixed=$(jq '[.entries[] | select(.status == "fixed")] | length' "$LEDGER_PATH")
   escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
-  echo "[REPORT] Final ledger: $total total, $fixed fixed, $escalated escalated"
+  log "[REPORT] Final ledger: $total total, $fixed fixed, $escalated escalated"
+}
+
+# ── Helper: Heartbeat Watcher ────────────────────────────────────────
+# Runs in background during an agent round. Every HEARTBEAT_INTERVAL seconds
+# it prints elapsed time and the last line written to the round log file so
+# the operator can see whether the agent is still making progress.
+HEARTBEAT_INTERVAL=60
+heartbeat_watcher() {
+  local pid="$1"
+  local log_file="$2"
+  local start_ts="$3"
+  local interval="${HEARTBEAT_INTERVAL}"
+
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep "$interval"
+    kill -0 "$pid" 2>/dev/null || break
+    local elapsed=$(( $(date +%s) - start_ts ))
+    local last_line=""
+    [[ -f "$log_file" ]] && last_line=$(tail -1 "$log_file" 2>/dev/null | tr -d '\n' || true)
+    log "[HEARTBEAT] Round still running — elapsed: ${elapsed}s / ${ROUND_TIMEOUT}s | last: ${last_line:0:150}"
+  done
+}
+
+# ── Helper: Timeout Post-Mortem ────────────────────────────────────────
+# Called immediately after timeout is detected. Dumps the last N lines of the
+# round log so the operator can see exactly where the agent got stuck.
+timeout_postmortem() {
+  local log_file="$1"
+  local elapsed="$2"
+
+  log "[TIMEOUT] Agent ran for ${elapsed}s before being killed" >&2
+
+  # Which ledger entry was in-progress when we timed out?
+  if [[ -f "$LEDGER_PATH" ]] && jq empty "$LEDGER_PATH" 2>/dev/null; then
+    local attempted_info
+    attempted_info=$(jq -r \
+      '.entries[] | select(.status == "attempted") | "  \(.id)  \(.priority)  \(.file)  \(.test)"' \
+      "$LEDGER_PATH" 2>/dev/null || true)
+    if [[ -n "$attempted_info" ]]; then
+      log "[TIMEOUT] Entry being worked on when timeout fired:" >&2
+      echo "$attempted_info" | while IFS= read -r line; do
+        log "[TIMEOUT]   $line" >&2
+      done
+    fi
+  fi
+
+  # Dump last 30 lines of the round log for post-mortem analysis
+  if [[ -f "$log_file" ]]; then
+    local line_count
+    line_count=$(wc -l <"$log_file" 2>/dev/null | tr -d ' ')
+    log "[TIMEOUT] Round log has $line_count line(s). Last 30 lines of $log_file:" >&2
+    tail -30 "$log_file" 2>/dev/null | while IFS= read -r line; do
+      echo "  [TIMEOUT|LOG] $line" >&2
+    done
+  else
+    log "[TIMEOUT] Round log not found: $log_file" >&2
+  fi
 }
 
 # ── LOOP State: Round Invocation with Timeout ────────────────────────
 echo ""
-echo "[LOOP] Starting fix loop..."
+log "[LOOP] Starting fix loop..."
 
 stale_rounds=0
 MAX_STALE_ROUNDS=3
@@ -676,25 +739,29 @@ while true; do
   local_remaining=$(count_non_terminal)
 
   echo ""
-  echo "[LOOP] Round $local_round | $local_remaining non-terminal entries remaining | stale_rounds=$stale_rounds"
+  log "[LOOP] Round $local_round | $local_remaining non-terminal entries remaining | stale_rounds=$stale_rounds"
 
   # Termination: all entries are terminal
   if [[ "$local_remaining" -eq 0 ]]; then
     if [[ "$FINAL_CHECK_DONE" -eq 0 ]]; then
-      echo "[FINAL_CHECK] All known failures resolved — running full suite to catch any missed failures..."
+      log "[FINAL_CHECK] All known failures resolved — running full suite via test:parallel..."
       final_output="$LOG_DIR/test-fix-final-check.txt"
-      bun test --cwd "$PROJECT_ROOT/packages/opencode" >"$final_output" 2>&1 || true
+      local_fc_start=$(date +%s)
+      bun run --cwd "$PROJECT_ROOT/packages/opencode" test:parallel >"$final_output" 2>&1 || true
+      local_fc_elapsed=$(( $(date +%s) - local_fc_start ))
 
-      local_fc_a=$(grep -c '^(fail)' "$final_output" 2>/dev/null || echo "0")
-      local_fc_b=$(grep -c '✗' "$final_output" 2>/dev/null || echo "0")
+      # test:parallel summary uses "Fail: N" lines; also check ✗ markers for safety
+      local_fc_a=$(grep -E '^Fail:\s+[0-9]' "$final_output" 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo "0")
+      local_fc_b=$(grep -c '^\[.*\] ✗' "$final_output" 2>/dev/null || echo "0")
       final_fail_count=$(( local_fc_a > local_fc_b ? local_fc_a : local_fc_b ))
-      echo "[FINAL_CHECK] Full suite: $final_fail_count failure(s)"
+      log "[FINAL_CHECK] Full suite finished in ${local_fc_elapsed}s"
+      log "[FINAL_CHECK] Full suite: $final_fail_count failure(s)"
 
       if [[ "$final_fail_count" -eq 0 ]]; then
         FINAL_CHECK_DONE=1
-        echo "[FINAL_CHECK] Suite is clean — proceeding to REPORT"
+        log "[FINAL_CHECK] Suite is clean — proceeding to REPORT"
       else
-        echo "[FINAL_CHECK] $final_fail_count new failure(s) detected — invoking /test-analyze to catalog them..."
+        log "[FINAL_CHECK] $final_fail_count new failure(s) detected — invoking /test-analyze to catalog them..."
         final_analyze_log="$LOG_DIR/test-fix-final-analyze.log"
         local_fc_ec=0
         run_with_timeout "$ROUND_TIMEOUT" claude -p \
@@ -703,9 +770,9 @@ while true; do
 
         if [[ "$local_fc_ec" -eq 0 ]]; then
           local_new_count=$(add_failures_from_report "$final_analyze_log")
-          echo "[FINAL_CHECK] $local_new_count new failure(s) added to ledger — continuing fix loop"
+          log "[FINAL_CHECK] $local_new_count new failure(s) added to ledger — continuing fix loop"
         else
-          echo "[WARN] /test-analyze failed (code $local_fc_ec) — skipping final check to avoid infinite loop" >&2
+          log "[WARN] /test-analyze failed (code $local_fc_ec) — skipping final check to avoid infinite loop" >&2
           FINAL_CHECK_DONE=1
         fi
 
@@ -714,54 +781,54 @@ while true; do
       fi
     fi
 
-    echo "[LOOP] All ledger entries are terminal and suite is clean — transitioning to REPORT"
+    log "[LOOP] All ledger entries are terminal and suite is clean — transitioning to REPORT"
     generate_report
     # Determine exit code: 0 if all fixed, 1 if any escalated
     local_escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
     if [[ "$local_escalated" -eq 0 ]]; then
-      echo "[DONE] All failures fixed!"
+      log "[DONE] All failures fixed!"
       exit 0
     else
-      echo "[DONE] $local_escalated failure(s) escalated for human review."
+      log "[DONE] $local_escalated failure(s) escalated for human review."
       exit 1
     fi
   fi
 
   # Termination: max rounds exceeded
   if [[ "$local_round" -ge "$MAX_ROUNDS" ]]; then
-    echo "[LOOP] Round $local_round >= max rounds $MAX_ROUNDS — transitioning to FORCE_ESCALATE"
+    log "[LOOP] Round $local_round >= max rounds $MAX_ROUNDS — transitioning to FORCE_ESCALATE"
     force_escalate
     generate_report
     # Determine exit code: 0 if all fixed, 1 if any escalated
     local_escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
     if [[ "$local_escalated" -eq 0 ]]; then
-      echo "[DONE] All failures fixed!"
+      log "[DONE] All failures fixed!"
       exit 0
     else
-      echo "[DONE] $local_escalated failure(s) escalated for human review."
+      log "[DONE] $local_escalated failure(s) escalated for human review."
       exit 1
     fi
   fi
 
   # Termination: staleness detected (no progress for 3 consecutive rounds)
   if [[ "$stale_rounds" -ge "$MAX_STALE_ROUNDS" ]]; then
-    echo "[LOOP] $stale_rounds consecutive rounds with no progress — transitioning to FORCE_ESCALATE"
+    log "[LOOP] $stale_rounds consecutive rounds with no progress — transitioning to FORCE_ESCALATE"
     force_escalate
     generate_report
     # Determine exit code: 0 if all fixed, 1 if any escalated
     local_escalated=$(jq '[.entries[] | select(.status == "escalated")] | length' "$LEDGER_PATH")
     if [[ "$local_escalated" -eq 0 ]]; then
-      echo "[DONE] All failures fixed!"
+      log "[DONE] All failures fixed!"
       exit 0
     else
-      echo "[DONE] $local_escalated failure(s) escalated for human review."
+      log "[DONE] $local_escalated failure(s) escalated for human review."
       exit 1
     fi
   fi
 
   # Check if shutdown was requested between rounds
   if [[ "$SHUTDOWN_REQUESTED" -eq 1 ]]; then
-    echo "[SIGNAL] Graceful shutdown — exiting after completing previous round"
+    log "[SIGNAL] Graceful shutdown — exiting after completing previous round"
     print_ledger_summary
     exit 1
   fi
@@ -769,10 +836,15 @@ while true; do
   # Record terminal count before the round
   local_terminal_before=$(count_terminal)
 
+  # Log which ledger entry will be targeted this round (highest-priority discovered)
+  local_target=$(jq -r \
+    '[.entries[] | select(.status == "discovered")] | sort_by(.priority) | first | "\(.id)  \(.priority)  \(.file)  \(.test)"' \
+    "$LEDGER_PATH" 2>/dev/null || echo "(unknown)")
+  log "[LOOP] Target entry: $local_target"
+
   # Invoke Agent for one fix round
   local_log_file="$LOG_DIR/test-fix-round-${local_round}.log"
-  echo "[LOOP] Invoking Agent: timeout ${ROUND_TIMEOUT}s claude -p '/test-fix-round --ledger $LEDGER_PATH'"
-  echo "[LOOP] Log: $local_log_file"
+  log "[LOOP] Invoking Agent: timeout=${ROUND_TIMEOUT}s  pid=TBD  log=$local_log_file"
 
   # Protect the Agent from SIGINT/SIGTERM: temporarily set "ignore"
   # disposition before forking so the child inherits it. Then restore
@@ -782,10 +854,24 @@ while true; do
   claude -p "/test-fix-round --ledger $LEDGER_PATH" \
     >"$local_log_file" 2>&1 &
   agent_pid=$!
-  # Timeout watcher: kills the agent after ROUND_TIMEOUT seconds
-  (sleep "$ROUND_TIMEOUT" && kill "$agent_pid" 2>/dev/null) &
+  round_start_ts=$(date +%s)
+  log "[LOOP] Agent started: pid=$agent_pid"
+
+  # Timeout watcher: sends SIGTERM after ROUND_TIMEOUT seconds, then SIGKILL
+  # after an additional 15s grace period if the agent ignores SIGTERM.
+  (sleep "$ROUND_TIMEOUT" \
+    && log "[TIMEOUT] Sending SIGTERM to agent pid=$agent_pid after ${ROUND_TIMEOUT}s" \
+    && kill "$agent_pid" 2>/dev/null \
+    && sleep 15 \
+    && kill -0 "$agent_pid" 2>/dev/null \
+    && log "[TIMEOUT] Agent still alive after 15s grace — sending SIGKILL to pid=$agent_pid" \
+    && kill -9 "$agent_pid" 2>/dev/null) &
   watcher_pid=$!
   trap 'handle_shutdown' SIGINT SIGTERM
+
+  # Start heartbeat watcher in background — prints progress every 60s
+  heartbeat_watcher "$agent_pid" "$local_log_file" "$round_start_ts" &
+  heartbeat_pid=$!
 
   # Wait for agent completion — re-wait if interrupted by a signal
   local_exit_code=0
@@ -798,25 +884,30 @@ while true; do
     # If agent is still running (wait was interrupted by signal), re-wait
     kill -0 "$agent_pid" 2>/dev/null || break
   done
+  round_elapsed=$(( $(date +%s) - round_start_ts ))
+
+  # Shut down heartbeat watcher
+  kill "$heartbeat_pid" 2>/dev/null || true
+  wait "$heartbeat_pid" 2>/dev/null || true
 
   # Clean up timeout watcher and detect whether timeout occurred
   if kill -0 "$watcher_pid" 2>/dev/null; then
     # Watcher still alive → agent finished before timeout
     kill "$watcher_pid" 2>/dev/null
-    wait "$watcher_pid" 2>/dev/null
+    wait "$watcher_pid" 2>/dev/null || true
   else
     # Watcher exited first → timeout was triggered
-    wait "$watcher_pid" 2>/dev/null
+    wait "$watcher_pid" 2>/dev/null || true
     local_exit_code=124
   fi
 
   if [[ "$local_exit_code" -eq 0 ]]; then
-    echo "[LOOP] Agent completed successfully"
+    log "[LOOP] Agent completed successfully in ${round_elapsed}s"
   elif [[ "$local_exit_code" -eq 124 ]]; then
-    echo "[WARN] Agent timed out after ${ROUND_TIMEOUT}s"
+    timeout_postmortem "$local_log_file" "$round_elapsed"
     handle_timeout "$ROUND_TIMEOUT"
   else
-    echo "[WARN] Agent exited with code $local_exit_code — retrying same ledger state"
+    log "[WARN] Agent exited with code $local_exit_code after ${round_elapsed}s — retrying same ledger state"
   fi
 
   increment_round
@@ -824,10 +915,10 @@ while true; do
   # Staleness detection: compare terminal count before and after the round
   local_terminal_after=$(count_terminal)
   if [[ "$local_terminal_after" -gt "$local_terminal_before" ]]; then
-    echo "[LOOP] Progress detected: terminal entries $local_terminal_before → $local_terminal_after"
+    log "[LOOP] Progress detected: terminal entries $local_terminal_before → $local_terminal_after"
     stale_rounds=0
   else
     stale_rounds=$((stale_rounds + 1))
-    echo "[LOOP] No progress: terminal entries unchanged at $local_terminal_after (stale_rounds=$stale_rounds/$MAX_STALE_ROUNDS)"
+    log "[LOOP] No progress: terminal entries unchanged at $local_terminal_after (stale_rounds=$stale_rounds/$MAX_STALE_ROUNDS)"
   fi
 done

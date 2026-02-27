@@ -40,8 +40,10 @@ Based on the `--scope` argument, run the appropriate test command:
 - **`e2e`:** `bun run --cwd packages/app test:e2e`
 - **`all`:** Run both commands sequentially
 
-If `--file` is provided, run a single file directly (no parallelism benefit for one file):
-- `bun test --cwd packages/opencode -- <file>`
+If `--file` is provided, run only that file via test:parallel using `--pattern`:
+- `bun run --cwd packages/opencode test:parallel --workers 1 --pattern "**/<file>" 2>&1`
+
+  Where `<file>` is the value passed to `--file`. The `--pattern` argument is matched against absolute file paths using minimatch, so prefixing with `**/` ensures it matches regardless of the absolute root. Example: `--file test/tool/bash.test.ts` → `--pattern "**/test/tool/bash.test.ts"`.
 
 Capture ALL stdout and stderr combined (`2>&1`). If `--output` is provided, save the raw output to that path.
 
@@ -95,9 +97,7 @@ Use TWO independent extraction methods to count failures, then cross-check with 
 
 ### Source A: Summary Line Extraction
 
-The summary format depends on which command was used:
-
-**`bun test:parallel` summary** (default `bun` scope, at end of output):
+All scopes (`bun`, `e2e`, and `--file`) use `test:parallel`, which always emits the same summary block at the end of output:
 ```
 Pass:    N
 Fail:    N
@@ -107,41 +107,17 @@ Skip:    N
 2. Search for `^Pass:\s+(\d+)` → `source_a_pass`
 3. Search for `^Skip:\s+(\d+)` → `source_a_skip`
 
-**`bun test` summary** (used when `--file` is provided):
-```
-N pass, N fail, N skip, N expect() calls
-```
-1. Extract the integer before `fail` → `source_a_fail`
-2. Extract the integers for `pass` and `skip`
-
-If the summary block is missing or unparseable for either format, set `source_a_fail = UNKNOWN` and flag for `COMPLETENESS_WARNING`.
+If the summary block is missing or unparseable, set `source_a_fail = UNKNOWN` and flag for `COMPLETENESS_WARNING`.
 
 ---
 
 ### Source B: Individual Failure Counting
 
-The counting method depends on which command was used:
-
-**`bun test:parallel` (default `bun` scope):**
-
-Count per-file failure markers — lines matching the `[N/M] ✗` pattern:
+All scopes use `test:parallel`, so count per-file failure markers — lines matching the `[N/M] ✗` pattern:
 ```
 grep -c '^\[.*\] ✗' <raw-output-file>
 ```
 Each `[N/M] ✗` line represents one failing test **file** (not one failing test case). Cross-check by summing the `Y fail` values from all `[N/M] ✗ <path> (X pass, Y fail, Z skip, T.Ts)` lines; the sum must equal `source_a_fail`. If they differ, flag for `COMPLETENESS_WARNING`.
-
-**`bun test` (used when `--file` is provided):**
-
-Check for BOTH non-TTY and TTY patterns and take the maximum:
-1. Count `^(fail)` lines (non-TTY):
-   ```
-   grep -c '^(fail)' <raw-output-file>
-   ```
-2. Count `✗` lines (TTY):
-   ```
-   grep -c '✗' <raw-output-file>
-   ```
-3. `source_b_fail = max(count_from_step1, count_from_step2)`
 
 If `source_b_fail` differs from `source_a_fail`, flag for `COMPLETENESS_WARNING`.
 
@@ -338,7 +314,7 @@ Always include this section. Fill in actual values from Steps 2–3.
 | Metric | Value |
 |--------|-------|
 | **Scope** | bun / e2e / all |
-| **Runner** | test:parallel / bun test |
+| **Runner** | test:parallel |
 | **Total** | N |
 | **Pass** | N |
 | **Fail** | N |
@@ -356,8 +332,8 @@ Always include this section. Fill in actual values from Steps 2–3.
 ```
 
 Rules:
-- **Runner** is `test:parallel` when the `bun` scope is used without `--file`; `bun test` when `--file` is provided or scope is `e2e`.
-- **Wall Time** and **Speedup** are only shown for `test:parallel` runs; omit both rows for plain `bun test`.
+- **Runner** is always `test:parallel` for all scopes and for `--file` runs.
+- **Wall Time** and **Speedup** are always shown — `test:parallel` provides them in all cases.
 
 Rules:
 - `Dual Verification` is **PASS** only if **all four** checks pass (Source A/B match, arithmetic, silent skip).
