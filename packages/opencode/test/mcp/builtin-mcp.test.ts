@@ -10,8 +10,8 @@ describe("BuiltinMcp", () => {
     mockMcpPolicy = "trusted"
     spies.push(
       spyOn(SecurityConfig, "getMcpPolicy").mockImplementation(() => mockMcpPolicy as "trusted" | "enforced" | "blocked"),
-      spyOn(SecurityConfig, "getSecurityConfig").mockImplementation(() => ({ version: "1.0", roles: [], rules: [] })),
-      spyOn(SecurityConfig, "loadSecurityConfig").mockImplementation(async () => ({ version: "1.0", roles: [], rules: [] })),
+      spyOn(SecurityConfig, "getSecurityConfig").mockImplementation(() => ({ version: "1.0", roles: [], rules: [], resolvedAllowlist: [] })),
+      spyOn(SecurityConfig, "loadSecurityConfig").mockImplementation(async () => ({ version: "1.0", roles: [], rules: [], resolvedAllowlist: [] })),
       spyOn(SecurityConfig, "resetConfig").mockImplementation(() => {}),
     )
   })

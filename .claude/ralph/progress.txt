@@ -1,0 +1,88 @@
+## 2026-02-26 - US-006
+- Updated `packages/opencode/script/test-parallel/types.ts`: added `shard?: { index: number; total: number }` to `RunnerConfig`
+- Updated `packages/opencode/script/test-parallel/reporter.ts`: `printSummary` prints `Shard: N/M` line when `config.shard` is set
+- Updated `packages/opencode/script/test-parallel.ts`:
+  - Added `--shard N/M` to `--help` usage text
+  - `parseShard` helper splits `N/M` string, returns undefined if malformed
+  - `rawShard` reads `--shard` arg, falls back to `TEST_SHARD_INDEX`/`TEST_SHARD_TOTAL` env vars
+  - After `buildQueue`, `sharded = shard ? queue.filter((_, i) => i % shard.total === shard.index - 1) : queue`
+  - `shard` added to `config` object
+- **Learnings for future iterations:**
+  - Modular sharding `i % M === N-1` is deterministic as long as the file list order is deterministic (LPT ensures this)
+  - Env var fallback pattern: `getArg("--flag") ?? (process.env.A && process.env.B ? \`${A}/${B}\` : undefined)`
+  - Adding optional config fields to an interface is zero-cost — no callers need updating if they use object spread or explicit construction
+---
+
+## 2026-02-26 - US-005
+- Created `packages/opencode/script/test-parallel.ts` CLI entry point
+- Manual arg parser using `getArg(flag, alias?)` helper (no external deps)
+- `--help` flag prints usage and exits with code 0
+- `import.meta.dir` (Bun API) for directory resolution instead of `fileURLToPath`
+- Narrowed reporter type: `rawReporter === "json" || rawReporter === "junit" ? rawReporter : undefined`
+- Top-level `await` throughout (ESM, Bun supports it)
+- Added `"test:parallel": "bun run script/test-parallel.ts"` to `packages/opencode/package.json`
+- **Learnings for future iterations:**
+  - `import.meta.dir` is the Bun-idiomatic equivalent of `path.dirname(fileURLToPath(import.meta.url))`
+  - Manual arg parsing with `args.indexOf(flag)` is simpler than yargs for a small number of flags
+  - Type narrowing pattern for union string: `const x = raw === "a" || raw === "b" ? raw : undefined`
+  - `process.argv.slice(2)` gives flags; booleans use `args.includes(flag)`, valued args use indexOf + offset
+---
+
+## 2026-02-26 - US-004
+- Implemented `packages/opencode/script/test-parallel/reporter.ts`
+- `printFileResult`: early return on `config.silent`; prints `[N/total] ✓/✗ file (P pass, F fail, S skip, Xs)`; prints `result.error` verbatim if fail > 0
+- `printSummary`: uses `reduce` for totals; speedup = serialTime/wallTime; early return if no failures; lists failed files with fail count
+- `writeReport`: `mkdir` with `recursive: true` + `.catch()` for idempotency; json branch returns early; xml uses `escapeXml` helper for JUnit output; one `<testsuite>` per file with one `<testcase>`
+- **Learnings for future iterations:**
+  - `mkdir(outDir, { recursive: true }).catch(() => undefined)` is idiomatic for ensuring a directory exists
+  - For JUnit XML: escape `&`, `<`, `>` in file names and error text; each file = one `<testsuite>` with one `<testcase>`
+  - `(ms / 1000).toFixed(N)` converts millisecond duration to seconds string
+---
+
+## Codebase Patterns
+- Project uses `bun turbo typecheck` (via `tsgo --noEmit`) for typechecking across all packages
+- Script files live in `packages/opencode/script/` - new subdirectories can be created freely
+- Code style: no try/catch (use .catch()), no else, prefer const, functional methods, Bun APIs
+- `Bun.file(path).json().catch(() => defaultValue)` is idiomatic for optional JSON reads
+- `Object.fromEntries(array.map(...))` preferred over for-loops for building objects
+- For mutable flags in async orchestration: use `const state = { value: false }` (satisfies "prefer const" while allowing mutation)
+- `Promise.resolve(s).then(JSON.parse).catch(() => null)` is idiomatic for try-parse without try/catch
+- `new Response(proc.stdout).text()` reads a Bun pipe ReadableStream to string
+- `Promise.race([proc.exited.then(() => false), new Promise(resolve => setTimeout(() => { proc.kill(); resolve(true) }, ms))])` is the idiomatic timeout pattern
+
+---
+
+## 2026-02-26 - US-001
+- Implemented `packages/opencode/script/test-parallel/types.ts` with WorkerResult, TimingEntry, TimingData, RunnerConfig interfaces
+- Implemented `packages/opencode/script/test-parallel/timing.ts` with readTiming (Bun.file + .catch) and writeTiming (EMA update, stale entry removal via Object.fromEntries over results only)
+- Fixed pre-existing typecheck errors in `test/mcp/builtin-mcp.test.ts` and `test/tool/skill-mcp.test.ts`: security mocks were missing `resolvedAllowlist: []` on the ResolvedSecurityConfig mock objects
+- **Learnings for future iterations:**
+  - The branch was created from `ralph/security-allowlist` which had unfinished typecheck issues in test mocks
+  - `SecuritySchema.ResolvedSecurityConfig` requires `resolvedAllowlist` field - always include it in mocks
+  - `writeTiming` removes stale entries by only building `updated` from the current `results` array (not merging with existing)
+  - EMA formula: `new_avg = 0.7 * actual + 0.3 * old_avg`
+---
+
+## 2026-02-26 - US-003
+- Implemented `packages/opencode/script/test-parallel/runner.ts`
+- `spawnWorker` internal helper: spawns `bun test --reporter json <file>`, writes stdout to `worker-<pid>.json` in tmpdir, uses `Promise.race` for timeout (kills process + resolves true), reads stdout via `new Response(proc.stdout).text()`, parses NDJSON output for pass/fail/skip, deletes temp file
+- `parseOutput` tries multiple JSON summary formats (`.passed`/`.failed` keys, then `.pass`/`.fail` keys) using `tryParse = (s) => Promise.resolve(s).then(JSON.parse).catch(() => null)`
+- `runWorker` exported as thin wrapper over `spawnWorker`
+- `runAll` uses promise pool: N coroutines each pulling from a shared queue, `activeFns` Set tracks kill handles, `stopped = { value: false }` const-object for mutable flag, `killActive()` kills all on stopOnFailure
+- **Learnings for future iterations:**
+  - `const stopped = { value: false }` satisfies "prefer const" while allowing mutation in async orchestration
+  - `Array.from({ length: N }, () => runNext())` creates N concurrent promise-pool coroutines
+  - `Promise.race([proc.exited.then(() => false), timeout resolving true])` cleanly handles timeout detection
+  - `new Response(proc.stdout).text()` works after process exits (Bun buffers the pipe)
+  - After killing a process in stopOnFailure, check `if (stopped.value) return` before adding to results
+---
+
+## 2026-02-26 - US-002
+- Implemented `packages/opencode/script/test-parallel/discover.ts`
+- `discoverFiles`: uses `new Bun.Glob("**/*.test.ts").scanSync({ cwd: root, absolute: true })`, spreads into array, filters via minimatch if pattern provided
+- `buildQueue`: splits into timed/untimed arrays, sorts timed desc by avg, sorts untimed alphabetically, concatenates
+- **Learnings for future iterations:**
+  - `Bun.Glob.scanSync({ cwd, absolute: true })` is the idiomatic sync way to glob files recursively
+  - Spread `[...glob.scanSync(...)]` needed to get a plain array from the sync iterator
+  - Sort timed/untimed separately then concat — avoids comparing undefined timing entries
+---

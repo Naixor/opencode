@@ -124,7 +124,7 @@ describe("CASE-CFG-004: Child config cannot REMOVE restrictions from parent", ()
     }
 
     // Merge: parent first (least specific), then child (most specific)
-    const merged = SecurityConfig.mergeSecurityConfigs([parentConfig, childConfig])
+    const merged = SecurityConfig.mergeSecurityConfigs([{ config: parentConfig, path: "parent/.opencode-security.json" }, { config: childConfig, path: "child/.opencode-security.json" }])
 
     // Both rules should be present (union)
     expect(merged.rules).toHaveLength(2)
@@ -161,7 +161,7 @@ describe("CASE-CFG-004: Child config cannot REMOVE restrictions from parent", ()
       rules: [],
     }
 
-    const merged = SecurityConfig.mergeSecurityConfigs([parentConfig, childConfig])
+    const merged = SecurityConfig.mergeSecurityConfigs([{ config: parentConfig, path: "parent/.opencode-security.json" }, { config: childConfig, path: "child/.opencode-security.json" }])
     const dir = await setupSecurityConfig(merged)
 
     // Parent restriction on secrets/** should still block viewer
@@ -184,7 +184,7 @@ describe("CASE-CFG-005: Conflicting role definitions across nested configs throw
       roles: [{ name: "admin", level: 50 }],
     }
 
-    expect(() => SecurityConfig.mergeSecurityConfigs([configA, configB])).toThrow(
+    expect(() => SecurityConfig.mergeSecurityConfigs([{ config: configA, path: "a/.opencode-security.json" }, { config: configB, path: "b/.opencode-security.json" }])).toThrow(
       /Role conflict.*admin.*100.*50/,
     )
   })
@@ -200,7 +200,7 @@ describe("CASE-CFG-005: Conflicting role definitions across nested configs throw
       roles: [{ name: "admin", level: 100 }],
     }
 
-    const merged = SecurityConfig.mergeSecurityConfigs([configA, configB])
+    const merged = SecurityConfig.mergeSecurityConfigs([{ config: configA, path: "a/.opencode-security.json" }, { config: configB, path: "b/.opencode-security.json" }])
     expect(merged.roles).toHaveLength(1)
     expect(merged.roles![0].name).toBe("admin")
     expect(merged.roles![0].level).toBe(100)

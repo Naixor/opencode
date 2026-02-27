@@ -1,84 +1,123 @@
 {
   "project": "OpenCode",
-  "branchName": "ralph/tui-shift-enter-newline",
-  "description": "TUI Input Box Shift+Enter Newline Support - Enable reliable newline insertion in the TUI input box via Shift+Enter (in supported terminals) and Ctrl+J (universal fallback)",
+  "branchName": "ralph/security-allowlist",
+  "description": "Security Access Control Allowlist - restrict LLM access to explicitly permitted files/directories via allowlist in .opencode-security.json",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Diagnose terminal Shift+Enter support",
-      "description": "As a developer, I need to understand why Shift+Enter and Cmd+Enter are not working in the TUI, so that I can determine the correct fix strategy.",
+      "title": "Add allowlist schema and ResolvedSecurityConfig type",
+      "description": "As a developer, I need the type definitions for the allowlist feature before any logic can be implemented. Add AllowlistEntry Zod schema, AllowlistLayer interface, ResolvedSecurityConfig interface, and the allowlist field to securityConfigSchema. All changes in packages/opencode/src/security/schema.ts only.",
       "acceptanceCriteria": [
-        "Add temporary debug logging in the textarea key handler (packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx or textarea-keybindings.ts) to log ParsedKey fields (name, ctrl, shift, meta, super) for every keypress",
-        "Document findings: what ParsedKey fields are received for Enter, Shift+Enter, Ctrl+Enter, Cmd+Enter, and Ctrl+J",
-        "Confirm whether the terminal sends shift:true for Shift+Enter or treats it identically to plain Enter",
-        "Write findings as comments in a new file packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md",
+        "Add AllowlistEntry Zod schema: z.object({ pattern: z.string(), type: z.enum(['directory', 'file']) })",
+        "Export AllowlistEntry type via z.infer",
+        "Add AllowlistLayer interface: { source: string, entries: AllowlistEntry[] } — source is config file path, entries are the allowlist entries from that config level",
+        "Add ResolvedSecurityConfig interface extending SecurityConfig with resolvedAllowlist: AllowlistLayer[]",
+        "Add optional allowlist field to securityConfigSchema: z.array(AllowlistEntry).optional()",
+        "Existing configs without allowlist field still parse successfully (backward compatible)",
+        "Config with allowlist: [{ pattern: 'src/**', type: 'directory' }] parses successfully",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "This is a diagnostic story. The debug logging should be added temporarily to understand the terminal behavior. The key question: does OpenTUI's ParsedKey distinguish Shift+Enter from Enter? If not, the issue is at the terminal emulator level."
+      "notes": "Schema-only change. No logic changes. File: packages/opencode/src/security/schema.ts. Follow existing namespace pattern (SecuritySchema). AllowlistEntry uses same RuleType enum as deny rules."
     },
     {
       "id": "US-002",
-      "title": "Verify config-driven keybindings register correctly in OpenTUI",
-      "description": "As a developer, I want to verify that the config-driven keybindings for input_submit and input_newline are correctly registered in OpenTUI's KeyBinding map, so that the config system works as designed.",
+      "title": "Refactor config.ts to use ResolvedSecurityConfig and update merge signature",
+      "description": "As a developer, I want config.ts to use ResolvedSecurityConfig as its internal type and build AllowlistLayer[] during config merging, so that checkAccess() and all callers have access to resolved allowlist layers. This includes changing mergeSecurityConfigs() signature, updating getSecurityConfig() return type, and adding empty-allowlist warning.",
       "acceptanceCriteria": [
-        "Confirm mapTextareaKeybindings in textarea-keybindings.ts generates correct KeyBinding entries for both 'submit' and 'newline' actions",
-        "Confirm the hardcoded entries { name: 'return', action: 'submit' } and { name: 'return', meta: true, action: 'newline' } are preserved as fallbacks",
-        "Confirm config-driven bindings are appended AFTER hardcoded entries so they override via OpenTUI's last-write-wins merge strategy",
-        "Add a unit test in a new test file packages/opencode/test/tui/textarea-keybindings.test.ts that verifies useTextareaKeybindings returns the expected keybinding array containing both hardcoded and config-driven entries",
+        "Change currentConfig variable type from SecurityConfig to ResolvedSecurityConfig",
+        "Update emptyConfig to include resolvedAllowlist: [] (no restriction by default)",
+        "Change getSecurityConfig() return type to ResolvedSecurityConfig",
+        "Change mergeSecurityConfigs() input from SecurityConfig[] to { config: SecurityConfig, path: string }[] and return type to ResolvedSecurityConfig",
+        "In mergeSecurityConfigs(), each config that defines allowlist produces one AllowlistLayer in resolvedAllowlist with source set to the config file path",
+        "If neither config defines allowlist, resolvedAllowlist is empty array",
+        "In loadSecurityConfig(), if single config has allowlist defined, create one AllowlistLayer with source set to config file path; if not defined, resolvedAllowlist is []",
+        "When allowlist is present but is empty array [], log warning: 'Empty allowlist configured — all LLM operations will be denied. No files are accessible to the LLM.'",
+        "Update all callers of getSecurityConfig() if needed — most callers only access existing fields so changes should be minimal since ResolvedSecurityConfig extends SecurityConfig",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "Depends on US-001 findings. The current code already has config defaults input_newline='shift+return,ctrl+return,alt+return,ctrl+j' in config.ts. This story verifies they flow through correctly."
+      "notes": "Primary file: packages/opencode/src/security/config.ts. Depends on US-001 for types. ResolvedSecurityConfig extends SecurityConfig so most callers need no change. The merge function now needs { config, path }[] input — findSecurityConfigs() already returns this shape."
     },
     {
       "id": "US-003",
-      "title": "Ensure Shift+Enter inserts newline in supported terminals",
-      "description": "As a user using a modern terminal (Kitty, WezTerm, iTerm2 with CSI u mode), I want Shift+Enter to insert a newline in the TUI input box, so that I can compose multiline prompts.",
+      "title": "Wire up multi-level config loading in bootstrap",
+      "description": "As a developer, I want the bootstrap flow to use findSecurityConfigs() + mergeSecurityConfigs() instead of single-file loading, so that hierarchical configs and multi-level allowlists are properly loaded.",
       "acceptanceCriteria": [
-        "In terminals that distinguish Shift+Enter, pressing Shift+Enter inserts a newline at the cursor position",
-        "The input box auto-expands to show the new line (up to the existing max height of 6 lines)",
-        "Cursor moves to the beginning of the new line after insertion",
-        "Pressing Enter (without modifiers) still submits the prompt",
-        "If US-001 diagnosis shows Shift+Enter is not distinguishable, document this limitation in KEYBINDING-DIAGNOSIS.md and mark this story as passed with a note",
+        "Refactor loadSecurityConfig() to call findSecurityConfigs(projectRoot) to discover all .opencode-security.json files from project root up to git root",
+        "Pass discovered configs through mergeSecurityConfigs() to produce the final merged ResolvedSecurityConfig",
+        "Bootstrap call in packages/opencode/src/project/bootstrap.ts still calls SecurityConfig.loadSecurityConfig(Instance.directory) — function signature unchanged",
+        "Single-config scenario: only one .opencode-security.json exists → behaves identically to before",
+        "No-config scenario: no .opencode-security.json found → returns empty config as before",
+        "Multi-config scenario: parent and child configs merged correctly — rules unioned, roles validated, allowlist layers preserved per-level",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": false,
-      "notes": "Depends on US-001 and US-002. If the terminal cannot distinguish Shift+Enter from Enter, this story is effectively a no-op (the config already has the binding, but the terminal doesn't send the modifier). In that case, document the limitation and pass."
+      "notes": "Primary files: packages/opencode/src/security/config.ts (loadSecurityConfig refactor), packages/opencode/src/project/bootstrap.ts (verify). findSecurityConfigs() and mergeSecurityConfigs() already exist — this story wires them into the main loading path."
     },
     {
       "id": "US-004",
-      "title": "Ensure Ctrl+J works as universal newline shortcut",
-      "description": "As a user, I want Ctrl+J to always insert a newline regardless of terminal type, so that I have a reliable multiline input method.",
+      "title": "Enforce allowlist in checkAccess with evaluation order and audit logging",
+      "description": "As a developer, I want checkAccess() to enforce the allowlist for llm operations with correct priority (deny > allowlist > default-allow), friendly denial messages, symlink handling, and audit logging.",
       "acceptanceCriteria": [
-        "Ctrl+J inserts a newline character at the cursor position in the TUI input box",
-        "Behavior is identical to any other newline shortcut (expands input box, moves cursor to new line)",
-        "Ctrl+J does not conflict with any other TUI functionality",
-        "If Ctrl+J already works due to existing config defaults, verify and document it",
+        "Evaluation order in checkAccess(): 1) resolve symlinks, 2) check deny rules — if denied return DENIED, 3) if operation is not 'llm' return ALLOWED, 4) if resolvedAllowlist has layers check file against every layer, 5) if all layers pass or no allowlist configured return ALLOWED",
+        "For each AllowlistLayer, file must match at least one AllowlistEntry to pass (AND across layers, OR within entries)",
+        "AllowlistEntry with type 'directory' matches using same logic as deny rule directory matching (pattern itself + pattern/**)",
+        "AllowlistEntry with type 'file' matches using same logic as deny rule file matching (exact pattern match via minimatch with matchBase: true)",
+        "read and write operations NOT affected by allowlist — only llm is restricted",
+        "Symlink handling: resolve symlinks first, check resolved (real) path against allowlist — real file location determines access",
+        "Denial message is user-friendly and actionable: includes rejected file path, which layer's source config rejected it, and suggestion to add matching entry with example format",
+        "When a file is denied due to allowlist, call SecurityAudit.logSecurityEvent() with path, operation, role, allowed: false, reason with allowlist context and rejecting layer source",
+        "When no allowlist configured (resolvedAllowlist empty), behavior identical to current (all files accessible)",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": false,
-      "notes": "Ctrl+J sends ASCII 0x0A (linefeed) which all terminals support. The config already has ctrl+j in input_newline defaults. This story verifies it actually works end-to-end."
+      "notes": "Primary file: packages/opencode/src/security/access.ts. Reuse existing matchPath() for AllowlistEntry matching. Add allowlist check AFTER the deny rule loop but BEFORE returning allowed: true. Early exit on first failing layer."
     },
     {
       "id": "US-005",
-      "title": "Verify user-customizable submit and newline keybindings",
-      "description": "As a user, I want to customize which keys trigger submit vs newline via the config file, so that I can match my preferred workflow.",
+      "title": "Unit tests for allowlist enforcement",
+      "description": "As a developer, I want comprehensive unit tests covering all allowlist scenarios: basic matching, deny rule interaction, operation filtering, empty/missing allowlist, multi-layer merge, symlink, and audit logging.",
       "acceptanceCriteria": [
-        "Setting keybinds.input_submit in opencode.jsonc config changes the submit key in the TUI textarea",
-        "Setting keybinds.input_newline in opencode.jsonc config changes the newline key(s) in the TUI textarea",
-        "Setting keybinds.input_newline to 'none' disables all newline insertion shortcuts",
-        "Missing or invalid config values fall back to defaults (input_submit='return', input_newline='shift+return,ctrl+return,alt+return,ctrl+j')",
-        "Add a unit test verifying config override behavior in packages/opencode/test/tui/textarea-keybindings.test.ts",
+        "Test: file matches allowlist entry (type: file), no deny rule → llm allowed",
+        "Test: file matches allowlist entry (type: directory), no deny rule → llm allowed for nested files",
+        "Test: file NOT in allowlist → llm denied with friendly actionable message (includes rejected path, rejecting layer source, suggestion to add entry)",
+        "Test: file in allowlist but covered by deny rule with llm in deniedOperations → llm denied (deny wins)",
+        "Test: read and write operations unaffected by allowlist (read allowed even if file not in allowlist)",
+        "Test: empty allowlist array [] → all llm operations denied, warning logged",
+        "Test: no allowlist field → all files accessible (backward compatible)",
+        "Test: directory entry { pattern: 'src/**', type: 'directory' } matches src/foo/bar.ts",
+        "Test: file entry { pattern: 'README.md', type: 'file' } matches only README.md, not README.md.bak",
+        "Test: symlink resolved path checked against allowlist",
+        "Test: two-layer allowlist — file must match both layers to be allowed",
+        "Test: child config cannot expand parent allowlist (parent allows src/**, child allows src/** + test/** → test/** still denied by parent layer)",
+        "Test: single-layer allowlist (only parent or only child defines it)",
+        "Test: multi-level config loading via findSecurityConfigs + mergeSecurityConfigs produces correct ResolvedSecurityConfig with AllowlistLayer[]",
+        "Test: audit log records allowlist denial events via SecurityAudit.logSecurityEvent()",
+        "All tests pass with bun test --cwd packages/opencode",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": false,
-      "notes": "The config system already supports this via keybinds config in config.ts. This story verifies the full flow from config -> textarea keybindings."
+      "notes": "Test file: packages/opencode/test/security/access_control_cases/unit/allowlist.test.ts. Use existing test helpers: setupSecurityConfig(config, dir?) + teardownSecurityConfig(). setupSecurityConfig creates .git dir automatically. Use fs.realpathSync() on temp dirs for absolute rule patterns (macOS /private/var/ canonicalization). Follow existing test patterns in the same directory."
+    },
+    {
+      "id": "US-006",
+      "title": "Update security check CLI command for allowlist",
+      "description": "As a user, I want the 'opencode security check <path>' CLI command to show allowlist status so I can verify whether a file is permitted by the allowlist.",
+      "acceptanceCriteria": [
+        "security check output includes whether the file matches the current allowlist",
+        "If no allowlist configured, output indicates 'No allowlist configured (all files accessible)'",
+        "If allowlist configured, output shows per-layer match status: which layer matched (with source path) and which pattern matched, or 'Not matched' per layer",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "CLI command location: packages/opencode/src/cli/cmd/security/. Reads resolvedAllowlist from getSecurityConfig(). Reuse the same AllowlistEntry matching logic from access.ts."
     }
   ]
 }

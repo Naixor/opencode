@@ -14,6 +14,7 @@ import fs from "fs"
 import { Instance } from "../../../src/project/instance"
 import { tmpdir } from "../../fixture/fixture"
 import { SecurityConfig } from "../../../src/security/config"
+import { SecurityAccess } from "../../../src/security/access"
 import { AstGrepSearchTool, AstGrepReplaceTool, AstGrepLoader } from "../../../src/tool/ast-grep"
 import { InteractiveBashTool } from "../../../src/tool/interactive-bash"
 
@@ -77,6 +78,7 @@ async function loadSecurityConfig(dir: string, config: Record<string, unknown>) 
   if (!fs.existsSync(gitDir)) {
     fs.mkdirSync(gitDir)
   }
+  SecurityAccess.setProjectRoot(dir)
   await SecurityConfig.loadSecurityConfig(dir)
 }
 
@@ -131,10 +133,7 @@ describe("SecurityAudit integration - audit log entries for denials", () => {
       directory: tmp.path,
       fn: async () => {
         const tool = await AstGrepSearchTool.init()
-        await tool.execute(
-          { pattern: "console.log", lang: "javascript", paths: [tmp.path] },
-          ctx,
-        )
+        await tool.execute({ pattern: "console.log", lang: "javascript", paths: [tmp.path] }, ctx)
 
         await waitForAuditFlush()
 
@@ -142,9 +141,7 @@ describe("SecurityAudit integration - audit log entries for denials", () => {
         const deniedEntries = entries.filter((e) => e.result === "denied")
         expect(deniedEntries.length).toBeGreaterThanOrEqual(1)
 
-        const secretDenied = deniedEntries.find(
-          (e) => typeof e.path === "string" && e.path.includes("secret.js"),
-        )
+        const secretDenied = deniedEntries.find((e) => typeof e.path === "string" && e.path.includes("secret.js"))
         expect(secretDenied).toBeDefined()
         expect(secretDenied!.operation).toBe("read")
         expect(secretDenied!.result).toBe("denied")
@@ -204,9 +201,7 @@ describe("SecurityAudit integration - audit log entries for denials", () => {
         const deniedEntries = entries.filter((e) => e.result === "denied")
         expect(deniedEntries.length).toBeGreaterThanOrEqual(1)
 
-        const segmentDenied = deniedEntries.find(
-          (e) => typeof e.path === "string" && e.path.includes("mixed.js"),
-        )
+        const segmentDenied = deniedEntries.find((e) => typeof e.path === "string" && e.path.includes("mixed.js"))
         expect(segmentDenied).toBeDefined()
         expect(segmentDenied!.operation).toBe("write")
       },
@@ -250,9 +245,7 @@ describe("SecurityAudit integration - audit log entries for denials", () => {
         const deniedEntries = entries.filter((e) => e.result === "denied")
         expect(deniedEntries.length).toBeGreaterThanOrEqual(1)
 
-        const secretDenied = deniedEntries.find(
-          (e) => typeof e.path === "string" && e.path.includes("secrets.env"),
-        )
+        const secretDenied = deniedEntries.find((e) => typeof e.path === "string" && e.path.includes("secrets.env"))
         expect(secretDenied).toBeDefined()
         expect(secretDenied!.operation).toBe("read")
       },
@@ -297,10 +290,7 @@ describe("SecurityAudit integration - audit log entries for denials", () => {
       directory: tmp.path,
       fn: async () => {
         const tool = await AstGrepSearchTool.init()
-        await tool.execute(
-          { pattern: "console.log", lang: "javascript", paths: [tmp.path] },
-          ctx,
-        )
+        await tool.execute({ pattern: "console.log", lang: "javascript", paths: [tmp.path] }, ctx)
 
         await waitForAuditFlush()
 
@@ -308,12 +298,8 @@ describe("SecurityAudit integration - audit log entries for denials", () => {
         const deniedEntries = entries.filter((e) => e.result === "denied")
 
         // Both alpha.js and beta.js should have denied entries
-        const alphaDenied = deniedEntries.find(
-          (e) => typeof e.path === "string" && e.path.includes("alpha.js"),
-        )
-        const betaDenied = deniedEntries.find(
-          (e) => typeof e.path === "string" && e.path.includes("beta.js"),
-        )
+        const alphaDenied = deniedEntries.find((e) => typeof e.path === "string" && e.path.includes("alpha.js"))
+        const betaDenied = deniedEntries.find((e) => typeof e.path === "string" && e.path.includes("beta.js"))
         expect(alphaDenied).toBeDefined()
         expect(betaDenied).toBeDefined()
       },
@@ -351,10 +337,7 @@ describe("SecurityAudit integration - audit log entries for denials", () => {
       directory: tmp.path,
       fn: async () => {
         const tool = await AstGrepSearchTool.init()
-        await tool.execute(
-          { pattern: "console.log", lang: "javascript", paths: [tmp.path] },
-          ctx,
-        )
+        await tool.execute({ pattern: "console.log", lang: "javascript", paths: [tmp.path] }, ctx)
 
         await waitForAuditFlush()
 

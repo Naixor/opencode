@@ -67,6 +67,17 @@ export namespace SecuritySchema {
   })
   export type McpConfig = z.infer<typeof McpConfig>
 
+  export const AllowlistEntry = z.object({
+    pattern: z.string(),
+    type: RuleType,
+  })
+  export type AllowlistEntry = z.infer<typeof AllowlistEntry>
+
+  export interface AllowlistLayer {
+    source: string
+    entries: AllowlistEntry[]
+  }
+
   export const securityConfigSchema = z.object({
     version: z.string(),
     roles: z.array(Role).optional(),
@@ -75,7 +86,12 @@ export namespace SecuritySchema {
     logging: Logging.optional(),
     authentication: Authentication.optional(),
     mcp: McpConfig.optional(),
+    allowlist: z.array(AllowlistEntry).optional(),
   })
 
   export type SecurityConfig = z.infer<typeof securityConfigSchema>
+
+  export interface ResolvedSecurityConfig extends SecurityConfig {
+    resolvedAllowlist: AllowlistLayer[]
+  }
 }

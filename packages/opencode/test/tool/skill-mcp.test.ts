@@ -44,8 +44,8 @@ describe("skill_mcp tool", () => {
     // Use spyOn instead of mock.module to avoid leaking mocks to other test files
     spies.push(
       spyOn(SecurityConfig, "getMcpPolicy").mockImplementation(() => mockMcpPolicy as "trusted" | "enforced" | "blocked"),
-      spyOn(SecurityConfig, "getSecurityConfig").mockImplementation(() => ({ version: "1.0", roles: [], rules: [] }) as ReturnType<typeof SecurityConfig.getSecurityConfig>),
-      spyOn(SecurityConfig, "loadSecurityConfig").mockImplementation(async () => ({ version: "1.0", roles: [], rules: [] }) as unknown as Awaited<ReturnType<typeof SecurityConfig.loadSecurityConfig>>),
+      spyOn(SecurityConfig, "getSecurityConfig").mockImplementation(() => ({ version: "1.0", roles: [], rules: [], resolvedAllowlist: [] }) as ReturnType<typeof SecurityConfig.getSecurityConfig>),
+      spyOn(SecurityConfig, "loadSecurityConfig").mockImplementation(async () => ({ version: "1.0", roles: [], rules: [], resolvedAllowlist: [] }) as unknown as Awaited<ReturnType<typeof SecurityConfig.loadSecurityConfig>>),
       spyOn(SecurityAudit, "logSecurityEvent").mockImplementation(mockLogSecurityEvent),
       spyOn(MCP, "tools").mockImplementation(async () => ({ ...mockTools }) as unknown as Awaited<ReturnType<typeof MCP.tools>>),
       spyOn(MCP, "status").mockImplementation(async () => ({ ...mockStatuses }) as unknown as Awaited<ReturnType<typeof MCP.status>>),

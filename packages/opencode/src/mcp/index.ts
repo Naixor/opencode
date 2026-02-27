@@ -809,6 +809,10 @@ export namespace MCP {
     // Register the callback BEFORE opening the browser to avoid race condition
     // when the IdP has an active SSO session and redirects immediately
     const callbackPromise = McpOAuthCallback.waitForCallback(oauthState)
+    // Pre-attach a no-op rejection handler so that if stop() rejects the promise
+    // before we reach `await callbackPromise` below, Bun does not treat it as an
+    // unhandled rejection.  The real error handling happens at the await below.
+    callbackPromise.catch(() => {})
 
     try {
       const subprocess = await open(authorizationUrl)

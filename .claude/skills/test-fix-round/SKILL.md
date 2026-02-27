@@ -58,6 +58,19 @@ Execute a single test-fix cycle. Read the ledger, select the highest-priority `d
 
 Follow these sub-steps in order to identify the root cause. Do not skip ahead — each sub-step builds on the previous one.
 
+### 3.0 Check `.test-failures.json` (Parallel Runner Artifact)
+
+Before reading the test file, check if `packages/opencode/.test-failures.json` exists.
+
+This file is written by `script/test-parallel.ts` whenever any file reports failures. It contains an array of `WorkerResult` objects with fields: `file`, `pass`, `fail`, `skip`, `duration`, and `error` (the combined stdout + stderr from `bun test`).
+
+1. Read the file if it exists.
+2. Find the entry whose `file` path matches the current ledger entry's `file` field.
+3. If found, read the `error` field — it contains the raw bun test output (banner, per-test lines, and summary). This is the most reliable source of the actual failure message.
+4. Note: if `pass` and `fail` counts look wrong (e.g., `fail: 2` but the `error` text shows "0 fail"), suspect a regex false-positive in `parseOutput` rather than a real test failure.
+
+Use this data to pre-populate your understanding of the error before reading the test source.
+
 ### 3.1 Read the Failing Test
 
 1. Open the test file at the entry's `file` path.
@@ -269,25 +282,35 @@ If the targeted test from Step 5.2 shows the entry's test still fails:
 
 ## Step 7: Regression Check
 
-After updating the ledger entry, run the full test suite to detect any regressions caused by the fix. This is critical — a fix that passes its own test but breaks others is not acceptable.
+After updating the ledger entry, run targeted tests on the files you modified to detect direct regressions. Do **not** run the full suite here — the outer driver runs a full sweep once all failures are resolved. Running the full suite on every fix round is the main cause of per-round timeouts.
 
-### 7.1 Run Full Suite Analysis
+### 7.1 Identify Test Files to Check
 
-1. Invoke `/test-analyze --scope all` to run and analyze the complete test suite.
-2. Wait for the analysis to complete and produce a Markdown report.
-3. If the full suite analysis fails to run, log a warning and skip to Step 8 — do not block the ledger write.
+1. Collect all files from Step 5.3's `modified_files` list.
+2. For each file:
+   - If it IS a test file (path contains `/test/` or ends in `.test.ts`) → include it directly.
+   - If it is a source file (path contains `/src/`) → derive the corresponding test path by replacing `/src/` with `/test/` and appending `.test` before the extension (e.g., `src/foo/bar.ts` → `test/foo/bar.test.ts`). Include it only if the file exists on disk.
+3. Always include the current entry's `file` field (the test being fixed).
+4. Deduplicate — if the same path appears more than once, only check it once.
+5. If the final list is empty, skip to Step 8.
 
-### 7.2 Compare Against Existing Ledger
+### 7.2 Run Targeted Tests
 
-1. Extract the list of failing test names from the `/test-analyze` report's Failure Table.
-2. For each failure in the report, check if a matching entry already exists in the ledger:
+1. For each file in the list from 7.1, invoke `/test-analyze --file <path>`.
+2. Wait for each analysis to complete and produce a Markdown report.
+3. If any invocation fails to run, log a warning and continue with the remaining files.
+
+### 7.3 Compare Against Existing Ledger
+
+1. Extract the list of failing test names from all `/test-analyze` reports' Failure Tables.
+2. For each failure in the reports, check if a matching entry already exists in the ledger:
    - Match by **both** `file` (test file path) **and** `test` (test name) — both must match.
    - If a match exists, the failure is already tracked — no action needed.
 3. Collect any failures that do **not** match existing ledger entries — these are **new regressions**.
 
-### 7.3 Add New Regression Entries
+### 7.4 Add New Regression Entries
 
-If new regressions were found in Step 7.2:
+If new regressions were found in Step 7.3:
 
 1. For each new failure, create a new ledger entry:
    - `id`: Sequential ID continuing from the highest existing ID. Parse the numeric suffix from the last entry's ID (e.g., `F-012` → `12`) and increment (e.g., `F-013`, `F-014`, ...).
@@ -303,7 +326,7 @@ If new regressions were found in Step 7.2:
    - `modified_files`: `[]`.
 2. Append the new entries to the ledger's `entries` array.
 
-### 7.4 Handle Circular Regression
+### 7.5 Handle Circular Regression
 
 If a new failure involves a test that was previously `"fixed"` in the ledger (i.e., an earlier round fixed it, but this round's fix broke it again):
 

@@ -1,79 +1,90 @@
 # Ralph Progress Log
-Started: Sat Feb 14 11:28:47 CST 2026
----
-
-## Codebase Patterns
-- OpenCode enables Kitty keyboard protocol via `useKittyKeyboard: {}` in `app.tsx:171` (flags: disambiguate + alternateKeys)
-- OpenTUI's `ParsedKey` has fields: name, ctrl, meta, shift, option, super, hyper, capsLock, numLock, source ("raw" | "kitty"), eventType
-- OpenTUI's `KeyBinding` matching uses `getKeyBindingKey()`: `"${name}:${ctrl}:${shift}:${meta}:${super}"` - exact match required
-- In standard terminals, Ctrl+J (0x0A) parses to `{ name: "linefeed" }`, NOT `{ name: "j", ctrl: true }` - the linefeed check in parseKeypress happens before the ctrl+letter check
-- Default key aliases in OpenTUI: only `enter` → `return` and `esc` → `escape`
-- Textarea keybindings flow: config.ts defaults → Keybind.parse() → keybind context → mapTextareaKeybindings() → OpenTUI KeyBinding[]
-- Hardcoded fallback bindings in useTextareaKeybindings: `{ name: "return", action: "submit" }`, `{ name: "return", meta: true, action: "newline" }`, and `{ name: "linefeed", action: "newline" }`
-- Config-driven bindings are appended AFTER hardcoded ones (last-write-wins in OpenTUI's buildKeyBindingsMap)
-
+Started: Sat 14 Feb 2026 11:25:14 CST
 ---
 
 ## 2026-02-14 - US-001
-- Diagnosed terminal Shift+Enter support through source code analysis
-- Created KEYBINDING-DIAGNOSIS.md documenting all findings
-- Files changed:
-  - packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md (new)
+- Added AllowlistEntry Zod schema (pattern + type using existing RuleType enum)
+- Added AllowlistLayer interface (source + entries)
+- Added ResolvedSecurityConfig interface extending SecurityConfig with resolvedAllowlist
+- Added optional allowlist field to securityConfigSchema
+- Verified backward compatibility (configs without allowlist still parse)
+- Files changed: packages/opencode/src/security/schema.ts
 - **Learnings for future iterations:**
-  - OpenTUI's standard keypress parser handles `\n` (0x0A / Ctrl+J) as `name: "linefeed"` BEFORE reaching the ctrl+letter branch, so `ctrl+j` config binding won't match in non-Kitty terminals
-  - OpenTUI's Kitty keyboard parser correctly handles Ctrl+J as `{ name: "j", ctrl: true }` via the CSI u protocol
-  - Shift+Enter works correctly in Kitty-protocol terminals but is indistinguishable from Enter in standard terminals
-  - Alt+Enter is the most reliable modifier+Enter combo across terminal types (works via `\x1b\r` → `{ name: "return", meta: true }`)
-  - The diagnosis was done entirely through source code analysis - no runtime debug logging was needed since OpenTUI's parser source is available in node_modules
+  - SecuritySchema namespace pattern: all types/schemas defined within `export namespace SecuritySchema {}`
+  - RuleType enum already has 'directory' and 'file' values — reuse for AllowlistEntry.type
+  - Zod schemas use `z.infer<typeof SchemaName>` pattern for type exports
+  - ResolvedSecurityConfig extends SecurityConfig via interface — so callers using SecurityConfig type still work
 ---
 
 ## 2026-02-14 - US-002
-- Verified config-driven keybindings register correctly in OpenTUI
-- Added unit test at packages/opencode/test/tui/textarea-keybindings.test.ts (8 tests)
-- Files changed:
-  - packages/opencode/test/tui/textarea-keybindings.test.ts (new)
+- Changed `currentConfig` and `emptyConfig` types from `SecurityConfig` to `ResolvedSecurityConfig` (with `resolvedAllowlist: []`)
+- Changed `getSecurityConfig()` return type to `ResolvedSecurityConfig`
+- Changed `mergeSecurityConfigs()` signature: input from `SecurityConfig[]` to `{ config: SecurityConfig, path: string }[]`, return type to `ResolvedSecurityConfig`
+- `mergeSecurityConfigs()` now builds `AllowlistLayer[]` from configs that define allowlist — one layer per config
+- `loadSecurityConfig()` now builds `resolvedAllowlist` from single config's allowlist field
+- Added empty-allowlist warning when `allowlist: []` is configured
+- Updated test callers in `inheritance-bypass.test.ts` and `config-manipulation.test.ts` to use new `{ config, path }` signature
+- Files changed: `packages/opencode/src/security/config.ts`, `packages/opencode/test/security/access_control_cases/unit/inheritance-bypass.test.ts`, `packages/opencode/test/security/access_control_cases/unit/config-manipulation.test.ts`
 - **Learnings for future iterations:**
-  - Cannot directly import from textarea-keybindings.ts in tests due to SolidJS/OpenTUI JSX runtime dependency - re-implement pure logic in test instead
-  - mapTextareaKeybindings converts false booleans to undefined (via `|| undefined`) to match OpenTUI's KeyBinding type which uses optional booleans
-  - The config key convention is `input_${action.replace(/-/g, "_")}` - e.g., "move-left" → "input_move_left"
+  - `findSecurityConfigs()` already returns `{ config, path }[]` shape — the new merge signature matches it directly
+  - All callers of `getSecurityConfig()` use type inference (`const config = ...`) — changing return type to `ResolvedSecurityConfig` (which extends `SecurityConfig`) requires zero caller changes
+  - `setupSecurityConfig(merged)` helper in tests accepts `SecurityConfig` parameter but `ResolvedSecurityConfig` passes via structural subtyping — the extra `resolvedAllowlist` field is stripped by Zod when written to JSON and re-parsed by `loadSecurityConfig()`
+  - Test merge calls need dummy path strings like `"parent/.opencode-security.json"` — these don't need to be real paths for unit tests
 ---
 
 ## 2026-02-14 - US-003
-- Verified Shift+Enter newline works in Kitty-protocol terminals (no code changes needed)
-- Documented terminal limitation: standard terminals can't distinguish Shift+Enter from Enter
-- Updated KEYBINDING-DIAGNOSIS.md with full end-to-end verification details
-- Files changed:
-  - packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md (updated)
+- Refactored `loadSecurityConfig()` to use `findSecurityConfigs()` + `mergeSecurityConfigs()` instead of single-file loading
+- The function now discovers all `.opencode-security.json` files from project root up to git root and merges them
+- Single-config, no-config, and multi-config scenarios all handled correctly via existing `findSecurityConfigs()` and `mergeSecurityConfigs()` functions
+- Bootstrap call in `bootstrap.ts` unchanged — still calls `SecurityConfig.loadSecurityConfig(Instance.directory)`
+- Files changed: `packages/opencode/src/security/config.ts`
 - **Learnings for future iterations:**
-  - Shift+Enter support is purely a terminal capability question — the keybinding pipeline handles it correctly
-  - OpenTUI textarea natively handles the "newline" action (inserts \n, expands height, moves cursor)
-  - The `maxHeight={6}` on textarea controls the auto-expand limit
-  - When a feature depends on terminal capabilities, verify the pipeline is correct and document the limitation rather than trying to work around it
+  - `findSecurityConfigs()` + `mergeSecurityConfigs()` already handled all the complex logic (config discovery, validation, merging, allowlist layer building, empty-allowlist warning) — `loadSecurityConfig()` just needed to delegate to them
+  - The old `loadSecurityConfig()` had duplicated logic (JSON parsing, Zod validation, allowlist layer building) that was already in `loadConfigFile()` + `mergeSecurityConfigs()` — removing the duplication made the code much simpler (50 lines removed, 7 added)
+  - `setupSecurityConfig()` test helper creates `.git` in the temp dir, so `findGitRoot()` returns that dir — meaning `findSecurityConfigs()` only looks at that single dir, preserving single-config test behavior
 ---
 
 ## 2026-02-14 - US-004
-- Fixed Ctrl+J to work as universal newline shortcut in all terminal types
-- Added hardcoded `{ name: "linefeed", action: "newline" }` fallback in useTextareaKeybindings()
-- Added test verifying both standard terminal (linefeed) and Kitty terminal (ctrl+j) paths
-- Updated KEYBINDING-DIAGNOSIS.md with fix details and compatibility table
-- Files changed:
-  - packages/opencode/src/cli/cmd/tui/component/textarea-keybindings.ts (modified - added linefeed fallback)
-  - packages/opencode/test/tui/textarea-keybindings.test.ts (modified - updated for 3 hardcoded fallbacks, added linefeed test)
-  - packages/opencode/src/cli/cmd/tui/component/KEYBINDING-DIAGNOSIS.md (updated - replaced Recommendations with fix details)
+- Enforced allowlist in `checkAccess()` with correct evaluation order: deny rules → operation filter → allowlist check
+- Deny rules checked first — if denied, returns immediately (deny always wins)
+- Allowlist only applies to `llm` operations — `read` and `write` bypass allowlist entirely
+- Empty `resolvedAllowlist` means no restriction (backward compatible)
+- AND across layers, OR within entries — file must match at least one entry in every layer
+- Reused existing `matchPath()` for AllowlistEntry matching (same logic as deny rules)
+- Symlinks resolved first, real path checked against allowlist
+- Friendly denial message includes rejected file path, rejecting layer source, and suggestion with example entry format
+- Audit logging via `SecurityAudit.logSecurityEvent()` on allowlist denial
+- Files changed: `packages/opencode/src/security/access.ts`
 - **Learnings for future iterations:**
-  - When a key produces different ParsedKey names across terminal types (e.g., Ctrl+J → "linefeed" vs "j"+ctrl), add hardcoded fallbacks for the variant that the config system can't express
-  - Hardcoded fallbacks in useTextareaKeybindings are the simplest fix for terminal compatibility gaps — no OpenTUI changes needed
-  - The linefeed key name has no other bindings in the TUI, so it's safe to unconditionally map to newline
+  - `matchPath()` already handles both `directory` and `file` type matching with minimatch — direct reuse for allowlist entries
+  - Symlink resolution happens once at the top of `checkAccess()`, so the resolved path is available for both deny rules and allowlist checks
+  - Early return after deny rules means allowlist check only runs for files that passed deny rules — correct priority order
+  - `path.dirname(filePath)` in the denial message provides a useful suggestion pattern for the user to add
+  - The deny rule check was restructured to be inside a conditional block (`if config.rules`) rather than early-returning, so that control flow continues to the allowlist check
 ---
 
 ## 2026-02-14 - US-005
-- Verified user-customizable submit and newline keybindings via config
-- Added 5 new tests to packages/opencode/test/tui/textarea-keybindings.test.ts (total: 14 tests)
-- Files changed:
-  - packages/opencode/test/tui/textarea-keybindings.test.ts (modified - added 5 config override tests)
+- Added 29 comprehensive unit tests across 15 test cases covering all allowlist scenarios
+- Test cases: file matching (type: file), directory matching (type: directory), denial with friendly messages, deny rule priority over allowlist, read/write bypass, empty allowlist, no allowlist (backward compat), glob pattern matching, exact file match, symlink resolution, two-layer AND logic, child cannot expand parent, single-layer scenarios, multi-level config merging, audit logging
+- Files changed: `packages/opencode/test/security/access_control_cases/unit/allowlist.test.ts`
 - **Learnings for future iterations:**
-  - Keybind.parse("none") returns [] which causes mapTextareaKeybindings to produce no bindings for that action
-  - The config layer (Zod schema in config.ts) provides defaults before keybinds reach the TUI — mapTextareaKeybindings never sees missing config in practice
-  - Hardcoded fallbacks (return→submit, meta+return→newline, linefeed→newline) always remain regardless of config; they provide baseline functionality
-  - When config sets input_submit to a modified key (e.g. ctrl+return), the hardcoded plain return→submit still exists but gets overridden by last-write-wins only if the key name matches
+  - When testing deny rules with allowlist, must define ALL roles in the roles array including the `admin` role — otherwise `isRoleAllowed()` returns true for any role with level > 0 (because undefined role defaults to level 0)
+  - `findSecurityConfigs()` orders configs child-first then parent — so in two-layer tests, the child config's layer is checked first, then parent's
+  - For multi-level directory tests, write separate `.opencode-security.json` files and call `loadSecurityConfig(childDir)` directly — `setupSecurityConfig()` only handles single-config scenarios
+  - `@ts-expect-error` is NOT needed when reassigning namespace functions like `SecurityAudit.logSecurityEvent` — TypeScript allows it without error
+  - The audit log file `.opencode-security-audit.log` gets created in the working directory during tests — the `afterEach` cleanup via `teardownSecurityConfig()` doesn't remove it
+---
+
+## 2026-02-14 - US-006
+- Updated `security check` CLI command to display per-layer allowlist match status
+- Added `checkAllowlistLayers()` exported function to `SecurityAccess` namespace for reuse by CLI
+- When no allowlist configured: shows "No allowlist configured (all files accessible)"
+- When allowlist configured: shows each layer's source path, match status (Matched/Not matched), and matching pattern
+- Updated inactive security check to also consider allowlist presence (not just rules)
+- Symlink-aware: uses resolved real path for allowlist matching
+- Files changed: `packages/opencode/src/security/access.ts`, `packages/opencode/src/cli/cmd/security/check.ts`
+- **Learnings for future iterations:**
+  - `matchPath()` is a private function in `SecurityAccess` — to reuse it from the CLI, created a new exported `checkAllowlistLayers()` wrapper instead of exposing the low-level function
+  - The CLI check command's "inactive" guard needed updating: previously only checked `hasRules`, now also checks `hasAllowlist` since an allowlist-only config (no deny rules) is a valid security setup
+  - The `AllowlistMatchResult` interface returns the full `AllowlistLayer` object so the CLI can display `layer.source` without needing to re-fetch config
 ---
