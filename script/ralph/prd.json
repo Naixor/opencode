@@ -1,0 +1,226 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/os-native-sandbox",
+  "description": "OS Native Sandbox - kernel-level file system isolation for bash/MCP tools using macOS Seatbelt (sandbox-exec), preventing LLM from bypassing allowlist via arbitrary scripts",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add sandbox config schema",
+      "description": "As a project manager, I need to declare sandbox mode in the config file. Add `sandbox` field to config schema with `enabled: boolean` and `paths?: string[]`.",
+      "acceptanceCriteria": [
+        "In `packages/opencode/src/config/config.ts`, add `sandbox` field to config schema with Zod",
+        "`sandbox.enabled` is boolean, defaults to false",
+        "`sandbox.paths` is optional string array for extra allowed paths",
+        "No `sandbox` field in config = behavior unchanged (backward compatible)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Define Sandbox interface and getSandbox factory",
+      "description": "As a developer, I need a cross-platform Sandbox interface so tool code doesn't need to know the platform-specific implementation.",
+      "acceptanceCriteria": [
+        "New file `packages/opencode/src/sandbox/index.ts` with `Sandbox` interface",
+        "Interface has: `wrap(command: string[]): string[]`, `isAvailable(): Promise<boolean>`, `generatePolicy(config): Promise<string>`",
+        "`getSandbox()` factory returns platform-specific implementation or `null` if unsupported",
+        "On macOS (`process.platform === 'darwin'`), returns `SeatbeltSandbox` instance (stubbed, implemented in next story)",
+        "On unsupported platforms, returns `null`",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Implement SBPL profile generation from allowlist/deny config",
+      "description": "As a developer, I need to convert allowlist/deny rules from .opencode-security.json into a Seatbelt SBPL profile string.",
+      "acceptanceCriteria": [
+        "New file `packages/opencode/src/sandbox/profile.ts` with `generateProfile()` function",
+        "Directory glob patterns (e.g. `src/**`) → extract top-level dir → `(allow file-read* file-write* (subpath \"/abs/path/src\"))`",
+        "File patterns (e.g. `package.json`) → `(allow file-read* file-write* (literal \"/abs/path/package.json\"))`",
+        "Deny rule directories → `(deny file-read* file-write* (subpath ...))` written AFTER allow rules (last match wins)",
+        "Deny rule files → `(deny file-read* file-write* (literal ...))`",
+        "All allowlist entries are rw (no read-only distinction)",
+        "All paths resolved via `fs.realpath()` before writing to profile (handles symlinks like /tmp → /private/tmp)",
+        "Profile starts with `(version 1)` and `(deny default)`",
+        "Unit tests cover: directory glob, file pattern, deny directory, deny file, empty allowlist, symlink resolution",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Add built-in whitelist and process capabilities to SBPL profile",
+      "description": "As a developer, I need the generated SBPL profile to include system paths, dev tool paths, and basic process capabilities so sandboxed commands can actually run.",
+      "acceptanceCriteria": [
+        "Profile includes process capabilities: `process-exec`, `process-fork`, `signal`, `pseudo-tty`, `sysctl-read`, required `mach-lookup` services",
+        "Profile allows read-only access to system binaries: `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`",
+        "Profile allows read-only access to system libraries: `/usr/lib`, `/usr/share`, `/System/Library`, `/Library/Frameworks`",
+        "Profile allows read-only access to Homebrew: `/opt/homebrew`, `/usr/local`",
+        "Profile allows read-only access to Xcode: `/Applications/Xcode.app`, `/Library/Developer`",
+        "Profile allows read-only access to /dev devices: `/dev/null`, `/dev/zero`, `/dev/ptmx`, `/dev/ttysN`",
+        "Profile allows rw access to project `node_modules/` and `.git/` directories",
+        "Profile allows rw access to `/private/tmp`",
+        "Profile allows all network: `(allow network*)`",
+        "Auto-detect and allow read-only access to user toolchain paths: `~/.bun`, `~/.nvm`, `~/.cargo`, `~/.pyenv` (only if they exist)",
+        "User-configured `sandbox.paths` added as rw allow rules",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Implement SeatbeltSandbox class",
+      "description": "As a developer, I need the macOS Seatbelt implementation of the Sandbox interface that generates profile files and wraps commands with sandbox-exec.",
+      "acceptanceCriteria": [
+        "New file `packages/opencode/src/sandbox/seatbelt.ts` with `SeatbeltSandbox` class implementing `Sandbox` interface",
+        "`isAvailable()` checks `sandbox-exec` exists via `which sandbox-exec`",
+        "`generatePolicy(config)` calls profile generation from US-003/US-004, writes to temp file, returns path",
+        "`wrap(command)` prepends `['sandbox-exec', '-f', policyPath]` to the command array",
+        "Generated profile file is cached per session (not regenerated on every call)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Adapt bash tool for sandbox execution",
+      "description": "As a user, I want bash commands to automatically run inside the sandbox when sandbox is enabled.",
+      "acceptanceCriteria": [
+        "Modify `packages/opencode/src/tool/bash.ts` to check if sandbox is enabled",
+        "When sandbox enabled, wrap bash command with `sandbox.wrap()` before spawning",
+        "stdout/stderr correctly passed through",
+        "Exit code correctly passed through",
+        "Timeout mechanism still works",
+        "Working directory is project root",
+        "Skip bash scanner security checks when sandbox is enabled (sandbox provides stronger OS-level isolation)",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Adapt interactive bash tool for sandbox execution",
+      "description": "As a user, I want interactive bash sessions to also run inside the sandbox.",
+      "acceptanceCriteria": [
+        "Modify `packages/opencode/src/tool/interactive-bash.ts` to check if sandbox is enabled",
+        "When sandbox enabled, wrap interactive bash with `sandbox.wrap()` before spawning",
+        "PTY/interactive session works correctly under sandbox-exec",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Adapt MCP tool for sandbox execution",
+      "description": "As a user, I want MCP servers to run inside the sandbox to prevent bypassing file restrictions through MCP tools.",
+      "acceptanceCriteria": [
+        "Modify MCP server launch in `packages/opencode/src/mcp/index.ts` to wrap with `sandbox.wrap()` when sandbox enabled",
+        "MCP server stdio pipes work correctly under sandbox-exec",
+        "MCP server file access is restricted by sandbox profile",
+        "`enforced` policy MCP servers always run in sandbox",
+        "`trusted` policy MCP servers skip sandbox (user's explicit trust decision)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Verify file tools use application-layer allowlist (no sandbox)",
+      "description": "As a developer, I need to confirm file tools (read/write/glob/grep) continue using application-layer allowlist checks and do NOT go through sandbox-exec.",
+      "acceptanceCriteria": [
+        "read/write/glob/grep tools in sandbox mode continue using existing allowlist checks",
+        "No sandbox-exec wrapping for file tools — OpenCode controls this code, LLM cannot bypass",
+        "Verify existing allowlist check logic covers all file tool paths",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Implement sandbox initialization flow",
+      "description": "As a user, when sandbox is enabled, I want automatic initialization at session start with clear progress and error messages.",
+      "acceptanceCriteria": [
+        "On session start, detect `sandbox.enabled = true` and trigger init flow",
+        "Init steps: 1) platform detection (sandbox-exec available), 2) environment check (macOS version, SIP), 3) policy generation, 4) validation (run `sandbox-exec -f profile.sb /usr/bin/true`)",
+        "If any step fails, sandbox auto-disables, session continues without sandbox, warning shown",
+        "Init result cached at session level — no re-init unless allowlist config changes",
+        "Clear error messages for each failure type: platform unsupported, profile generation failed, validation failed",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Implement sandbox doctor CLI command",
+      "description": "As a user, I need `opencode sandbox doctor` to diagnose my sandbox environment without starting the TUI.",
+      "acceptanceCriteria": [
+        "New file `packages/opencode/src/sandbox/doctor.ts` with environment detection logic",
+        "macOS checks: sandbox-exec available, macOS version, SIP status",
+        "Each failed check includes specific fix instructions",
+        "New CLI command `opencode sandbox doctor` registered in CLI commands",
+        "Command runs checks and prints results to stdout (no TUI needed)",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Add sandbox status to TUI and CLI",
+      "description": "As a user, I want to see sandbox status in the TUI status bar and via `opencode sandbox status` command.",
+      "acceptanceCriteria": [
+        "TUI status bar shows sandbox state: `[Sandbox: ON]`, `[Sandbox: OFF]`, or `[Sandbox: FAILED]`",
+        "Sandbox errors shown in TUI with repair suggestions",
+        "`opencode sandbox status` CLI command shows: platform, sandbox type, init status, allowlist paths, built-in whitelist paths",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Integration tests for sandbox security",
+      "description": "As a developer, I need integration tests verifying sandbox correctly blocks access to protected files and allows access to permitted files.",
+      "acceptanceCriteria": [
+        "Tests written against Sandbox interface (shared between macOS and future Linux)",
+        "Test: sandboxed bash cannot read files outside allowlist (Operation not permitted)",
+        "Test: sandboxed `python3 -c \"open('secrets/key.pem').read()\"` fails with permission denied",
+        "Test: sandboxed bash CAN read/write files in allowlist",
+        "Test: deny rule paths blocked even when parent is in allowlist",
+        "Test: built-in whitelist paths (node_modules, .git, /tmp) accessible",
+        "Test: user-configured extra paths accessible",
+        "Test: unsupported platform gracefully degrades (skips sandbox)",
+        "macOS-specific unit tests for SBPL profile generation correctness",
+        "Skip sandbox tests on unsupported platforms via `process.platform` check",
+        "All tests pass via `bun test --cwd packages/opencode`",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

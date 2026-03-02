@@ -1,0 +1,4 @@
+# Ralph Progress Log
+Started: Sun 02 Mar 2026
+Feature: OS Native Sandbox (macOS Seatbelt)
+---

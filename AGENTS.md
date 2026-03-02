@@ -122,3 +122,23 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+
+## Sandbox Architecture Decisions
+
+### 方案选型：OS 原生沙箱（非 Docker）
+
+sandbox 使用 OS 原生沙箱机制，不使用 Docker。原因：Docker 容器运行 Linux，无法支持 macOS 原生工具链（Xcode、iOS Simulator 等）。
+
+- **Phase 1: macOS** — Seatbelt (`sandbox-exec` + 动态生成 .sb profile)
+- **Phase 2: Linux** — Landlock + seccomp
+- **Windows** — 架构预留，暂不实现
+
+### 沙箱执行准则
+
+- **bash 和 MCP 工具**：必须通过 sandbox 执行（per-command `sandbox-exec` 包裹）。这是 LLM 绕过风险所在——LLM 可以编写任意脚本绕过应用层检查。
+- **文件工具（read/write/glob/grep）**：走应用层 allowlist 检查，不走 sandbox。这些工具的代码由我们控制，LLM 无法绕过。
+- **allowlist 条目一律 rw**，deny 路径在 sandbox profile 中用 deny 规则处理。
+
+### 跨平台测试要求
+
+macOS 和 Linux 的沙箱实现必须共用一份集成测试。测试面向 Executor 接口编写，验证沙箱行为（能访问 allowlist 文件、不能访问 deny 文件），不关心底层平台实现。
