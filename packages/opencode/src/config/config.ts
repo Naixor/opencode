@@ -1190,6 +1190,16 @@ export namespace Config {
         .array(z.string())
         .optional()
         .describe("List of built-in MCP server names to disable even when their API key is available"),
+      sandbox: z
+        .object({
+          enabled: z.boolean().optional().default(false).describe("Enable OS-level sandbox for bash and MCP commands"),
+          paths: z
+            .array(z.string())
+            .optional()
+            .describe("Additional paths to allow read-write access in the sandbox"),
+        })
+        .optional()
+        .describe("OS-native sandbox configuration for kernel-level file system isolation"),
       notification: z
         .object({
           enabled: z.boolean().optional().describe("Enable or disable notifications (default: true)"),

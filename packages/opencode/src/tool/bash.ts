@@ -22,6 +22,7 @@ import { SecurityAccess } from "../security/access"
 import { SecurityConfig } from "../security/config"
 import { SecuritySchema } from "../security/schema"
 import { SecurityAudit } from "../security/audit"
+import { getActiveSandbox } from "../sandbox"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -88,54 +89,58 @@ export const BashTool = Tool.define("bash", async () => {
       }
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
       // Security access control: scan command for protected file accesses
-      const securityConfig = SecurityConfig.getSecurityConfig()
-      const currentRole = getDefaultRole(securityConfig)
-      const scannedPaths = BashScanner.scanBashCommand(params.command, cwd)
+      // Skip bash scanner when sandbox is active — OS-level isolation is stronger
+      const sandbox = getActiveSandbox()
+      if (!sandbox) {
+        const securityConfig = SecurityConfig.getSecurityConfig()
+        const currentRole = getDefaultRole(securityConfig)
+        const scannedPaths = BashScanner.scanBashCommand(params.command, cwd)
 
-      if (scannedPaths.length > 0) {
-        const deniedPaths: Array<{ path: string; operation: SecuritySchema.Operation; reason: string }> = []
+        if (scannedPaths.length > 0) {
+          const deniedPaths: Array<{ path: string; operation: SecuritySchema.Operation; reason: string }> = []
 
-        for (const scannedPath of scannedPaths) {
-          // Check both read and write operations - use "read" as default since most commands read files
-          const readResult = SecurityAccess.checkAccess(scannedPath, "read", currentRole)
-          if (!readResult.allowed) {
-            deniedPaths.push({ path: scannedPath, operation: "read", reason: readResult.reason ?? "" })
-            continue
+          for (const scannedPath of scannedPaths) {
+            // Check both read and write operations - use "read" as default since most commands read files
+            const readResult = SecurityAccess.checkAccess(scannedPath, "read", currentRole)
+            if (!readResult.allowed) {
+              deniedPaths.push({ path: scannedPath, operation: "read", reason: readResult.reason ?? "" })
+              continue
+            }
+
+            // Also check write for commands that modify files (sed -i, etc.)
+            const writeResult = SecurityAccess.checkAccess(scannedPath, "write", currentRole)
+            if (!writeResult.allowed) {
+              deniedPaths.push({ path: scannedPath, operation: "write", reason: writeResult.reason ?? "" })
+            }
           }
 
-          // Also check write for commands that modify files (sed -i, etc.)
-          const writeResult = SecurityAccess.checkAccess(scannedPath, "write", currentRole)
-          if (!writeResult.allowed) {
-            deniedPaths.push({ path: scannedPath, operation: "write", reason: writeResult.reason ?? "" })
-          }
-        }
+          if (deniedPaths.length > 0) {
+            for (const denied of deniedPaths) {
+              SecurityAudit.logSecurityEvent({
+                role: currentRole,
+                operation: denied.operation,
+                path: denied.path,
+                allowed: false,
+                reason: denied.reason,
+                content: params.command,
+              })
+            }
 
-        if (deniedPaths.length > 0) {
-          for (const denied of deniedPaths) {
-            SecurityAudit.logSecurityEvent({
-              role: currentRole,
-              operation: denied.operation,
-              path: denied.path,
-              allowed: false,
-              reason: denied.reason,
-              content: params.command,
+            securityLog.info("bash command blocked due to protected file access", {
+              command: params.command,
+              blockedPaths: deniedPaths.map((d) => d.path),
             })
+
+            const reasons = deniedPaths.map((d) => `  - ${d.reason}`).join("\n")
+            throw new Error(`Security: Command blocked. The following file accesses are restricted:\n${reasons}`)
           }
 
-          securityLog.info("bash command blocked due to protected file access", {
+          securityLog.debug("bash security scan passed", {
             command: params.command,
-            blockedPaths: deniedPaths.map((d) => d.path),
+            scannedPaths,
+            role: currentRole,
           })
-
-          const reasons = deniedPaths.map((d) => `  - ${d.reason}`).join("\n")
-          throw new Error(`Security: Command blocked. The following file accesses are restricted:\n${reasons}`)
         }
-
-        securityLog.debug("bash security scan passed", {
-          command: params.command,
-          scannedPaths,
-          role: currentRole,
-        })
       }
 
       const tree = await parser().then((p) => p.parse(params.command))
@@ -221,16 +226,29 @@ export const BashTool = Tool.define("bash", async () => {
       }
 
       const shellEnv = await Plugin.trigger("shell.env", { cwd }, { env: {} })
-      const proc = spawn(params.command, {
-        shell,
-        cwd,
-        env: {
-          ...process.env,
-          ...shellEnv.env,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: process.platform !== "win32",
-      })
+      const spawnEnv = {
+        ...process.env,
+        ...shellEnv.env,
+      }
+
+      // When sandbox is active, wrap the shell command with sandbox-exec
+      const proc = sandbox
+        ? (() => {
+            const wrapped = sandbox.wrap([shell, "-c", params.command])
+            return spawn(wrapped[0], wrapped.slice(1), {
+              cwd,
+              env: spawnEnv,
+              stdio: ["ignore", "pipe", "pipe"],
+              detached: process.platform !== "win32",
+            })
+          })()
+        : spawn(params.command, {
+            shell,
+            cwd,
+            env: spawnEnv,
+            stdio: ["ignore", "pipe", "pipe"],
+            detached: process.platform !== "win32",
+          })
 
       let output = ""
 

@@ -19,6 +19,7 @@ import { Agent } from "../agent/agent"
 import { Skill } from "../skill/skill"
 import { Auth } from "../auth"
 import { Flag } from "../flag/flag"
+import { getSandboxStatus, type SandboxStatus } from "../sandbox"
 import { Command } from "../command"
 import { Global } from "../global"
 import { ProjectRoutes } from "./routes/project"
@@ -472,6 +473,32 @@ export namespace Server {
           }),
           async (c) => {
             return c.json(await Format.status())
+          },
+        )
+        .get(
+          "/sandbox",
+          describeRoute({
+            summary: "Get sandbox status",
+            description: "Get OS-native sandbox status",
+            operationId: "sandbox.status",
+            responses: {
+              200: {
+                description: "Sandbox status",
+                content: {
+                  "application/json": {
+                    schema: resolver(
+                      z.object({
+                        status: z.enum(["off", "active", "failed"]),
+                        error: z.string().nullable(),
+                      }),
+                    ),
+                  },
+                },
+              },
+            },
+          }),
+          async (c) => {
+            return c.json(getSandboxStatus())
           },
         )
         .get(

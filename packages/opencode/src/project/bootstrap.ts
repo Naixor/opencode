@@ -15,6 +15,7 @@ import { Snapshot } from "../snapshot"
 import { Truncate } from "../tool/truncation"
 import { SecurityConfig } from "../security/config"
 import { SecurityAccess } from "../security/access"
+import { initSandbox } from "../sandbox/init"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
@@ -30,6 +31,12 @@ export async function InstanceBootstrap() {
   Truncate.init()
   SecurityAccess.setProjectRoot(Instance.directory)
   await SecurityConfig.loadSecurityConfig(Instance.directory)
+
+  // Initialize sandbox after security config is loaded (needs allowlist/deny rules)
+  const sandboxResult = await initSandbox()
+  if (sandboxResult.status === "failed") {
+    Log.Default.warn("sandbox init failed, continuing without sandbox", { error: sandboxResult.error })
+  }
 
   Bus.subscribe(Command.Event.Executed, async (payload) => {
     if (payload.properties.name === Command.Default.INIT) {

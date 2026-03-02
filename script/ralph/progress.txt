@@ -1,4 +1,44 @@
 # Ralph Progress Log
-Started: Sun 02 Mar 2026
-Feature: OS Native Sandbox (macOS Seatbelt)
+Started: Mon Mar  2 22:13:33 CST 2026
+
+## Codebase Patterns
+- Sandbox SBPL profile must use `(allow default)` + `(deny file-write* (subpath "/"))` approach, NOT `(deny default)`. The `(deny default)` blocks system operations (mach-lookup, dyld loading) causing SIGABRT.
+- On macOS `os.tmpdir()` returns `/var/folders/...` not `/tmp`. Both need whitelisting.
+- `fs.realpath()` resolves symlinks: `/tmp` → `/private/tmp`, `/var` → `/private/var`.
+- Config is accessed via `await Config.get()`, NOT `Config.state.use()`.
+- CLI commands use `cmd()` wrapper from `./cmd`. Register in `index.ts` with `.command(XCommand)`.
+- File tools (read/write/glob/grep) use `SecurityAccess.checkAccess()` at app layer — no sandbox wrapping needed.
+- MCP trust policy from `SecurityConfig.getMcpPolicy(key)`: `enforced` = sandbox, `trusted` = skip.
+- TUI sync data flows: server route → SDK client → sync store → component. For non-SDK routes, use raw `fetch()`.
+
+---
+
+## 2026-03-02 - US-001 through US-013 (all stories)
+- Implemented full OS Native Sandbox feature for macOS Seatbelt (sandbox-exec)
+- Files created:
+  - `packages/opencode/src/sandbox/index.ts` — Sandbox interface, factory, session state
+  - `packages/opencode/src/sandbox/seatbelt.ts` — SeatbeltSandbox class
+  - `packages/opencode/src/sandbox/profile.ts` — SBPL profile generation
+  - `packages/opencode/src/sandbox/builtins.ts` — Built-in whitelist (system paths, temp, dev, toolchains)
+  - `packages/opencode/src/sandbox/init.ts` — Initialization flow (config → platform → policy → validation)
+  - `packages/opencode/src/sandbox/doctor.ts` — Environment diagnostic checks
+  - `packages/opencode/src/cli/cmd/sandbox.ts` — CLI `sandbox doctor` + `sandbox status`
+  - `packages/opencode/test/sandbox/profile.test.ts` — 8 profile unit tests
+  - `packages/opencode/test/sandbox/integration.test.ts` — 13 integration tests
+- Files modified:
+  - `packages/opencode/src/config/config.ts` — Added `sandbox` schema field
+  - `packages/opencode/src/tool/bash.ts` — Sandbox wrapping, skip BashScanner when sandboxed
+  - `packages/opencode/src/tool/interactive-bash.ts` — Sandbox wrapping for tmux
+  - `packages/opencode/src/mcp/index.ts` — Sandbox wrapping for MCP servers
+  - `packages/opencode/src/project/bootstrap.ts` — initSandbox() after SecurityConfig loads
+  - `packages/opencode/src/index.ts` — Register SandboxCommand
+  - `packages/opencode/src/server/server.ts` — /sandbox status endpoint
+  - `packages/opencode/src/cli/cmd/tui/context/sync.tsx` — sandbox status in sync store
+  - `packages/opencode/src/cli/cmd/tui/component/dialog-status.tsx` — Sandbox indicator in TUI
+- **Learnings for future iterations:**
+  - macOS Seatbelt `(deny default)` denies ALL operations including mach-lookup, causing SIGABRT. Must use `(allow default)` + `(deny file-write* (subpath "/"))` pattern instead.
+  - `os.tmpdir()` returns `/var/folders/.../T` on macOS, different from `/tmp` → `/private/tmp`. Both paths must be whitelisted.
+  - SBPL regex lines need careful paren counting: `(allow file-write* (regex "..."))` needs two closing parens.
+  - sandbox-exec exit code 134 = SIGABRT (signal 6 + 128), usually means invalid SBPL profile.
+  - sandbox-exec exit code 65 = Operation not permitted (sandbox policy denied the operation).
 ---

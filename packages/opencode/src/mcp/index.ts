@@ -24,6 +24,8 @@ import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
 import { BuiltinMcp } from "./builtin"
+import { getActiveSandbox } from "../sandbox"
+import { SecurityConfig } from "../security/config"
 
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
@@ -413,10 +415,17 @@ export namespace MCP {
     if (mcp.type === "local") {
       const [cmd, ...args] = mcp.command
       const cwd = Instance.directory
+
+      // Sandbox wrapping: enforced-policy MCP servers run in sandbox, trusted ones skip
+      const sandbox = getActiveSandbox()
+      const mcpPolicy = SecurityConfig.getMcpPolicy(key)
+      const shouldSandbox = sandbox && mcpPolicy !== "trusted"
+      const sandboxedCommand = shouldSandbox ? sandbox.wrap([cmd, ...args]) : [cmd, ...args]
+
       const transport = new StdioClientTransport({
         stderr: "pipe",
-        command: cmd,
-        args,
+        command: sandboxedCommand[0],
+        args: sandboxedCommand.slice(1),
         cwd,
         env: {
           ...process.env,

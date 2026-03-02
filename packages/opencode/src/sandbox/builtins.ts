@@ -1,0 +1,62 @@
+import fs from "fs/promises"
+import path from "path"
+import os from "os"
+
+async function realpath(p: string): Promise<string> {
+  const resolved = await fs.realpath(p).catch(() => null)
+  if (resolved) return resolved
+  const parent = path.dirname(p)
+  if (parent === p) return p
+  const resolvedParent = await realpath(parent)
+  return path.join(resolvedParent, path.basename(p))
+}
+
+function subpath(p: string): string {
+  return `(subpath "${p}")`
+}
+
+/**
+ * Generate built-in sandbox rules.
+ *
+ * Strategy: (allow default) lets system operations (process, mach, sysctl, etc.)
+ * work without enumerating every low-level capability.
+ * We then deny all writes globally and selectively re-allow writes to
+ * project-relevant directories (allowlist, tmp, node_modules, .git).
+ * Deny rules for sensitive paths block both reads and writes.
+ */
+export async function generateBuiltins(projectRoot: string): Promise<string> {
+  const lines: string[] = []
+  const resolvedRoot = await realpath(projectRoot)
+
+  // --- Global write deny ---
+  // Block all file writes by default; specific paths re-allow below
+  lines.push(";; --- Deny all writes globally ---")
+  lines.push(`(deny file-write* ${subpath("/")})`)
+  lines.push("")
+
+  // --- Writable: project node_modules and .git ---
+  lines.push(";; --- Project node_modules and .git (rw) ---")
+  lines.push(`(allow file-write* ${subpath(path.join(resolvedRoot, "node_modules"))})`)
+  lines.push(`(allow file-write* ${subpath(path.join(resolvedRoot, ".git"))})`)
+  lines.push("")
+
+  // --- Writable: temp directories ---
+  lines.push(";; --- Temp directories (rw) ---")
+  const resolvedTmp = await realpath("/tmp")
+  lines.push(`(allow file-write* ${subpath(resolvedTmp)})`)
+  const runtimeTmp = await realpath(os.tmpdir())
+  if (runtimeTmp !== resolvedTmp) {
+    lines.push(`(allow file-write* ${subpath(runtimeTmp)})`)
+  }
+  lines.push("")
+
+  // --- Writable: /dev devices ---
+  lines.push(";; --- /dev devices (rw) ---")
+  for (const p of ["/dev/null", "/dev/zero", "/dev/ptmx", "/dev/urandom", "/dev/random"]) {
+    lines.push(`(allow file-write* (literal "${p}"))`)
+  }
+  lines.push(`(allow file-write* (regex "^/dev/ttys[0-9]+"))`)
+  lines.push("")
+
+  return lines.join("\n")
+}

@@ -46,6 +46,36 @@ export function DialogStatus() {
         <text fg={theme.textMuted}>esc</text>
       </box>
       <text fg={theme.textMuted}>OpenCode v{Installation.VERSION}</text>
+      <box flexDirection="row" gap={1}>
+        <text
+          flexShrink={0}
+          style={{
+            fg: ({
+              active: theme.success,
+              failed: theme.error,
+              off: theme.textMuted,
+            } as Record<string, typeof theme.success>)[sync.data.sandbox.status],
+          }}
+        >
+          •
+        </text>
+        <text fg={theme.text}>
+          Sandbox:{" "}
+          <span
+            style={{
+              fg: ({
+                active: theme.success,
+                failed: theme.error,
+                off: theme.textMuted,
+              } as Record<string, typeof theme.success>)[sync.data.sandbox.status],
+            }}
+          >
+            {sync.data.sandbox.status === "active" && "ON"}
+            {sync.data.sandbox.status === "off" && "OFF"}
+            {sync.data.sandbox.status === "failed" && `FAILED: ${sync.data.sandbox.error}`}
+          </span>
+        </text>
+      </box>
       <Show when={Object.keys(sync.data.mcp).length > 0} fallback={<text fg={theme.text}>No MCP Servers</text>}>
         <box>
           <text fg={theme.text}>{Object.keys(sync.data.mcp).length} MCP Servers</text>

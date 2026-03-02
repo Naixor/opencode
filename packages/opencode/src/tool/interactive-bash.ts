@@ -5,6 +5,7 @@ import { BashScanner } from "../security/bash-scanner"
 import { SecurityAccess } from "../security/access"
 import { SecurityAudit } from "../security/audit"
 import { Instance } from "../project/instance"
+import { getActiveSandbox } from "../sandbox"
 import import_description from "./interactive-bash.txt"
 
 const BLOCKED_SUBCOMMANDS = new Set(["send-keys", "send", "type", "paste-buffer"])
@@ -100,7 +101,9 @@ export const InteractiveBashTool = Tool.define<z.ZodObject<{ tmux_command: z.Zod
         }
       }
 
-      const args = ["tmux", ...params.tmux_command.trim().split(/\s+/)]
+      const sandbox = getActiveSandbox()
+      const baseArgs = ["tmux", ...params.tmux_command.trim().split(/\s+/)]
+      const args = sandbox ? sandbox.wrap(baseArgs) : baseArgs
       const proc = Bun.spawn(args, {
         cwd,
         stdout: "pipe",

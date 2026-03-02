@@ -28,6 +28,7 @@ import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
 import { Log } from "@/util/log"
 import type { Path } from "@opencode-ai/sdk"
+import type { SandboxStatus } from "@/sandbox"
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
@@ -71,6 +72,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         [key: string]: McpResource
       }
       formatter: FormatterStatus[]
+      sandbox: { status: SandboxStatus; error: string | null }
       vcs: VcsInfo | undefined
       path: Path
     }>({
@@ -98,6 +100,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       mcp: {},
       mcp_resource: {},
       formatter: [],
+      sandbox: { status: "off", error: null },
       vcs: undefined,
       path: { state: "", config: "", worktree: "", directory: "" },
     })
@@ -395,6 +398,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             sdk.client.provider.auth().then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
             sdk.client.vcs.get().then((x) => setStore("vcs", reconcile(x.data))),
             sdk.client.path.get().then((x) => setStore("path", reconcile(x.data!))),
+            fetch(`${sdk.url}/sandbox`).then((r) => r.json()).then((data) => setStore("sandbox", reconcile(data))),
           ]).then(() => {
             setStore("status", "complete")
           })
