@@ -1,7 +1,10 @@
 import { cmd } from "./cmd"
 import { runDoctorChecks } from "../../sandbox/doctor"
-import { getSandboxStatus } from "../../sandbox"
+import { getActiveSandbox, getSandboxStatus } from "../../sandbox"
 import { Instance } from "../../project/instance"
+import { initSandbox } from "../../sandbox/init"
+import { SecurityConfig } from "../../security/config"
+import { SecurityAccess } from "../../security/access"
 
 const DoctorCommand = cmd({
   command: "doctor",
@@ -32,12 +35,29 @@ const StatusCommand = cmd({
     await Instance.provide({
       directory: process.cwd(),
       async fn() {
+        // Load security config and initialize sandbox (same as InstanceBootstrap)
+        SecurityAccess.setProjectRoot(Instance.directory)
+        await SecurityConfig.loadSecurityConfig(Instance.directory)
+        await initSandbox()
+
         const { status, error } = getSandboxStatus()
         console.log("Sandbox Status\n")
         console.log(`  Platform:  ${process.platform}`)
         console.log(`  Status:    ${status}`)
         if (error) {
           console.log(`  Error:     ${error}`)
+        }
+
+        // Show generated profile if sandbox is active
+        if (status === "active") {
+          const sandbox = getActiveSandbox() as { getPolicyPath?: () => string | null } | null
+          const policyPath = sandbox?.getPolicyPath?.()
+          if (policyPath) {
+            const profile = await Bun.file(policyPath).text()
+            console.log(`  Policy:    ${policyPath}`)
+            console.log(`\nSBPL Profile:\n`)
+            console.log(profile)
+          }
         }
       },
     })
