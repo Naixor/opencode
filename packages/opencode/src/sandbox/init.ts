@@ -23,7 +23,7 @@ export async function initSandbox(): Promise<SandboxInitResult> {
   }
 
   // Step 1: Platform detection
-  const sandbox = getSandbox()
+  const sandbox = await getSandbox()
   if (!sandbox) {
     log.warn("sandbox enabled but platform not supported", { platform: process.platform })
     setActiveSandbox(null, "off", `Platform ${process.platform} not supported`)

@@ -22,9 +22,9 @@ let currentSandbox: Sandbox | null = null
 let sandboxStatus: SandboxStatus = "off"
 let sandboxError: string | null = null
 
-export function getSandbox(): Sandbox | null {
+export async function getSandbox(): Promise<Sandbox | null> {
   if (process.platform === "darwin") {
-    const { SeatbeltSandbox } = require("./seatbelt") as typeof import("./seatbelt")
+    const { SeatbeltSandbox } = await import("./seatbelt")
     return new SeatbeltSandbox()
   }
   return null

@@ -2,6 +2,7 @@ import { minimatch } from "minimatch"
 import { SecuritySchema } from "./schema"
 import { SecurityConfig } from "./config"
 import { SecurityAudit } from "./audit"
+import { getActiveSandbox } from "../sandbox"
 import { Log } from "../util/log"
 import path from "path"
 import fs from "fs"
@@ -200,9 +201,14 @@ export namespace SecurityAccess {
       }
     }
 
-    // 2. Allowlist applies to 'llm' AND 'read' operations
-    // This ensures LLM tools (Read, Glob, Grep) cannot access files outside the allowlist
-    if (operation !== "llm" && operation !== "read") {
+    // 2. Allowlist check scope:
+    // - Always applies to 'llm' and 'read' operations (file tools: Read, Glob, Grep)
+    // - Also applies to 'write' operations when sandbox is enabled, so file tools
+    //   (Write, Edit) enforce the same boundary as the OS-level sandbox
+    if (operation === "write" && !getActiveSandbox()) {
+      return { allowed: true }
+    }
+    if (operation !== "llm" && operation !== "read" && operation !== "write") {
       return { allowed: true }
     }
 

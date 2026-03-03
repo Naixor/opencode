@@ -33,8 +33,8 @@ afterAll(async () => {
 })
 
 describe("platform detection", () => {
-  test("getSandbox returns Sandbox on macOS, null elsewhere", () => {
-    const sandbox = getSandbox()
+  test("getSandbox returns Sandbox on macOS, null elsewhere", async () => {
+    const sandbox = await getSandbox()
     if (IS_MACOS) {
       expect(sandbox).not.toBeNull()
     } else {
@@ -42,9 +42,9 @@ describe("platform detection", () => {
     }
   })
 
-  test("unsupported platform gracefully degrades", () => {
+  test("unsupported platform gracefully degrades", async () => {
     if (!IS_MACOS) {
-      expect(getSandbox()).toBeNull()
+      expect(await getSandbox()).toBeNull()
     }
   })
 })
