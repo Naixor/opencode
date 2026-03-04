@@ -8,7 +8,7 @@ const baseConfig: RunnerConfig = { maxWorkers: 1, timeout: 30, stopOnFailure: fa
 // ── parseOutput ────────────────────────────────────────────────────────────
 
 describe("parseOutput", () => {
-  test("parses standard bun test stderr output", () => {
+  test("parses standard bun test stderr output", async () => {
     const stderr = [
       "bun test v1.3.8 (b64edcb4)",
       "",
@@ -17,32 +17,32 @@ describe("parseOutput", () => {
       " 15 expect() calls",
       "Ran 3 tests across 1 file. [49.00ms]",
     ].join("\n")
-    expect(parseOutput(stderr)).toEqual({ pass: 3, fail: 0, skip: 0 })
+    expect(await parseOutput(stderr)).toEqual({ pass: 3, fail: 0, skip: 0 })
   })
 
-  test("parses non-zero fail count", () => {
+  test("parses non-zero fail count", async () => {
     const stderr = " 5 pass\n 2 fail\n 0 skip"
-    expect(parseOutput(stderr)).toEqual({ pass: 5, fail: 2, skip: 0 })
+    expect(await parseOutput(stderr)).toEqual({ pass: 5, fail: 2, skip: 0 })
   })
 
-  test("parses non-zero skip count", () => {
+  test("parses non-zero skip count", async () => {
     const stderr = " 10 pass\n 0 fail\n 3 skip"
-    expect(parseOutput(stderr)).toEqual({ pass: 10, fail: 0, skip: 3 })
+    expect(await parseOutput(stderr)).toEqual({ pass: 10, fail: 0, skip: 3 })
   })
 
-  test("returns zeros for empty string", () => {
-    expect(parseOutput("")).toEqual({ pass: 0, fail: 0, skip: 0 })
+  test("returns zeros for empty string", async () => {
+    expect(await parseOutput("")).toEqual({ pass: 0, fail: 0, skip: 0 })
   })
 
-  test("returns zeros for unsupported-reporter error (regression: --reporter json was invalid)", () => {
+  test("returns zeros for unsupported-reporter error (regression: --reporter json was invalid)", async () => {
     // bun test --reporter json used to produce this error, leaving counts at 0/0/0
     const stderr = "error: unsupported reporter format 'json'. Available options: 'junit' (for XML test results), 'dots'"
-    expect(parseOutput(stderr)).toEqual({ pass: 0, fail: 0, skip: 0 })
+    expect(await parseOutput(stderr)).toEqual({ pass: 0, fail: 0, skip: 0 })
   })
 
-  test("handles large numbers", () => {
+  test("handles large numbers", async () => {
     const stderr = " 1234 pass\n 56 fail\n 78 skip"
-    expect(parseOutput(stderr)).toEqual({ pass: 1234, fail: 56, skip: 78 })
+    expect(await parseOutput(stderr)).toEqual({ pass: 1234, fail: 56, skip: 78 })
   })
 })
 
