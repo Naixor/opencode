@@ -4,8 +4,29 @@ import { Instance } from "../../../src/project/instance"
 import { HookChain } from "../../../src/session/hooks"
 import { AgentEnforcementHooks } from "../../../src/session/hooks/agent-enforcement"
 import { Todo } from "../../../src/session/todo"
+import { Database, eq } from "../../../src/storage/db"
+import { SessionTable } from "../../../src/session/session.sql"
 
 describe("AgentEnforcementHooks", () => {
+  function ensureSession(sessionID: string) {
+    Database.use((db) => {
+      const existing = db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()
+      if (existing) return
+      db.insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Instance.project.id,
+          slug: sessionID,
+          directory: Instance.directory,
+          title: "test",
+          version: "0.0.0",
+          time_created: Date.now(),
+          time_updated: Date.now(),
+        })
+        .run()
+    })
+  }
+
   async function withInstance(fn: () => Promise<void>, config?: Record<string, unknown>) {
     await using tmp = await tmpdir({
       git: true,
@@ -28,8 +49,9 @@ describe("AgentEnforcementHooks", () => {
     test("agent stops with 3 incomplete todos -> continuation prompt", async () => {
       await withInstance(async () => {
         const sessionID = "s-todo-1"
+        ensureSession(sessionID)
 
-        await Todo.update({
+        Todo.update({
           sessionID,
           todos: [
             { content: "Fix auth bug", status: "in_progress", priority: "high" },
@@ -60,8 +82,9 @@ describe("AgentEnforcementHooks", () => {
     test("agent stops with all todos complete -> no prompt", async () => {
       await withInstance(async () => {
         const sessionID = "s-todo-2"
+        ensureSession(sessionID)
 
-        await Todo.update({
+        Todo.update({
           sessionID,
           todos: [
             { content: "Fix auth bug", status: "completed", priority: "high" },
@@ -105,8 +128,9 @@ describe("AgentEnforcementHooks", () => {
     test("non-stopped event -> no continuation check", async () => {
       await withInstance(async () => {
         const sessionID = "s-todo-4"
+        ensureSession(sessionID)
 
-        await Todo.update({
+        Todo.update({
           sessionID,
           todos: [
             { content: "Fix bug", status: "pending", priority: "high" },
@@ -130,8 +154,9 @@ describe("AgentEnforcementHooks", () => {
     test("single incomplete todo -> correct singular message", async () => {
       await withInstance(async () => {
         const sessionID = "s-todo-5"
+        ensureSession(sessionID)
 
-        await Todo.update({
+        Todo.update({
           sessionID,
           todos: [
             { content: "Fix auth bug", status: "in_progress", priority: "high" },
@@ -162,8 +187,9 @@ describe("AgentEnforcementHooks", () => {
     test("user sends stop -> continuation blocked", async () => {
       await withInstance(async () => {
         const sessionID = "s-stop-1"
+        ensureSession(sessionID)
 
-        await Todo.update({
+        Todo.update({
           sessionID,
           todos: [
             { content: "Fix bug", status: "pending", priority: "high" },
@@ -191,8 +217,9 @@ describe("AgentEnforcementHooks", () => {
     test("no user stop -> continuation allowed", async () => {
       await withInstance(async () => {
         const sessionID = "s-stop-2"
+        ensureSession(sessionID)
 
-        await Todo.update({
+        Todo.update({
           sessionID,
           todos: [
             { content: "Fix bug", status: "pending", priority: "high" },
@@ -283,8 +310,9 @@ describe("AgentEnforcementHooks", () => {
         HookChain.reloadConfig({ "todo-continuation-enforcer": { enabled: false } })
 
         const sessionID = "s-cfg-1"
+        ensureSession(sessionID)
 
-        await Todo.update({
+        Todo.update({
           sessionID,
           todos: [
             { content: "Fix bug", status: "pending", priority: "high" },
@@ -330,8 +358,9 @@ describe("AgentEnforcementHooks", () => {
         HookChain.reloadConfig({ "stop-continuation-guard": { enabled: false } })
 
         const sessionID = "s-cfg-3"
+        ensureSession(sessionID)
 
-        await Todo.update({
+        Todo.update({
           sessionID,
           todos: [
             { content: "Fix bug", status: "pending", priority: "high" },

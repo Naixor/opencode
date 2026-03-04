@@ -1,10 +1,11 @@
 import { minimatch } from "minimatch"
-import fs from "fs"
 import { SecuritySchema } from "./schema"
 import { SecurityConfig } from "./config"
+import { SecurityAudit } from "./audit"
 import { getActiveSandbox } from "../sandbox"
 import { Log } from "../util/log"
 import path from "path"
+import fs from "fs"
 
 export namespace SecurityAccess {
   const log = Log.create({ service: "security-access" })
@@ -136,11 +137,71 @@ export namespace SecurityAccess {
   export function checkAccess(filePath: string, operation: SecuritySchema.Operation, role: string): AccessResult {
     const config = SecurityConfig.getSecurityConfig()
 
-    if (!config.rules || config.rules.length === 0) {
-      return { allowed: true }
+    // Resolve symbolic links before checking access
+    const resolved = resolveSymlink(filePath)
+    const pathToCheck = resolved?.realPath ?? filePath
+    const isSymlink = resolved?.isSymlink ?? false
+
+    // Normalize to relative paths for pattern matching against rules/allowlist
+    const relativePathToCheck = normalizePath(pathToCheck)
+    const relativeFilePath = normalizePath(filePath)
+
+    // 1. Check deny rules first — deny always wins
+    if (config.rules && config.rules.length > 0) {
+      const roles = config.roles || []
+      const roleLevel = getRoleLevel(role, roles)
+
+      // If path is a symlink, check both the symlink path and the target path
+      // Access is denied if either the symlink itself or its target is protected
+      const pathsToCheck = isSymlink ? [relativeFilePath, relativePathToCheck] : [relativePathToCheck]
+
+      for (const checkPath of pathsToCheck) {
+        const isTargetPath = isSymlink && checkPath === relativePathToCheck && checkPath !== relativeFilePath
+
+        // Get all applicable rules including inherited ones
+        const inheritedRules = getInheritanceChain(checkPath)
+
+        if (inheritedRules.length === 0) {
+          continue
+        }
+
+        // Check each applicable rule (both direct and inherited)
+        // Parent restrictions cannot be overridden by child rules, so we check all
+        for (const { rule, matchType, inheritedFrom } of inheritedRules) {
+          // Check if this operation is denied by this rule
+          if (!rule.deniedOperations.includes(operation)) {
+            continue
+          }
+
+          // Check if the user's role is allowed
+          if (isRoleAllowed(role, roleLevel, rule.allowedRoles, roles)) {
+            continue
+          }
+
+          const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
+          const symlinkInfo = isTargetPath ? " (symlink target is protected)" : ""
+
+          log.debug("access denied", {
+            path: filePath,
+            relativePath: relativeFilePath,
+            operation,
+            role,
+            rule: rule.pattern,
+            matchType,
+            inheritedFrom,
+            isSymlink,
+            targetPath: isTargetPath ? pathToCheck : undefined,
+          })
+
+          return {
+            allowed: false,
+            reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}${symlinkInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
+          }
+        }
+      }
     }
 
-    // Allowlist check scope:
+    // 2. Allowlist check scope:
     // - Always applies to 'llm' and 'read' operations (file tools: Read, Glob, Grep)
     // - Also applies to 'write' operations when sandbox is enabled, so file tools
     //   (Write, Edit) enforce the same boundary as the OS-level sandbox
@@ -151,29 +212,47 @@ export namespace SecurityAccess {
       return { allowed: true }
     }
 
-    const roles = config.roles || []
-    const roleLevel = getRoleLevel(role, roles)
-
-    // Get all applicable rules including inherited ones
-    const inheritedRules = getInheritanceChain(filePath)
-
-    if (inheritedRules.length === 0) {
+    // 3. If no allowlist configured, all files are accessible
+    if (config.resolvedAllowlist.length === 0) {
       return { allowed: true }
     }
 
-    // Check each applicable rule (both direct and inherited)
-    // Parent restrictions cannot be overridden by child rules, so we check all
-    for (const { rule, matchType, inheritedFrom } of inheritedRules) {
-      // Check if this operation is denied by this rule
-      if (!rule.deniedOperations.includes(operation)) {
-        continue
-      }
+    // 4. Check file against every allowlist layer (AND across layers, OR within entries)
+    // Use normalized relative path for allowlist matching
+    const normalizedPath = relativePathToCheck.replace(/\\/g, "/")
 
-      const inheritanceInfo = matchType === "inherited" ? ` (inherited from '${inheritedFrom}')` : ""
-      log.debug("access denied", { path: filePath, operation, role, rule: rule.pattern, matchType, inheritedFrom })
-      return {
-        allowed: false,
-        reason: `Access denied: operation '${operation}' on '${filePath}' is restricted by rule '${rule.pattern}'${inheritanceInfo}. Allowed roles: ${rule.allowedRoles.join(", ")}`,
+    for (const layer of config.resolvedAllowlist) {
+      const matched = layer.entries.some((entry) => {
+        const normalizedPattern = normalizePath(entry.pattern).replace(/\\/g, "/")
+        return matchPath(normalizedPath, normalizedPattern, entry.type)
+      })
+
+      if (!matched) {
+        const displayPath = relativeFilePath || filePath
+        const reason =
+          `Access denied: file '${displayPath}' is not in the allowlist defined in '${layer.source}'. ` +
+          `Add a matching entry to the allowlist, e.g.: { "pattern": "${path.dirname(displayPath).replace(/\\/g, "/")}/**", "type": "directory" }`
+
+        log.debug("access denied by allowlist", {
+          path: filePath,
+          relativePath: relativeFilePath,
+          operation,
+          role,
+          layer: layer.source,
+        })
+
+        SecurityAudit.logSecurityEvent({
+          path: filePath,
+          operation,
+          role,
+          allowed: false,
+          reason: `Allowlist denial: file not matched by layer '${layer.source}'`,
+        })
+
+        return {
+          allowed: false,
+          reason,
+        }
       }
     }
 

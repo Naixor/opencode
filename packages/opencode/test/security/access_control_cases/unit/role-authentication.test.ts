@@ -85,6 +85,9 @@ describe("CASE-AUTH-001: All tools use getDefaultRole() instead of SecurityRole.
 
   test("[CRITICAL] valid admin token has NO EFFECT on tool-level access checks", async () => {
     const baseConfig = loadBaseConfig()
+    // Set real public key so token verification works
+    const publicKeyPem = fs.readFileSync(keyPath("test-public"), "utf8")
+    baseConfig.authentication = { ...baseConfig.authentication, publicKey: publicKeyPem }
     const dir = await setupSecurityConfig(baseConfig)
 
     // Generate a valid admin token
@@ -193,6 +196,9 @@ describe("CASE-AUTH-004: Revoked token is rejected", () => {
 describe("CASE-AUTH-005: Token with non-existent role falls back to lowest role", () => {
   test("getCurrentRole falls back to lowest role for unknown role in token", async () => {
     const baseConfig = loadBaseConfig()
+    // Set real public key so token verification works
+    const publicKeyPem = fs.readFileSync(keyPath("test-public"), "utf8")
+    baseConfig.authentication = { ...baseConfig.authentication, publicKey: publicKeyPem }
     const dir = await setupSecurityConfig(baseConfig)
 
     // Create a valid token with a non-existent role
@@ -382,6 +388,9 @@ describe("CASE-AUTH-009: Role name matching is case-sensitive", () => {
 
   test("getCurrentRole with case-mismatched role falls back to lowest", async () => {
     const baseConfig = loadBaseConfig()
+    // Set real public key so token verification works
+    const publicKeyPem = fs.readFileSync(keyPath("test-public"), "utf8")
+    baseConfig.authentication = { ...baseConfig.authentication, publicKey: publicKeyPem }
     const dir = await setupSecurityConfig(baseConfig)
 
     // Create a valid token with "Admin" (capital A) — not in config roles
