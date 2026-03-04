@@ -5,7 +5,7 @@ import type { RunnerConfig, WorkerResult } from "./types"
 
 const tryParse = (s: string) => Promise.resolve(s).then(JSON.parse).catch(() => null)
 
-const parseOutput = async (stdout: string): Promise<{ pass: number; fail: number; skip: number }> => {
+export const parseOutput = async (stdout: string): Promise<{ pass: number; fail: number; skip: number }> => {
   const lines = stdout.trim().split("\n").filter(Boolean)
   const parsed = await Promise.all(lines.map(tryParse))
 

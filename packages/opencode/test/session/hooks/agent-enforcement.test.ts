@@ -32,10 +32,10 @@ describe("AgentEnforcementHooks", () => {
         await Todo.update({
           sessionID,
           todos: [
-            { id: "t1", content: "Fix auth bug", status: "in_progress", priority: "high" },
-            { id: "t2", content: "Write tests", status: "pending", priority: "medium" },
-            { id: "t3", content: "Update docs", status: "pending", priority: "low" },
-            { id: "t4", content: "Deploy", status: "completed", priority: "high" },
+            { content: "Fix auth bug", status: "in_progress", priority: "high" },
+            { content: "Write tests", status: "pending", priority: "medium" },
+            { content: "Update docs", status: "pending", priority: "low" },
+            { content: "Deploy", status: "completed", priority: "high" },
           ],
         })
 
@@ -64,9 +64,9 @@ describe("AgentEnforcementHooks", () => {
         await Todo.update({
           sessionID,
           todos: [
-            { id: "t1", content: "Fix auth bug", status: "completed", priority: "high" },
-            { id: "t2", content: "Write tests", status: "completed", priority: "medium" },
-            { id: "t3", content: "Deploy", status: "cancelled", priority: "low" },
+            { content: "Fix auth bug", status: "completed", priority: "high" },
+            { content: "Write tests", status: "completed", priority: "medium" },
+            { content: "Deploy", status: "cancelled", priority: "low" },
           ],
         })
 
@@ -109,7 +109,7 @@ describe("AgentEnforcementHooks", () => {
         await Todo.update({
           sessionID,
           todos: [
-            { id: "t1", content: "Fix bug", status: "pending", priority: "high" },
+            { content: "Fix bug", status: "pending", priority: "high" },
           ],
         })
 
@@ -134,7 +134,7 @@ describe("AgentEnforcementHooks", () => {
         await Todo.update({
           sessionID,
           todos: [
-            { id: "t1", content: "Fix auth bug", status: "in_progress", priority: "high" },
+            { content: "Fix auth bug", status: "in_progress", priority: "high" },
           ],
         })
 
@@ -166,8 +166,8 @@ describe("AgentEnforcementHooks", () => {
         await Todo.update({
           sessionID,
           todos: [
-            { id: "t1", content: "Fix bug", status: "pending", priority: "high" },
-            { id: "t2", content: "Write tests", status: "pending", priority: "medium" },
+            { content: "Fix bug", status: "pending", priority: "high" },
+            { content: "Write tests", status: "pending", priority: "medium" },
           ],
         })
 
@@ -195,7 +195,7 @@ describe("AgentEnforcementHooks", () => {
         await Todo.update({
           sessionID,
           todos: [
-            { id: "t1", content: "Fix bug", status: "pending", priority: "high" },
+            { content: "Fix bug", status: "pending", priority: "high" },
           ],
         })
 
@@ -287,7 +287,7 @@ describe("AgentEnforcementHooks", () => {
         await Todo.update({
           sessionID,
           todos: [
-            { id: "t1", content: "Fix bug", status: "pending", priority: "high" },
+            { content: "Fix bug", status: "pending", priority: "high" },
           ],
         })
 
@@ -334,7 +334,7 @@ describe("AgentEnforcementHooks", () => {
         await Todo.update({
           sessionID,
           todos: [
-            { id: "t1", content: "Fix bug", status: "pending", priority: "high" },
+            { content: "Fix bug", status: "pending", priority: "high" },
           ],
         })
 

@@ -24,6 +24,13 @@ import { SecuritySchema } from "../security/schema"
 import { SecurityAudit } from "../security/audit"
 import { getActiveSandbox } from "../sandbox"
 
+function getDefaultRole(config: SecuritySchema.SecurityConfig): string {
+  const roles = config.roles || []
+  if (roles.length === 0) return "default"
+  const sorted = [...roles].sort((a, b) => a.level - b.level)
+  return sorted[0].name
+}
+
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 
@@ -125,7 +132,7 @@ export const BashTool = Tool.define("bash", async () => {
               })
             }
 
-            securityLog.info("bash command blocked due to protected file access", {
+            log.info("bash command blocked due to protected file access", {
               command: params.command,
               blockedPaths: deniedPaths.map((d) => d.path),
             })
@@ -134,7 +141,7 @@ export const BashTool = Tool.define("bash", async () => {
             throw new Error(`Security: Command blocked. The following file accesses are restricted:\n${reasons}`)
           }
 
-          securityLog.debug("bash security scan passed", {
+          log.debug("bash security scan passed", {
             command: params.command,
             scannedPaths,
             role: currentRole,
