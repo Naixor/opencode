@@ -30,10 +30,21 @@ test("empty allowlist produces minimal profile", async () => {
   expect(profile).not.toContain("file-write*")
 })
 
-test("directory glob pattern generates subpath write allow rule", async () => {
+test("directory glob pattern generates regex write allow rule", async () => {
   const profile = await generateProfile(
     makeInput({
       allowlist: [{ pattern: "src/**", type: "directory" }],
+    }),
+  )
+  expect(profile).toContain("(allow file-write*")
+  expect(profile).toContain(";; glob: src/**")
+  expect(profile).toMatch(/\(regex ".*"\)/)
+})
+
+test("directory concrete pattern generates subpath write allow rule", async () => {
+  const profile = await generateProfile(
+    makeInput({
+      allowlist: [{ pattern: "src", type: "directory" }],
     }),
   )
   expect(profile).toContain("(allow file-write*")
