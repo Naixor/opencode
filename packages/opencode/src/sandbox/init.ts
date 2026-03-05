@@ -44,14 +44,18 @@ export async function initSandbox(): Promise<SandboxInitResult> {
   const allowlistPatterns = securityConfig.resolvedAllowlist.flatMap((layer) =>
     layer.entries.map((e) => e.pattern),
   )
-  const denyPatterns = (securityConfig.rules ?? []).map((r) => r.pattern)
+  // Only generate sandbox deny for rules that deny read or llm (llm = read+write).
+  // Rules that only deny write are skipped since sandbox deny blocks both read+write.
+  const denyEntries = (securityConfig.rules ?? [])
+    .filter((r) => r.deniedOperations.includes("read") || r.deniedOperations.includes("llm"))
+    .map((r) => ({ pattern: r.pattern, deniedOperations: r.deniedOperations }))
   const extraPaths = config.sandbox?.paths ?? []
 
   const policyPath = await sandbox
     .generatePolicy({
       projectRoot: Instance.directory,
       allowlist: allowlistPatterns,
-      deny: denyPatterns,
+      deny: denyEntries,
       extraPaths,
     })
     .catch((err: Error) => {

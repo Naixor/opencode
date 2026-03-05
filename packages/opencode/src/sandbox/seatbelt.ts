@@ -30,12 +30,13 @@ export class SeatbeltSandbox implements Sandbox {
         const isDir = pattern.endsWith("/**") || pattern.endsWith("/") || !pattern.includes(".")
         return { pattern, type: isDir ? ("directory" as const) : ("file" as const) }
       }),
-      deny: config.deny.map((pattern) => {
-        const isDir = pattern.endsWith("/**") || pattern.endsWith("/") || !pattern.includes(".")
+      deny: config.deny.map((entry) => {
+        const isGlob = /[*?[{]/.test(entry.pattern)
+        const isDir = !isGlob && (entry.pattern.endsWith("/**") || entry.pattern.endsWith("/") || !entry.pattern.includes("."))
         return {
-          pattern,
+          pattern: entry.pattern,
           type: isDir ? ("directory" as const) : ("file" as const),
-          deniedOperations: ["read" as const, "write" as const],
+          deniedOperations: entry.deniedOperations as ("read" | "write")[],
           allowedRoles: [],
         }
       }),
