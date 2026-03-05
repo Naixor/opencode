@@ -58,23 +58,27 @@ test("discovers config files in subdirectories", async () => {
   expect(found).toBeDefined()
 })
 
-test("subdirectory config not in merge chain produces warning", async () => {
+test("subdirectory configs are included in merge chain", async () => {
   await fs.mkdir(path.join(testDir, ".git"), { recursive: true })
-  // Root config (active)
+  // Root config
   await fs.writeFile(
     path.join(testDir, ".opencode-security.json"),
     JSON.stringify({ version: "1.0" }),
   )
-  // Subdirectory config (inactive — not in the upward walk from projectRoot to git root)
+  // Subdirectory config — should now be loaded
   await fs.mkdir(path.join(testDir, "packages", "app"), { recursive: true })
   await fs.writeFile(
     path.join(testDir, "packages", "app", ".opencode-security.json"),
-    JSON.stringify({ version: "1.0" }),
+    JSON.stringify({ version: "1.0", rules: [{ pattern: ".env", type: "file", deniedOperations: ["read"], allowedRoles: [] }] }),
   )
   await SecurityConfig.loadSecurityConfig(testDir)
   const diagnostics = await runSecurityDoctor(testDir)
-  const inactive = diagnostics.find((d) => d.category === "config" && d.level === "warn" && d.message.includes("NOT in active merge chain"))
-  expect(inactive).toBeDefined()
+  // Should NOT have "NOT in active merge chain" warning
+  const inactive = diagnostics.find((d) => d.message.includes("NOT in active merge chain"))
+  expect(inactive).toBeUndefined()
+  // Both configs should be reported as valid
+  const validInfos = diagnostics.filter((d) => d.category === "config" && d.message.includes("valid"))
+  expect(validInfos.length).toBe(2)
 })
 
 test("schema validation error produces error diagnostic", async () => {
@@ -217,6 +221,32 @@ test("valid config with no issues produces only info diagnostics", async () => {
   const warnings = diagnostics.filter((d) => d.level === "warn")
   expect(errors.length).toBe(0)
   expect(warnings.length).toBe(0)
+})
+
+test("subdirectory config rules are merged into resolved config", async () => {
+  await fs.mkdir(path.join(testDir, ".git"), { recursive: true })
+  await fs.writeFile(
+    path.join(testDir, ".opencode-security.json"),
+    JSON.stringify({
+      version: "1.0",
+      rules: [{ pattern: ".env", type: "file", deniedOperations: ["read"], allowedRoles: [] }],
+    }),
+  )
+  await fs.mkdir(path.join(testDir, "packages", "core"), { recursive: true })
+  await fs.writeFile(
+    path.join(testDir, "packages", "core", ".opencode-security.json"),
+    JSON.stringify({
+      version: "1.0",
+      rules: [{ pattern: "**/*.key", type: "file", deniedOperations: ["read", "write"], allowedRoles: [] }],
+    }),
+  )
+  await SecurityConfig.loadSecurityConfig(testDir)
+  const config = SecurityConfig.getSecurityConfig()
+  // Both root and subdirectory rules should be merged
+  expect(config.rules?.length).toBe(2)
+  const patterns = config.rules?.map((r) => r.pattern) ?? []
+  expect(patterns).toContain(".env")
+  expect(patterns).toContain("**/*.key")
 })
 
 test("deny/allowlist overlap produces info", async () => {

@@ -157,19 +157,14 @@ async function checkAllConfigFiles(
     }
   }
 
-  // Check which configs are active (in the merge chain from projectRoot up to git root)
+  // Show merge scope info
   const activeConfigs = await SecurityConfig.findSecurityConfigs(projectRoot)
-  const activePaths = new Set(activeConfigs.map((c) => c.path))
-
-  for (const result of parsed) {
-    if (!result.parseError && !result.schemaErrors && !activePaths.has(result.path)) {
-      diagnostics.push({
-        level: "warn",
-        category: "config",
-        message: `${result.relativePath}: valid config but NOT in active merge chain (not between project root and git root)`,
-        fix: "This config exists in a subdirectory and won't be loaded. Move it to the project root or a parent directory up to the git root.",
-      })
-    }
+  if (activeConfigs.length > 1) {
+    diagnostics.push({
+      level: "info",
+      category: "config",
+      message: `${activeConfigs.length} configs in active merge chain (ancestors + project root + subdirectories)`,
+    })
   }
 }
 

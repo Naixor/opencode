@@ -87,38 +87,90 @@ export namespace SecurityConfig {
     return undefined
   }
 
+  const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache"])
+
   /**
-   * Walk up from startPath to the git root, collecting all `.opencode-security.json` files.
-   * Returns configs ordered from most specific (startPath) to least specific (git root).
+   * Recursively scan a directory for `.opencode-security.json` files.
+   * Skips common non-source directories (node_modules, .git, dist, etc.).
+   */
+  async function findConfigsInSubtree(dir: string): Promise<{ config: SecuritySchema.SecurityConfig; path: string }[]> {
+    const results: { config: SecuritySchema.SecurityConfig; path: string }[] = []
+
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return results
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
+        const subResults = await findConfigsInSubtree(path.join(dir, entry.name))
+        results.push(...subResults)
+      } else if (entry.name === SECURITY_CONFIG_FILE) {
+        const configPath = path.join(dir, entry.name)
+        const config = await loadConfigFile(configPath)
+        if (config) {
+          results.push({ config, path: configPath })
+        }
+      }
+    }
+
+    return results
+  }
+
+  /**
+   * Collect all `.opencode-security.json` files from three scopes:
+   * 1. Walk UP from startPath to git root (ancestor configs)
+   * 2. Walk DOWN from startPath into subdirectories (descendant configs)
+   *
+   * Returns configs ordered: startPath first, then ancestors (up), then descendants (down).
+   * Deduplicates by path so startPath's own config is not counted twice.
    */
   export async function findSecurityConfigs(
     startPath: string,
   ): Promise<{ config: SecuritySchema.SecurityConfig; path: string }[]> {
     const resolved = path.resolve(startPath)
-    const gitRoot = findGitRoot(resolved)
+    const seen = new Set<string>()
+    const configs: { config: SecuritySchema.SecurityConfig; path: string }[] = []
 
-    if (!gitRoot) {
-      log.debug("no git root found, checking startPath only", { startPath: resolved })
-      const configPath = path.join(resolved, SECURITY_CONFIG_FILE)
-      const config = await loadConfigFile(configPath)
-      if (!config) return []
-      return [{ config, path: configPath }]
+    function addIfNew(entry: { config: SecuritySchema.SecurityConfig; path: string }) {
+      if (!seen.has(entry.path)) {
+        seen.add(entry.path)
+        configs.push(entry)
+      }
     }
 
-    const configs: { config: SecuritySchema.SecurityConfig; path: string }[] = []
-    let current = resolved
+    // 1. startPath itself
+    const startConfig = await loadConfigFile(path.join(resolved, SECURITY_CONFIG_FILE))
+    if (startConfig) {
+      addIfNew({ config: startConfig, path: path.join(resolved, SECURITY_CONFIG_FILE) })
+    }
 
-    while (true) {
-      const configPath = path.join(current, SECURITY_CONFIG_FILE)
-      const config = await loadConfigFile(configPath)
-      if (config) {
-        configs.push({ config, path: configPath })
+    // 2. Walk UP to git root (ancestors)
+    const gitRoot = findGitRoot(resolved)
+    if (gitRoot) {
+      let current = path.dirname(resolved)
+      while (true) {
+        const configPath = path.join(current, SECURITY_CONFIG_FILE)
+        const config = await loadConfigFile(configPath)
+        if (config) {
+          addIfNew({ config, path: configPath })
+        }
+        if (current === gitRoot) break
+        const parent = path.dirname(current)
+        if (parent === current) break
+        current = parent
       }
+    } else if (!startConfig) {
+      // No git root and no startPath config — nothing to find
+      return []
+    }
 
-      if (current === gitRoot) break
-      const parent = path.dirname(current)
-      if (parent === current) break
-      current = parent
+    // 3. Walk DOWN into subdirectories
+    const subConfigs = await findConfigsInSubtree(resolved)
+    for (const entry of subConfigs) {
+      addIfNew(entry)
     }
 
     return configs
