@@ -9,10 +9,15 @@ export interface Sandbox {
   generatePolicy(config: SandboxConfig): Promise<string>
 }
 
+export interface SandboxDenyEntry {
+  pattern: string
+  deniedOperations: ("read" | "write" | "llm")[]
+}
+
 export interface SandboxConfig {
   projectRoot: string
   allowlist: string[]
-  deny: string[]
+  deny: SandboxDenyEntry[]
   extraPaths: string[]
 }
 

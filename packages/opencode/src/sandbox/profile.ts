@@ -2,6 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import type { SecuritySchema } from "../security/schema"
 import { generateBuiltins } from "./builtins"
+import { isGlobPattern, globToSbplRegex } from "./glob-to-regex"
 
 export interface ProfileInput {
   projectRoot: string
@@ -28,6 +29,10 @@ function sbplLiteral(p: string): string {
   return `(literal "${p}")`
 }
 
+function sbplRegex(r: string): string {
+  return `(regex "${r}")`
+}
+
 function allowWrite(filter: string): string {
   return `(allow file-write* ${filter})`
 }
@@ -39,7 +44,12 @@ function denyRW(filter: string): string {
 async function resolveAllowlistEntry(
   entry: SecuritySchema.AllowlistEntry,
   projectRoot: string,
-): Promise<string> {
+): Promise<string | string[]> {
+  if (isGlobPattern(entry.pattern)) {
+    const regex = await globToSbplRegex(entry.pattern, projectRoot)
+    return [`;; glob: ${entry.pattern}`, allowWrite(sbplRegex(regex))]
+  }
+
   const pattern = entry.pattern.replace(/\/\*\*$/, "").replace(/\*\*/g, "")
   const abs = path.isAbsolute(pattern) ? pattern : path.resolve(projectRoot, pattern)
   const resolved = await realpath(abs)
@@ -52,7 +62,12 @@ async function resolveAllowlistEntry(
 async function resolveDenyEntry(
   rule: SecuritySchema.Rule,
   projectRoot: string,
-): Promise<string> {
+): Promise<string | string[]> {
+  if (isGlobPattern(rule.pattern)) {
+    const regex = await globToSbplRegex(rule.pattern, projectRoot)
+    return [`;; glob: ${rule.pattern}`, denyRW(sbplRegex(regex))]
+  }
+
   const pattern = rule.pattern.replace(/\/\*\*$/, "").replace(/\*\*/g, "")
   const abs = path.isAbsolute(pattern) ? pattern : path.resolve(projectRoot, pattern)
   const resolved = await realpath(abs)
@@ -69,10 +84,10 @@ export async function generateProfile(input: ProfileInput): Promise<string> {
     ";; --- Allowlist write rules ---",
   ]
 
-  const allowRules = await Promise.all(
+  const allowResults = await Promise.all(
     input.allowlist.map((entry) => resolveAllowlistEntry(entry, input.projectRoot)),
   )
-  lines.push(...allowRules)
+  lines.push(...allowResults.flat())
 
   if (input.extraPaths.length > 0) {
     lines.push("")
@@ -86,10 +101,10 @@ export async function generateProfile(input: ProfileInput): Promise<string> {
   if (input.deny.length > 0) {
     lines.push("")
     lines.push(";; --- Deny rules (block read+write) ---")
-    const denyRules = await Promise.all(
+    const denyResults = await Promise.all(
       input.deny.map((rule) => resolveDenyEntry(rule, input.projectRoot)),
     )
-    lines.push(...denyRules)
+    lines.push(...denyResults.flat())
   }
 
   lines.push("")

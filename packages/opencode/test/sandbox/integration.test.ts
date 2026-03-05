@@ -61,7 +61,7 @@ describe.if(IS_MACOS)("sandbox-exec integration", () => {
     await sandbox.generatePolicy({
       projectRoot: testDir,
       allowlist: ["allowed/**"],
-      deny: ["denied"],
+      deny: [{ pattern: "denied", deniedOperations: ["read", "write"] }],
       extraPaths: [extraDir],
     })
   })
