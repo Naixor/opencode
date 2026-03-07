@@ -362,3 +362,21 @@ Started: Sat Mar  7 21:18:34 CST 2026
   - Tool output token estimate: ~bytes/4 (rough byte-to-token ratio)
   - Manual browser verification needed (no browser testing tools configured)
 ---
+
+## 2026-03-07 - US-023
+- Added "Annotations" tab to LogDetailPage with full annotation CRUD
+- Text selection on completion text shows floating toolbar with 3 annotation types: hallucination (red), quality (yellow), note (blue)
+- Creating annotation sends POST /api/logs/:id/annotations with type, content, and marked_text
+- Annotations overlay on completion text as colored highlights with tooltip showing type and content
+- View existing annotations in a list with type badge, content, marked text preview, timestamp
+- Delete annotations via DELETE /api/logs/annotations/:id
+- Data refresh after create/delete uses lightweight re-fetch (no loading spinner)
+- Optional note input appears when text is selected for annotation context
+- Files changed: `packages/log-viewer/src/pages/LogDetailPage.tsx`
+- **Learnings for future iterations:**
+  - `AnnotationToolbar` uses `fixed` positioning with `window.scrollY` offset for correct placement relative to selection
+  - Text highlight segments: build markers array from annotations' `marked_text` positions in completion text, sort by start, skip overlapping
+  - `useCallback` for `refreshData` avoids full loading state — just silently re-fetches and updates state
+  - `window.getSelection()?.removeAllRanges()` clears selection after annotation is created for clean UX
+  - Manual browser verification needed (no browser testing tools configured)
+---
