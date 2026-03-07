@@ -25,6 +25,7 @@ Started: Sat Mar  7 21:18:34 CST 2026
 - React packages in this monorepo: must add `"react": ["./node_modules/@types/react"]` to tsconfig paths to fix duplicate @types/react resolution (monorepo has @types/react@18.0.25 hoisted, conflicts with package-level @types/react@19.x)
 - Use `react-router` v7 (not `react-router-dom`) — v7 primary package, `react-router-dom` is compat layer
 - Use `createBrowserRouter` + `RouterProvider` API (not `BrowserRouter` + `Routes`) — better types and data loading support
+- Recharts tooltip/label callbacks: don't annotate param types explicitly — use `(value) => ...` and cast with `Number(value)` inside to avoid strict type mismatches
 
 ## 2026-03-07 - US-001
 - Added `metadata: z.record(z.string(), z.any()).optional()` to PreLLMContext, PreToolContext, PostToolContext, SessionLifecycleContext
@@ -323,5 +324,25 @@ Started: Sat Mar  7 21:18:34 CST 2026
   - `modified_fields` from the API may be a JSON string or already parsed array — handle both cases with try/catch fallback
   - Chat bubble role colors: blue=user, emerald=assistant, amber=tool, purple=system — consistent with common LLM UI conventions
   - `tabular-nums` Tailwind class essential for aligning numeric columns in tables
+  - Manual browser verification needed (no browser testing tools configured)
+---
+
+## 2026-03-07 - US-021
+- Implemented StatsPage with summary cards and 4 chart/table views
+- Summary cards: total requests, total tokens (in/out), total cost, avg tokens/request
+- Line chart: token usage & cost over time (hourly/daily) with dual Y-axes (tokens left, cost right)
+- Bar chart: token consumption by model (input vs output stacked)
+- Pie chart: token distribution by agent with percentage labels
+- Session table: per-session token totals, request count, cost, avg duration
+- All views share a time range filter (1h/6h/24h/7d/30d/all)
+- Each chart component fetches its own data with the appropriate `group_by` parameter
+- Installed `recharts@3.8.0` as dependency
+- Files changed: `packages/log-viewer/src/pages/StatsPage.tsx`, `packages/log-viewer/package.json`, `bun.lock`
+- **Learnings for future iterations:**
+  - Recharts `Tooltip` `formatter` and `labelFormatter` callbacks have loose types — use `(value) => ...` without explicit type annotations and cast with `Number(value)` / `String(label)` inside
+  - Recharts `Pie` `label` callback: `percent` can be undefined — use `(percent ?? 0)`
+  - Dual Y-axis pattern: use `yAxisId` on both `<YAxis>` and `<Line>` to associate them
+  - Cost is stored as microdollars (integer) in the API — divide by 1_000_000 for display
+  - Time grouping returns timestamps as strings — sort numerically with `Number(a.group)` for correct time ordering
   - Manual browser verification needed (no browser testing tools configured)
 ---
