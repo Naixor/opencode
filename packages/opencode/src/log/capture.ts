@@ -2,16 +2,19 @@ import { Log } from "../util/log"
 import { HookChain } from "../session/hooks"
 import { Instance } from "../project/instance"
 import { Database } from "../storage/db"
-import { LlmLogTable, LlmLogRequestTable, LlmLogResponseTable, LlmLogTokensTable } from "./log.sql"
+import { LlmLogTable, LlmLogRequestTable, LlmLogResponseTable, LlmLogTokensTable, LlmLogToolCallTable } from "./log.sql"
 import { Identifier } from "../id/id"
 import { Config } from "../config/config"
-import { eq } from "drizzle-orm"
+import { eq, and } from "drizzle-orm"
 
 export namespace LlmLogCapture {
   const log = Log.create({ service: "llm-log-capture" })
 
   // Per-instance state: Map<sessionID, { logId, timeStart }>
   const currentLogState = Instance.state(() => new Map<string, { logId: string; timeStart: number }>())
+
+  // Per-instance state: Map<"sessionID:callID", timeStart> for tool call duration tracking
+  const toolCallStartState = Instance.state(() => new Map<string, number>())
 
   export function getCurrentLogId(sessionID: string): string | undefined {
     return currentLogState().get(sessionID)?.logId
@@ -61,6 +64,98 @@ export namespace LlmLogCapture {
         log.error("failed to capture pre-llm log", {
           error: err instanceof Error ? err.message : String(err),
           sessionID: ctx.sessionID,
+        })
+      }
+    })
+
+    HookChain.register("llm-log-tool-start", "pre-tool", 999, async (ctx) => {
+      const config = await Config.get()
+      if (!config.llmLog?.enabled) return
+
+      const llmLogId = getCurrentLogId(ctx.sessionID)
+      if (!llmLogId) return
+
+      const callId = ctx.metadata?.callID as string | undefined
+      const now = Date.now()
+
+      try {
+        const toolCallId = Identifier.ascending("log")
+
+        Database.use((db) => {
+          db.insert(LlmLogToolCallTable)
+            .values({
+              id: toolCallId,
+              llm_log_id: llmLogId,
+              call_id: callId ?? null,
+              tool_name: ctx.toolName,
+              input: ctx.args,
+              status: "running",
+              time_start: now,
+            })
+            .run()
+        })
+
+        // Store start time keyed by sessionID:callID for duration calculation in post-tool hook
+        const key = `${ctx.sessionID}:${callId ?? ctx.toolName}`
+        toolCallStartState().set(key, now)
+
+        log.info("captured tool call start", { toolCallId, toolName: ctx.toolName, llmLogId })
+      } catch (err) {
+        log.error("failed to capture tool call start", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionID: ctx.sessionID,
+          toolName: ctx.toolName,
+        })
+      }
+    })
+
+    HookChain.register("llm-log-tool-finish", "post-tool", 0, async (ctx) => {
+      const config = await Config.get()
+      if (!config.llmLog?.enabled) return
+
+      const llmLogId = getCurrentLogId(ctx.sessionID)
+      if (!llmLogId) return
+
+      const callId = ctx.metadata?.callID as string | undefined
+      const now = Date.now()
+
+      try {
+        const key = `${ctx.sessionID}:${callId ?? ctx.toolName}`
+        const startTime = toolCallStartState().get(key)
+        const durationMs = startTime ? now - startTime : null
+        toolCallStartState().delete(key)
+
+        const outputStr = ctx.result.output ?? ""
+        const outputBytes = Buffer.byteLength(outputStr, "utf8")
+
+        Database.use((db) => {
+          db.update(LlmLogToolCallTable)
+            .set({
+              output: { output: outputStr, title: ctx.result.title },
+              title: ctx.result.title ?? null,
+              status: "success",
+              time_end: now,
+              duration_ms: durationMs,
+              output_bytes: outputBytes,
+            })
+            .where(
+              and(
+                eq(LlmLogToolCallTable.llm_log_id, llmLogId),
+                callId
+                  ? eq(LlmLogToolCallTable.call_id, callId)
+                  : eq(LlmLogToolCallTable.tool_name, ctx.toolName),
+                eq(LlmLogToolCallTable.status, "running"),
+              ),
+            )
+            .run()
+        })
+
+        log.info("captured tool call finish", { toolName: ctx.toolName, llmLogId, durationMs })
+      } catch (err) {
+        log.error("failed to capture tool call finish", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionID: ctx.sessionID,
+          toolName: ctx.toolName,
         })
       }
     })

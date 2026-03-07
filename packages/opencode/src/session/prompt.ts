@@ -852,6 +852,7 @@ export namespace SessionPrompt {
               toolName: item.id,
               args: preToolPluginOutput.args as Record<string, unknown>,
               agent: input.agent.name,
+              metadata: { callID: ctx.callID },
             },
           )
           const result = await item.execute(preToolPluginOutput.args as any, ctx)
@@ -882,6 +883,7 @@ export namespace SessionPrompt {
                 metadata: output.metadata,
               },
               agent: input.agent.name,
+              metadata: { callID: ctx.callID },
             },
           )
           return output
@@ -934,6 +936,7 @@ export namespace SessionPrompt {
             toolName: key,
             args: mcpPreToolPluginOutput.args as Record<string, unknown>,
             agent: input.agent.name,
+            metadata: { callID: opts.toolCallId },
           },
         )
 
@@ -1053,6 +1056,7 @@ export namespace SessionPrompt {
               metadata: mcpOutput.metadata,
             },
             agent: input.agent.name,
+            metadata: { callID: opts.toolCallId },
           },
         )
 
