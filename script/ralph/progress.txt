@@ -380,3 +380,19 @@ Started: Sat Mar  7 21:18:34 CST 2026
   - `window.getSelection()?.removeAllRanges()` clears selection after annotation is created for clean UX
   - Manual browser verification needed (no browser testing tools configured)
 ---
+
+## 2026-03-07 - US-024
+- Added "Diff" tab to LogDetailPage showing LLM completion text side-by-side with actual tool call inputs/outputs
+- `buildDiffPairs()` associates tool calls with completion text segments by searching for tool name mentions and extracting surrounding context (200 chars before, up to 500 chars after or next paragraph break)
+- Auto-detects potential hallucinations: tool call failed but completion text doesn't mention failure/error keywords
+- `DiffPairCard` component renders left-right split: completion segment (left) vs actual tool input + output (right)
+- Hallucination banner at top shows count of detected issues
+- Failed tool outputs displayed with red background for visual distinction
+- Files changed: `packages/log-viewer/src/pages/LogDetailPage.tsx`
+- **Learnings for future iterations:**
+  - Tool name matching in completion text: try variants (underscores → spaces, hyphens → spaces) for better coverage
+  - Segment extraction: `lastIndexOf("\n", bestIdx - 200)` finds a clean line boundary for context start
+  - Hallucination heuristic: regex for failure keywords `/\b(fail|error|issue|problem|couldn't|unable|sorry)\b/i` — simple but effective for flagging
+  - `&apos;` needed for apostrophe in JSX text to satisfy some linters
+  - Manual browser verification needed (no browser testing tools configured)
+---
