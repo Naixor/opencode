@@ -320,44 +320,71 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             save()
           })
         },
-        variant: {
-          current() {
-            const m = currentModel()
-            if (!m) return undefined
-            const key = `${m.providerID}/${m.modelID}`
-            return modelStore.variant[key]
-          },
-          list() {
-            const m = currentModel()
-            if (!m) return []
-            const provider = sync.data.provider.find((x) => x.id === m.providerID)
-            const info = provider?.models[m.modelID]
-            if (!info?.variants) return []
-            return Object.keys(info.variants)
-          },
-          set(value: string | undefined) {
-            const m = currentModel()
-            if (!m) return
-            const key = `${m.providerID}/${m.modelID}`
-            setModelStore("variant", key, value)
-            save()
-          },
-          cycle() {
-            const variants = this.list()
-            if (variants.length === 0) return
-            const current = this.current()
-            if (!current) {
-              this.set(variants[0])
-              return
-            }
-            const index = variants.indexOf(current)
-            if (index === -1 || index === variants.length - 1) {
-              this.set(undefined)
-              return
-            }
-            this.set(variants[index + 1])
-          },
-        },
+        variant: iife(() => {
+          let _previous: string | undefined = undefined
+          let _isOneShot = false
+
+          return {
+            current() {
+              const m = currentModel()
+              if (!m) return undefined
+              const key = `${m.providerID}/${m.modelID}`
+              return modelStore.variant[key]
+            },
+            list() {
+              const m = currentModel()
+              if (!m) return []
+              const provider = sync.data.provider.find((x) => x.id === m.providerID)
+              const info = provider?.models[m.modelID]
+              if (!info?.variants) return []
+              return Object.keys(info.variants)
+            },
+            set(value: string | undefined) {
+              _isOneShot = false
+              const m = currentModel()
+              if (!m) return
+              const key = `${m.providerID}/${m.modelID}`
+              setModelStore("variant", key, value)
+              save()
+            },
+            cycle() {
+              _isOneShot = false
+              const variants = this.list()
+              if (variants.length === 0) return
+              const current = this.current()
+              if (!current) {
+                this.set(variants[0])
+                return
+              }
+              const index = variants.indexOf(current)
+              if (index === -1 || index === variants.length - 1) {
+                this.set(undefined)
+                return
+              }
+              this.set(variants[index + 1])
+            },
+            setOneShot(value: string) {
+              _previous = this.current()
+              _isOneShot = true
+              const m = currentModel()
+              if (!m) return
+              const key = `${m.providerID}/${m.modelID}`
+              setModelStore("variant", key, value)
+            },
+            revertOneShot() {
+              if (!_isOneShot) return
+              const m = currentModel()
+              if (!m) return
+              const key = `${m.providerID}/${m.modelID}`
+              setModelStore("variant", key, _previous)
+              _isOneShot = false
+              _previous = undefined
+            },
+            isOneShot() {
+              return _isOneShot
+            },
+          }
+        }),
       }
     })
 
