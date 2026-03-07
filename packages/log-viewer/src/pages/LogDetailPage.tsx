@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router"
 
 interface TokenDetail {
@@ -69,7 +69,7 @@ interface LogDetail {
   annotations: Annotation[]
 }
 
-type Tab = "overview" | "request" | "response" | "tools" | "hooks"
+type Tab = "overview" | "request" | "response" | "tools" | "hooks" | "annotations"
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: "overview", label: "Overview" },
@@ -77,6 +77,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: "response", label: "Response" },
   { id: "tools", label: "Tools" },
   { id: "hooks", label: "Hooks" },
+  { id: "annotations", label: "Annotations" },
 ]
 
 const statusColors: Record<string, string> = {
@@ -566,6 +567,261 @@ function HooksTab({ data }: { data: LogDetail }) {
   )
 }
 
+const annotationTypeConfig: Record<string, { label: string; bg: string; border: string; text: string; highlight: string }> = {
+  hallucination: { label: "Hallucination", bg: "bg-red-950", border: "border-red-800", text: "text-red-400", highlight: "bg-red-500/20" },
+  quality: { label: "Quality", bg: "bg-yellow-950", border: "border-yellow-800", text: "text-yellow-400", highlight: "bg-yellow-500/20" },
+  note: { label: "Note", bg: "bg-blue-950", border: "border-blue-800", text: "text-blue-400", highlight: "bg-blue-500/20" },
+}
+
+function AnnotationToolbar({
+  position,
+  onAnnotate,
+  onClose,
+}: {
+  position: { top: number; left: number }
+  onAnnotate: (type: string) => void
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [onClose])
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl p-1 flex items-center gap-1"
+      style={{ top: position.top - 44, left: position.left }}
+    >
+      {Object.entries(annotationTypeConfig).map(([type, config]) => (
+        <button
+          key={type}
+          onClick={() => onAnnotate(type)}
+          className={`px-2.5 py-1.5 text-xs font-medium rounded ${config.text} hover:${config.bg} transition-colors`}
+          title={`Mark as ${config.label}`}
+        >
+          {config.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function AnnotationsTab({
+  data,
+  onAnnotationCreated,
+  onAnnotationDeleted,
+}: {
+  data: LogDetail
+  onAnnotationCreated: () => void
+  onAnnotationDeleted: () => void
+}) {
+  const containerRef = useRef<HTMLPreElement>(null)
+  const [toolbar, setToolbar] = useState<{ top: number; left: number; selectedText: string } | null>(null)
+  const [annotationNote, setAnnotationNote] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  const completionText = data.response?.completion_text ?? ""
+
+  const handleMouseUp = useCallback(() => {
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || !containerRef.current) return
+    const selectedText = selection.toString().trim()
+    if (!selectedText) return
+    const range = selection.getRangeAt(0)
+    if (!containerRef.current.contains(range.commonAncestorContainer)) return
+    const rect = range.getBoundingClientRect()
+    setToolbar({
+      top: rect.top + window.scrollY,
+      left: rect.left + (rect.width / 2) - 100,
+      selectedText,
+    })
+  }, [])
+
+  const handleAnnotate = useCallback(
+    async (type: string) => {
+      if (!toolbar || creating) return
+      setCreating(true)
+      try {
+        const res = await fetch(`/api/logs/${data.id}/annotations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type,
+            content: annotationNote || `Marked as ${type}`,
+            marked_text: toolbar.selectedText,
+          }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        setToolbar(null)
+        setAnnotationNote("")
+        window.getSelection()?.removeAllRanges()
+        onAnnotationCreated()
+      } catch {
+        // silently fail — could add error toast
+      } finally {
+        setCreating(false)
+      }
+    },
+    [toolbar, annotationNote, creating, data.id, onAnnotationCreated],
+  )
+
+  const handleDelete = useCallback(
+    async (annotationId: string) => {
+      if (deleting) return
+      setDeleting(annotationId)
+      try {
+        const res = await fetch(`/api/logs/annotations/${annotationId}`, { method: "DELETE" })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        onAnnotationDeleted()
+      } catch {
+        // silently fail
+      } finally {
+        setDeleting(null)
+      }
+    },
+    [deleting, onAnnotationDeleted],
+  )
+
+  // Build highlighted segments
+  const segments: Array<{ text: string; annotation?: Annotation }> = []
+  if (data.annotations.length === 0 || !completionText) {
+    segments.push({ text: completionText || "(no completion text)" })
+  } else {
+    const markers: Array<{ start: number; end: number; annotation: Annotation }> = []
+    for (const ann of data.annotations) {
+      if (!ann.marked_text) continue
+      let searchFrom = 0
+      while (searchFrom < completionText.length) {
+        const idx = completionText.indexOf(ann.marked_text, searchFrom)
+        if (idx === -1) break
+        markers.push({ start: idx, end: idx + ann.marked_text.length, annotation: ann })
+        searchFrom = idx + ann.marked_text.length
+      }
+    }
+    markers.sort((a, b) => a.start - b.start)
+    let pos = 0
+    for (const marker of markers) {
+      if (marker.start < pos) continue
+      if (marker.start > pos) segments.push({ text: completionText.slice(pos, marker.start) })
+      segments.push({ text: completionText.slice(marker.start, marker.end), annotation: marker.annotation })
+      pos = marker.end
+    }
+    if (pos < completionText.length) segments.push({ text: completionText.slice(pos) })
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Instructions */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+        <h3 className="text-sm font-medium text-zinc-300 mb-2">How to Annotate</h3>
+        <p className="text-xs text-zinc-500">
+          Select text in the completion below, then choose an annotation type from the floating toolbar.
+          Optionally add a note before selecting the type.
+        </p>
+        {toolbar && (
+          <div className="mt-2">
+            <input
+              type="text"
+              value={annotationNote}
+              onChange={(e) => setAnnotationNote(e.target.value)}
+              placeholder="Optional note for annotation..."
+              className="w-full px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Completion text with highlights */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-zinc-800">
+          <h3 className="text-sm font-medium text-zinc-400">Completion Text</h3>
+        </div>
+        <div className="p-4 relative">
+          <pre
+            ref={containerRef}
+            onMouseUp={handleMouseUp}
+            className="text-zinc-200 text-sm whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[500px] overflow-y-auto cursor-text"
+          >
+            {segments.map((seg, i) => {
+              if (!seg.annotation) return <span key={i}>{seg.text}</span>
+              const config = annotationTypeConfig[seg.annotation.type] ?? annotationTypeConfig.note
+              return (
+                <span
+                  key={i}
+                  className={`${config.highlight} rounded-sm px-0.5 cursor-help`}
+                  title={`[${seg.annotation.type}] ${seg.annotation.content}`}
+                >
+                  {seg.text}
+                </span>
+              )
+            })}
+          </pre>
+          {toolbar && (
+            <AnnotationToolbar
+              position={toolbar}
+              onAnnotate={handleAnnotate}
+              onClose={() => {
+                setToolbar(null)
+                setAnnotationNote("")
+              }}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Existing annotations list */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-zinc-800">
+          <h3 className="text-sm font-medium text-zinc-400">
+            Annotations ({data.annotations.length})
+          </h3>
+        </div>
+        {data.annotations.length === 0 ? (
+          <div className="p-4 text-zinc-500 text-sm">No annotations yet. Select text above to create one.</div>
+        ) : (
+          <div className="divide-y divide-zinc-800">
+            {data.annotations.map((ann) => {
+              const config = annotationTypeConfig[ann.type] ?? annotationTypeConfig.note
+              return (
+                <div key={ann.id} className="p-4 flex items-start gap-3">
+                  <span className={`px-2 py-0.5 text-xs font-medium rounded ${config.bg} ${config.border} border ${config.text} shrink-0`}>
+                    {config.label}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-zinc-300">{ann.content}</p>
+                    {ann.marked_text && (
+                      <p className="text-xs text-zinc-500 mt-1 font-mono truncate">
+                        &quot;{ann.marked_text.length > 100 ? ann.marked_text.slice(0, 100) + "..." : ann.marked_text}&quot;
+                      </p>
+                    )}
+                    <p className="text-xs text-zinc-600 mt-1">{formatTime(ann.time_created)}</p>
+                  </div>
+                  <button
+                    onClick={() => handleDelete(ann.id)}
+                    disabled={deleting === ann.id}
+                    className="text-xs text-zinc-600 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50"
+                  >
+                    {deleting === ann.id ? "..." : "delete"}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function KeyValueTable({ entries }: { entries: [string, string][] }) {
   return (
     <table className="w-full text-sm">
@@ -589,7 +845,7 @@ export function LogDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>("overview")
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
     if (!id) return
     setLoading(true)
     setError(null)
@@ -601,6 +857,22 @@ export function LogDetailPage() {
       .then((json: LogDetail) => setData(json))
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to fetch log"))
       .finally(() => setLoading(false))
+  }, [id])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  const refreshData = useCallback(() => {
+    if (!id) return
+    // Lightweight refresh without loading state
+    fetch(`/api/logs/${id}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then((json: LogDetail) => setData(json))
+      .catch(() => {})
   }, [id])
 
   if (loading) {
@@ -658,6 +930,9 @@ export function LogDetailPage() {
             {tab.id === "hooks" && data.hooks.length > 0 && (
               <span className="ml-1.5 text-xs text-zinc-500">({data.hooks.length})</span>
             )}
+            {tab.id === "annotations" && data.annotations.length > 0 && (
+              <span className="ml-1.5 text-xs text-zinc-500">({data.annotations.length})</span>
+            )}
           </button>
         ))}
       </div>
@@ -669,6 +944,9 @@ export function LogDetailPage() {
         {activeTab === "response" && <ResponseTab data={data} />}
         {activeTab === "tools" && <ToolsTab data={data} />}
         {activeTab === "hooks" && <HooksTab data={data} />}
+        {activeTab === "annotations" && (
+          <AnnotationsTab data={data} onAnnotationCreated={refreshData} onAnnotationDeleted={refreshData} />
+        )}
       </div>
     </div>
   )
