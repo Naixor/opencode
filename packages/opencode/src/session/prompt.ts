@@ -50,6 +50,7 @@ import { SecurityAccess } from "@/security/access"
 import { SecurityAudit } from "@/security/audit"
 import { LLMScanner } from "@/security/llm-scanner"
 import { SecurityRedact } from "@/security/redact"
+import { HookChain } from "@/session/hooks"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -839,18 +840,22 @@ export namespace SessionPrompt {
         inputSchema: jsonSchema(schema as any),
         async execute(args, options) {
           const ctx = context(args, options)
-          await Plugin.trigger(
-            "tool.execute.before",
+          const preToolPluginOutput = { args }
+          await HookChain.executePreTool(
             {
               tool: item.id,
               sessionID: ctx.sessionID,
               callID: ctx.callID,
             },
+            preToolPluginOutput,
             {
-              args,
+              sessionID: ctx.sessionID,
+              toolName: item.id,
+              args: preToolPluginOutput.args as Record<string, unknown>,
+              agent: input.agent.name,
             },
           )
-          const result = await item.execute(args, ctx)
+          const result = await item.execute(preToolPluginOutput.args as any, ctx)
           const output = {
             ...result,
             attachments: result.attachments?.map((attachment) => ({
@@ -860,8 +865,7 @@ export namespace SessionPrompt {
               messageID: input.processor.message.id,
             })),
           }
-          await Plugin.trigger(
-            "tool.execute.after",
+          await HookChain.executePostTool(
             {
               tool: item.id,
               sessionID: ctx.sessionID,
@@ -869,6 +873,17 @@ export namespace SessionPrompt {
               args,
             },
             output,
+            {
+              sessionID: ctx.sessionID,
+              toolName: item.id,
+              args: args as Record<string, unknown>,
+              result: {
+                output: output.output,
+                title: output.title,
+                metadata: output.metadata,
+              },
+              agent: input.agent.name,
+            },
           )
           return output
         },
@@ -907,15 +922,19 @@ export namespace SessionPrompt {
       item.execute = async (args, opts) => {
         const ctx = context(args, opts)
 
-        await Plugin.trigger(
-          "tool.execute.before",
+        const mcpPreToolPluginOutput = { args }
+        await HookChain.executePreTool(
           {
             tool: key,
             sessionID: ctx.sessionID,
             callID: opts.toolCallId,
           },
+          mcpPreToolPluginOutput,
           {
-            args,
+            sessionID: ctx.sessionID,
+            toolName: key,
+            args: mcpPreToolPluginOutput.args as Record<string, unknown>,
+            agent: input.agent.name,
           },
         )
 
@@ -984,8 +1003,7 @@ export namespace SessionPrompt {
           }
         }
 
-        await Plugin.trigger(
-          "tool.execute.after",
+        await HookChain.executePostTool(
           {
             tool: key,
             sessionID: ctx.sessionID,
@@ -993,6 +1011,20 @@ export namespace SessionPrompt {
             args,
           },
           result,
+          {
+            sessionID: ctx.sessionID,
+            toolName: key,
+            args: args as Record<string, unknown>,
+            result: {
+              output: result.content
+                ?.filter((c: any) => c.type === "text")
+                .map((c: any) => c.text)
+                .join("\n") ?? "",
+              title: "",
+              metadata: result.metadata,
+            },
+            agent: input.agent.name,
+          },
         )
 
         const textParts: string[] = []

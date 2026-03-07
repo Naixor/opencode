@@ -234,18 +234,18 @@ export namespace HookChain {
 
   export async function executePostTool(
     pluginInput: Record<string, unknown>,
-    pluginOutput: { title: string; output: string; metadata: unknown },
+    pluginOutput: Record<string, any>,
     ctx: PostToolContext,
   ): Promise<void> {
     await Plugin.trigger("tool.execute.after", pluginInput, pluginOutput)
     ctx.result = {
-      output: pluginOutput.output,
-      title: pluginOutput.title,
-      metadata: pluginOutput.metadata,
+      output: pluginOutput.output ?? ctx.result.output,
+      title: pluginOutput.title ?? ctx.result.title,
+      metadata: pluginOutput.metadata ?? ctx.result.metadata,
     }
     await execute("post-tool", ctx)
-    pluginOutput.output = ctx.result.output
-    pluginOutput.title = ctx.result.title ?? pluginOutput.title
+    if ("output" in pluginOutput) pluginOutput.output = ctx.result.output
+    if ("title" in pluginOutput) pluginOutput.title = ctx.result.title ?? pluginOutput.title
     pluginOutput.metadata = ctx.result.metadata
   }
 
