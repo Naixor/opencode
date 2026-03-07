@@ -19,6 +19,7 @@ export namespace HookChain {
     variant: z.string().optional(),
     messages: z.array(z.any()),
     providerOptions: z.record(z.string(), z.any()).optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
   })
   export type PreLLMContext = z.infer<typeof PreLLMContext>
 
@@ -27,6 +28,7 @@ export namespace HookChain {
     toolName: z.string(),
     args: z.record(z.string(), z.any()),
     agent: z.string(),
+    metadata: z.record(z.string(), z.any()).optional(),
   })
   export type PreToolContext = z.infer<typeof PreToolContext>
 
@@ -40,6 +42,7 @@ export namespace HookChain {
       metadata: z.any().optional(),
     }),
     agent: z.string(),
+    metadata: z.record(z.string(), z.any()).optional(),
   })
   export type PostToolContext = z.infer<typeof PostToolContext>
 
@@ -59,6 +62,7 @@ export namespace HookChain {
     event: SessionLifecycleEvent,
     data: z.any().optional(),
     agent: z.string().optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
   })
   export type SessionLifecycleContext = z.infer<typeof SessionLifecycleContext>
 
@@ -296,4 +300,5 @@ export namespace HookChain {
     s.compiled = undefined
     s.config = {}
   }
+
 }

@@ -35,6 +35,7 @@ import { JsonMigration } from "./storage/json-migration"
 import { Database } from "./storage/db"
 import { SecurityCommand } from "./cli/cmd/security"
 import { SandboxCommand } from "./cli/cmd/sandbox"
+import { registerAllHooks } from "./session/hooks/register"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -75,6 +76,8 @@ let cli = yargs(hideBin(process.argv))
         return "INFO"
       })(),
     })
+
+    registerAllHooks()
 
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
