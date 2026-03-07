@@ -6,18 +6,16 @@ import { LlmLogTable, LlmLogRequestTable, LlmLogResponseTable, LlmLogTokensTable
 import { Identifier } from "../id/id"
 import { Config } from "../config/config"
 import { eq, and } from "drizzle-orm"
+import { currentLlmLogState, getCurrentLogId as getCurrentLogId_impl } from "./log-state"
 
 export namespace LlmLogCapture {
   const log = Log.create({ service: "llm-log-capture" })
-
-  // Per-instance state: Map<sessionID, { logId, timeStart }>
-  const currentLogState = Instance.state(() => new Map<string, { logId: string; timeStart: number }>())
 
   // Per-instance state: Map<"sessionID:callID", timeStart> for tool call duration tracking
   const toolCallStartState = Instance.state(() => new Map<string, number>())
 
   export function getCurrentLogId(sessionID: string): string | undefined {
-    return currentLogState().get(sessionID)?.logId
+    return getCurrentLogId_impl(sessionID)
   }
 
   export function register(): void {
@@ -58,7 +56,7 @@ export namespace LlmLogCapture {
             .run()
         })
 
-        currentLogState().set(ctx.sessionID, { logId: llmLogId, timeStart: now })
+        currentLlmLogState().set(ctx.sessionID, { logId: llmLogId, timeStart: now })
         log.info("captured pre-llm log", { llmLogId, sessionID: ctx.sessionID, agent: ctx.agent })
       } catch (err) {
         log.error("failed to capture pre-llm log", {
@@ -166,7 +164,7 @@ export namespace LlmLogCapture {
       const config = await Config.get()
       if (!config.llmLog?.enabled) return
 
-      const logState = currentLogState().get(ctx.sessionID)
+      const logState = currentLlmLogState().get(ctx.sessionID)
       if (!logState) return
       const { logId: llmLogId, timeStart } = logState
 

@@ -2,6 +2,11 @@ import z from "zod"
 import { Log } from "../../util/log"
 import { Instance } from "../../project/instance"
 import { Plugin } from "../../plugin"
+import { Config } from "../../config/config"
+import { Database } from "../../storage/db"
+import { LlmLogHookTable } from "../../log/log.sql"
+import { getCurrentLogId } from "../../log/log-state"
+import { Identifier } from "../../id/id"
 
 export namespace HookChain {
   const log = Log.create({ service: "hooks" })
@@ -196,7 +201,34 @@ export namespace HookChain {
   ): Promise<void> {
     const chain = getCompiledChain(chainType)
 
+    // Check if instrumentation is needed
+    let instrumenting = false
+    let llmLogId: string | undefined
+    try {
+      const config = await Config.get()
+      if (config.llmLog?.enabled) {
+        const sessionID = (ctx as Record<string, unknown>).sessionID as string | undefined
+        if (sessionID) {
+          llmLogId = getCurrentLogId(sessionID)
+          instrumenting = !!llmLogId
+        }
+      }
+    } catch {
+      // Config not available — skip instrumentation
+    }
+
     for (const hook of chain.hooks) {
+      let snapshot: Map<string, unknown> | undefined
+      let startTime: number | undefined
+
+      if (instrumenting) {
+        snapshot = new Map()
+        for (const key of Object.keys(ctx as object)) {
+          snapshot.set(key, (ctx as Record<string, unknown>)[key])
+        }
+        startTime = performance.now()
+      }
+
       await (hook.handler as Handler<T>)(ctx).catch((err: unknown) => {
         log.error("hook execution error", {
           hook: hook.name,
@@ -204,6 +236,46 @@ export namespace HookChain {
           error: err instanceof Error ? err.message : String(err),
         })
       })
+
+      if (instrumenting && snapshot && startTime !== undefined) {
+        try {
+          const durationMs = Math.round(performance.now() - startTime)
+
+          // Detect modified fields by shallow reference comparison
+          const modifiedFields: string[] = []
+          for (const [key, oldVal] of snapshot) {
+            if ((ctx as Record<string, unknown>)[key] !== oldVal) {
+              modifiedFields.push(key)
+            }
+          }
+          // Check for newly added keys
+          for (const key of Object.keys(ctx as object)) {
+            if (!snapshot.has(key)) {
+              modifiedFields.push(key)
+            }
+          }
+
+          Database.use((db) => {
+            db.insert(LlmLogHookTable)
+              .values({
+                id: Identifier.ascending("log"),
+                llm_log_id: llmLogId!,
+                hook_name: hook.name,
+                chain_type: chainType,
+                priority: hook.priority,
+                modified_fields: modifiedFields.length > 0 ? modifiedFields : null,
+                duration_ms: durationMs,
+              })
+              .run()
+          })
+        } catch (err) {
+          log.error("failed to write hook instrumentation", {
+            hook: hook.name,
+            chainType,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
     }
   }
 
