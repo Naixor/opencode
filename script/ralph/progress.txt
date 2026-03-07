@@ -1,102 +1,128 @@
 # Ralph Progress Log
-Started: Sat Mar  7 15:29:14 CST 2026
+Started: Sat Mar  7 21:18:34 CST 2026
 ---
 
 ## Codebase Patterns
-- Keyword detection hooks are in `src/session/hooks/detection-checking.ts`, registered via `HookChain.register(name, chainType, priority, handler)`
-- Tests for hooks use `withInstance()` helper that sets up temp dir, resets HookChain, and registers hooks
-- `getLastUserMessage()` extracts text from last user message (supports string and multipart content)
-- To modify message content in a hook, you need a reference to the message object (not just the text) — use a separate ref-returning function
-- Tests run from `packages/opencode` dir; git operations use repo root paths
-- `bun run typecheck` runs from repo root; `bun run test:parallel` runs from `packages/opencode`
-- TUI local context (`src/cli/cmd/tui/context/local.tsx`) uses `iife()` + closure `let` vars for transient state that shouldn't persist to `model.json`
-- The variant API's `setOneShot` must use `setModelStore()` directly, not `this.set()`, to avoid clearing the one-shot flag
-
----
+- `executePostTool` pluginOutput type is `Record<string, any>` — supports both built-in tools (`{ title, output, metadata }`) and MCP tools (`{ content, metadata }`)
+- For MCP tools, PostToolContext.result.output is constructed by joining text content items; the raw `result` object is passed to Plugin.trigger for backwards compat
+- Hook registration files must avoid circular imports: hook files import from `./index` (HookChain), so `registerAll` lives in a separate `register.ts` file
+- All hook namespaces have `register()` functions that call `HookChain.register()` internally
+- Typecheck for the main opencode package: `cd packages/opencode && bun run typecheck` (or `bun run typecheck` from repo root)
+- Drizzle migration generation: `cd packages/opencode && bun drizzle-kit generate --name <name>` — must manually add IF NOT EXISTS after
+- New `*.sql.ts` files auto-discovered by drizzle config; new table exports must be added to `src/storage/schema.ts`
+- Git paths must be relative to repo root (`/Users/bytedance/GithubWorkspace/@Naixor/opencode`), not packages/opencode
+- Working directory may be `packages/opencode` due to turbo — always use absolute or repo-root-relative paths for git
+- `executePostTool` writeback requires `pluginOutput` to have an `output` field — MCP result objects need a wrapper object
+- `Identifier` prefixes must be registered in `src/id/id.ts` before using `Identifier.ascending(prefix)` — added `log: "log"` for llm_log tables
+- `LlmLogCapture.getCurrentLogId(sessionID)` provides cross-chain access to the current llm_log_id (used by US-009, US-010, US-011)
 
 ## 2026-03-07 - US-001
-- Removed `[ultrawork]` and bare `ulw` from KEYWORD_MAP
-- Added `/ulw` prefix detection with regex `/^\s*\/ulw\b/i` on last user message
-- When `/ulw` is detected: sets `ctx.variant = 'max'` and strips the prefix from message content
-- Supports both string content and multipart content (array with `type: text`)
-- Updated existing tests: `[ultrawork]` and bare `ulw` now correctly don't trigger
-- Added new tests for `/ulw` prefix detection, leading whitespace, not-at-start, and alone
-- Files changed:
-  - `packages/opencode/src/session/hooks/detection-checking.ts`
-  - `packages/opencode/test/session/hooks/detection-checking.test.ts`
+- Added `metadata: z.record(z.string(), z.any()).optional()` to PreLLMContext, PreToolContext, PostToolContext, SessionLifecycleContext
+- Created `src/session/hooks/register.ts` with `registerAllHooks()` that calls register() for all 7 hook namespaces
+- Called `registerAllHooks()` in `src/index.ts` middleware after Log.init()
+- Files changed: `src/session/hooks/index.ts`, `src/session/hooks/register.ts` (new), `src/index.ts`
 - **Learnings for future iterations:**
-  - `getLastUserMessage()` returns a copy of the text — to mutate message content in ctx.messages, need a separate function that returns a reference to the message object
-  - Added `getLastUserMessageRef()` and `stripUlwPrefix()` helper functions
-  - The config-driven disable test also referenced `[ultrawork]` — remember to update all test references when changing keyword behavior
-  - Working dir for tests is `packages/opencode` but git operations need repo root paths
+  - Circular import hazard: hook files (e.g., context-injection.ts) import HookChain from `./index`, so a registration function that imports all hook files cannot live in `./index.ts`
+  - Solution: separate `register.ts` file breaks the cycle
+  - The `Instance.state()` pattern provides per-directory singleton state — used by HookChain for its chain registry
 ---
 
 ## 2026-03-07 - US-002
-- Added multipart content test for `/ulw` prefix detection with stripping verification
-- Most tests were already added as part of US-001 implementation — only the multipart `/ulw` test was missing
-- All 28 tests pass, typecheck passes
-- Files changed:
-  - `packages/opencode/test/session/hooks/detection-checking.test.ts`
+- Replaced `Plugin.trigger('experimental.chat.system.transform')` in llm.ts with `HookChain.executePreLLM()`
+- Moved `variant`/`options` (providerOptions) construction BEFORE the hook call so hooks can access and modify them
+- Constructed `PreLLMContext` with sessionID, system, agent name, model id, variant, messages, providerOptions
+- After `executePreLLM`, reads back potentially-modified `providerOptions` from context
+- Changed `options` from `const` to `let` to allow reassignment from hook modifications
+- Files changed: `src/session/llm.ts`
 - **Learnings for future iterations:**
-  - US-001 already added most US-002 tests inline — when implementing features, check if the PRD has a separate test story and leave those tests for that story
-  - Multipart content messages use `{ content: [{ type: "text", text: "..." }] }` format — to verify stripping, access `ctx.messages[0].content[0].text`
+  - `executePreLLM` syncs system array between pluginOutput and ctx internally — no need to manually sync
+  - `options` variable is used downstream by `params` Plugin.trigger and `streamText` — any reordering must preserve availability
+  - Import `HookChain` from `@/session/hooks` (not `@/session/hooks/index`)
 ---
 
 ## 2026-03-07 - US-003
-- Added one-shot variant API to `local.model.variant` in `src/cli/cmd/tui/context/local.tsx`
-- New methods: `setOneShot(value)`, `revertOneShot()`, `isOneShot()`
-- `set()` and `cycle()` now clear `_isOneShot` flag so manual selections are persistent
-- One-shot state uses plain `let` variables (not in the solid-js store) so it's NOT persisted to `model.json`
-- `setOneShot()` directly calls `setModelStore()` instead of `this.set()` to avoid clearing `_isOneShot`
-- Wrapped variant object in `iife()` to create closure for transient state
-- Typecheck passes, no test changes needed (API is additive)
-- Files changed:
-  - `packages/opencode/src/cli/cmd/tui/context/local.tsx`
+- Replaced all 4 `Plugin.trigger("tool.execute.before/after")` calls in prompt.ts with `HookChain.executePreTool()`/`executePostTool()`
+- Built-in tools (line ~842, ~863): straightforward replacement with PreToolContext/PostToolContext
+- MCP tools (line ~910, ~987): adapted for different output shape (MCP `result` has `content[]` not `output/title`)
+- Widened `executePostTool` pluginOutput type from `{ title; output; metadata }` to `Record<string, any>` to support both tool types
+- Security code (ctx.ask, LLMScanner, SecurityRedact) between before/after hooks remains untouched
+- Files changed: `src/session/prompt.ts`, `src/session/hooks/index.ts`
 - **Learnings for future iterations:**
-  - The variant object was previously an inline object literal; wrapping in `iife()` allows closure variables for transient state
-  - `setOneShot` must NOT call `save()` — the one-shot variant change is intentionally transient
-  - `setOneShot` must NOT call `this.set()` because `set()` clears `_isOneShot` — use `setModelStore()` directly
-  - Existing consumers of `variant.set()`, `variant.cycle()`, `variant.current()` are unaffected by additive API changes
+  - Built-in tools return `{ title, output, metadata, attachments? }`, MCP tools return `{ content: [...], metadata? }`
+  - `executePostTool` must handle both shapes: for built-in tools, reads `pluginOutput.output`; for MCP, PostToolContext constructs output from content array
+  - The `preToolPluginOutput.args` may be modified by hooks — pass modified args to `item.execute()` for hook interception to work
+  - MCP pre-tool: `args` var from closure is not reassigned (MCP tools use it directly), but `mcpPreToolPluginOutput.args` captures modifications
 ---
 
 ## 2026-03-07 - US-004
-- Registered `/ulw` slash command in session route's `command.register()` block
-- Command toggles ULW mode: activates one-shot `max` variant when not active, deactivates when already `max`
-- Title is dynamic: shows "Activate ULW mode (next message)" or "Deactivate ULW mode" based on current variant
-- Command is visible in autocomplete and command palette (not hidden)
-- Files changed:
-  - `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx`
+- Updated `tool-output-truncator` hook in output-management.ts to use `Truncate.output()` instead of simple `truncateOutput()` — now does line-aware truncation with file saving
+- Restructured MCP tool path in prompt.ts: moved textParts/attachments extraction before `executePostTool`, created proper `mcpOutput` object with `output` field so hook modifications flow back through `pluginOutput`
+- Removed direct `Truncate.output()` call and unused `Truncate` import from prompt.ts
+- Grep built-in truncation (500 matches, line-level) is more precise and runs first inside the tool; grep-output-truncator hook (50 matches) provides additional safety net — no conflict
+- Files changed: `src/session/hooks/output-management.ts`, `src/session/prompt.ts`
 - **Learnings for future iterations:**
-  - Slash commands are registered in `command.register(() => [...])` blocks — the session route at `src/cli/cmd/tui/routes/session/index.tsx` is the primary location for session-scoped commands
-  - Each command entry needs: `title`, `value` (unique ID), `category`, `slash: { name }`, and `onSelect(dialog)` handler
-  - `dialog.clear()` must be called to close the command palette after action
-  - No `hidden: true` means command appears in both autocomplete and command palette
+  - `executePostTool` writes back to `pluginOutput.output` only if `"output" in pluginOutput` — MCP result objects don't have `output` field, so a wrapper object with `output` is needed for writeback to work
+  - When migrating inline logic to hooks, ensure the hook's output flows back to the caller via `pluginOutput`; the PostToolContext `ctx.result` modifications alone are not enough
+  - `Truncate.output()` accepts optional `agent` param for task-tool hints — when called from hooks without agent context, omitting it gives a generic hint which is fine
 ---
 
 ## 2026-03-07 - US-005
-- Added inline `/ulw` prefix detection in the TUI prompt submit handler
-- When user types `/ulw fix the bug`, strips the prefix, sets one-shot variant to 'max', and sends "fix the bug"
-- `/ulw` alone sets one-shot variant but doesn't send (clears prompt and returns)
-- After any prompt/command/shell send, calls `revertOneShot()` to restore previous variant
-- This covers both inline-prefix-activated and slash-command-activated one-shot prompts
-- Files changed:
-  - `packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx`
+- Created `src/log/log.sql.ts` with 7 Drizzle table definitions: llm_log, llm_log_request, llm_log_response, llm_log_tokens, llm_log_tool_call, llm_log_hook, llm_log_annotation
+- llm_log_request.system_prompt and messages use `blob()` for gzip storage; llm_log_response.raw_response also blob
+- All child tables use llm_log_id FK with CASCADE delete
+- Exported all tables from `src/storage/schema.ts`
+- Generated Drizzle migration at `migration/20260307133626_llm_log_tables/` with IF NOT EXISTS on all CREATE TABLE and CREATE INDEX statements
+- Files changed: `src/log/log.sql.ts` (new), `src/storage/schema.ts`, `migration/20260307133626_llm_log_tables/` (new)
 - **Learnings for future iterations:**
-  - The submit handler in `prompt/index.tsx` has three send paths: shell, slash command (server-side via `sync.data.command`), and regular prompt — one-shot revert must run after all three
-  - TUI slash commands registered via `command.register()` are NOT in `sync.data.command` — they're handled separately by the command dialog, so `/ulw` prefix won't collide with the slash command detection in submit
-  - `revertOneShot()` is safe to call unconditionally — it's a no-op when no one-shot is active
+  - Drizzle config at `packages/opencode/drizzle.config.ts` uses `schema: "./src/**/*.sql.ts"` — any new `*.sql.ts` file is auto-discovered
+  - Migration generation: `cd packages/opencode && bun drizzle-kit generate --name <name>`
+  - Drizzle generates `CREATE TABLE` without IF NOT EXISTS — must manually add after generation
+  - `blob()` columns in Drizzle map to SQLite `blob` type — suitable for gzip-compressed data
+  - `text({ mode: "json" })` stores JSON as text with automatic parse/stringify
+  - Timestamps helper from `@/storage/schema.sql` provides `time_created` and `time_updated` integer columns
+  - Existing tables export from `src/storage/schema.ts` — new table exports must be added here
 ---
 
 ## 2026-03-07 - US-006
-- Added inline `/ulw` prefix detection in CLI `run` command handler
-- After message assembly (including stdin), detects `/^\s*\/ulw(\s+|$)/i` prefix
-- When detected: strips prefix from message text and sets `args.variant = "max"` (only if `--variant` not already provided)
-- `/ulw` alone with no following text: prints error and exits (CLI requires a message)
-- `--variant` flag takes precedence when both are provided
-- Files changed:
-  - `packages/opencode/src/cli/cmd/run.ts`
+- Added `llmLog` field to `Config.Info` Zod schema in config.ts with 4 sub-fields: enabled, max_records, max_age_days, cleanup_interval_hours
+- All fields optional with defaults via `.optional().default(value)` pattern
+- Config accessible via `Config.get()` — the `llmLog` field is part of the Info schema which `.strict()` validates
+- Files changed: `src/config/config.ts`
 - **Learnings for future iterations:**
-  - The `args` object from yargs is mutable — you can assign `args.variant = "max"` directly
-  - Message assembly in `run.ts` joins positional args + `--` args with space, then appends stdin — `/ulw` detection should happen after all assembly is complete
-  - The empty message check (`message.trim().length === 0`) already exists, so `/ulw` alone detection must happen before it to give a specific error message
+  - Config fields use `.optional().default(value)` pattern — `.optional()` makes the field not required in input, `.default()` provides fallback in output
+  - The Info schema has `.strict()` — any unknown fields will cause validation errors
+  - Access pattern: `const config = await Config.get(); config.llmLog?.enabled` — the outer object is optional, inner fields have defaults when the object is provided
+  - Config segments don't need separate registration — just add to the Info schema and they're accessible via Config.get()
+---
+
+## 2026-03-07 - US-007
+- Added `step.finished` to `SessionLifecycleEvent` enum in hooks/index.ts
+- Emitted `HookChain.execute("session-lifecycle", ...)` with `step.finished` event in processor.ts finish-step case, after all existing processing (usage calc, message update, compaction check)
+- Data payload includes: usage (tokens + cost), finishReason, model (Provider.Model), assistantMessage reference
+- Fire-and-forget with `.catch(() => {})` — lifecycle hooks must not block the stream processing loop
+- Files changed: `src/session/hooks/index.ts`, `src/session/processor.ts`
+- **Learnings for future iterations:**
+  - Session-lifecycle events are fire-and-forget: use `HookChain.execute(...).catch(() => {})` to avoid blocking the main loop
+  - The `usage` object from `Session.getUsage()` contains `{ tokens: { input, output, reasoning, cacheRead, cacheWrite }, cost }` — this is the complete usage data for the step
+  - `value.finishReason` in the finish-step case is the AI SDK finish reason (e.g., "stop", "tool-calls", "length")
+  - `input.model` is the full `Provider.Model` object with providerID, modelID, cost info, etc.
+---
+
+## 2026-03-07 - US-008
+- Created `src/log/capture.ts` with `LlmLogCapture` namespace
+- Registered pre-llm hook 'llm-log-capture' at priority 999 (last to execute)
+- Hook creates `llm_log` record (session_id, agent, model, provider, variant, time_start, status='pending')
+- Hook creates `llm_log_request` record with gzip-compressed system_prompt and messages via `Bun.gzipSync()`
+- Stores current llm_log_id in `Instance.state()` Map keyed by sessionID for cross-chain access
+- Skips entirely when `llmLog.enabled` is false (zero overhead)
+- Added "log" prefix to `Identifier` prefixes in `src/id/id.ts`
+- Registered `LlmLogCapture.register()` in `src/session/hooks/register.ts`
+- Files changed: `src/log/capture.ts` (new), `src/id/id.ts`, `src/session/hooks/register.ts`
+- **Learnings for future iterations:**
+  - `Identifier` prefixes need a new entry for each table domain — added `log: "log"` for llm_log tables
+  - `Database.use((db) => { ... })` is the standard pattern for synchronous DB operations; it auto-handles transaction context
+  - `Bun.gzipSync()` accepts `Buffer` input — use `Buffer.from(string)` to convert
+  - `Config.get()` is async — hooks are async so this is fine
+  - `LlmLogCapture.getCurrentLogId(sessionID)` exported for cross-chain access (US-009, US-010, US-011)
+  - Provider extraction from model string: `ctx.model.split("/")[0]` — model IDs typically formatted as `provider/model-name`
 ---

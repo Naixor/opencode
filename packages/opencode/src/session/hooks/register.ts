@@ -5,6 +5,7 @@ import { OutputManagementHooks } from "./output-management"
 import { AgentEnforcementHooks } from "./agent-enforcement"
 import { LLMParameterHooks } from "./llm-parameters"
 import { SessionLifecycleHooks } from "./session-lifecycle"
+import { LlmLogCapture } from "../../log/capture"
 
 export function registerAllHooks(): void {
   ContextInjectionHooks.register()
@@ -14,4 +15,5 @@ export function registerAllHooks(): void {
   AgentEnforcementHooks.register()
   LLMParameterHooks.register()
   SessionLifecycleHooks.register()
+  LlmLogCapture.register()
 }
