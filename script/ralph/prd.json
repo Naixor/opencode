@@ -321,7 +321,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "This is the main detail view. Annotation and Diff tabs are added in later stories."
     },
     {

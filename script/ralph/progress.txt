@@ -308,3 +308,20 @@ Started: Sat Mar  7 21:18:34 CST 2026
   - Tailwind `tabular-nums` class aligns numeric columns nicely
   - Manual browser verification needed (no browser testing tools configured)
 ---
+
+## 2026-03-07 - US-020
+- Implemented full LogDetailPage with 5 tabs: Overview, Request, Response, Tools, Hooks
+- Overview tab: left-right grid with request metadata (key-value table) and token usage summary
+- Request tab: collapsible system prompt, chat-bubble messages (color-coded by role: user/assistant/tool/system), JSON tree for tool schemas, key-value table for provider options
+- Response tab: completion text, tool calls from response, token detail table with all categories, error panel in red
+- Tools tab: expandable tool call cards with name, status, duration, output bytes; expanded view shows input/output JSON with collapsible tree viewer
+- Hooks tab: grouped by chain_type (pre-llm/pre-tool/post-tool/session-lifecycle), table with hook name, priority, modified fields as tags, duration
+- Reusable components: JsonTree (collapsible JSON viewer), CollapsibleSection, MessageBubble, KeyValueTable, ToolCallCard
+- Files changed: `packages/log-viewer/src/pages/LogDetailPage.tsx`
+- **Learnings for future iterations:**
+  - TypeScript strict mode doesn't allow destructuring `[key, value]` from `.map()` on `any[][]` — use `entry[0]`/`entry[1]` access instead
+  - `modified_fields` from the API may be a JSON string or already parsed array — handle both cases with try/catch fallback
+  - Chat bubble role colors: blue=user, emerald=assistant, amber=tool, purple=system — consistent with common LLM UI conventions
+  - `tabular-nums` Tailwind class essential for aligning numeric columns in tables
+  - Manual browser verification needed (no browser testing tools configured)
+---
