@@ -409,7 +409,7 @@
         "Typecheck passes"
       ],
       "priority": 25,
-      "passes": false,
+      "passes": true,
       "notes": "This is the final integration step. Bun supports embedding files into the binary at build time."
     }
   ]

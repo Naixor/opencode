@@ -26,6 +26,7 @@ Started: Sat Mar  7 21:18:34 CST 2026
 - Use `react-router` v7 (not `react-router-dom`) — v7 primary package, `react-router-dom` is compat layer
 - Use `createBrowserRouter` + `RouterProvider` API (not `BrowserRouter` + `Routes`) — better types and data loading support
 - Recharts tooltip/label callbacks: don't annotate param types explicitly — use `(value) => ...` and cast with `Number(value)` inside to avoid strict type mismatches
+- Build-time asset embedding: use `define` with `JSON.stringify(assets)` in build.ts, `declare const NAME: Type | undefined` in source, check `typeof NAME !== "undefined"` at runtime
 
 ## 2026-03-07 - US-001
 - Added `metadata: z.record(z.string(), z.any()).optional()` to PreLLMContext, PreToolContext, PostToolContext, SessionLifecycleContext
@@ -395,4 +396,19 @@ Started: Sat Mar  7 21:18:34 CST 2026
   - Hallucination heuristic: regex for failure keywords `/\b(fail|error|issue|problem|couldn't|unable|sorry)\b/i` — simple but effective for flagging
   - `&apos;` needed for apostrophe in JSX text to satisfy some linters
   - Manual browser verification needed (no browser testing tools configured)
+---
+
+## 2026-03-07 - US-025
+- Updated `build.ts` to build log-viewer package before CLI binary compilation, collect dist/ files as base64, inject via `OPENCODE_LOG_VIEWER_ASSETS` define
+- Updated `server.ts` to serve embedded assets from memory: `getEmbeddedAssets()` lazily decodes base64 to `Uint8Array` and caches; `serveEmbeddedAsset()` serves with correct content types and SPA fallback
+- Embedded assets take priority over filesystem `staticDir` (production mode), filesystem preserved as fallback (dev mode)
+- No changes needed to `log-viewer.ts` CLI command — it already calls `LogServer.start()` without `staticDir`, and embedded assets are auto-detected
+- Files changed: `packages/opencode/script/build.ts`, `packages/opencode/src/log/server.ts`
+- **Learnings for future iterations:**
+  - Build-time defines follow `declare const NAME: Type | undefined` pattern in source, `NAME: JSON.stringify(value)` in build.ts
+  - `Uint8Array` is not assignable to `BodyInit` in strict TypeScript — use `.buffer as ArrayBuffer` for `new Response()`
+  - Base64 encoding adds ~33% overhead but is simple and works with `JSON.stringify()` for the define mechanism
+  - `Buffer.from(base64String, "base64")` returns a `Buffer` (which extends `Uint8Array`) — works for both storage and serving
+  - Recursive `collectAssets()` function handles nested dist/ directory structure (e.g., `assets/` subfolder)
+  - Content type mapping by file extension is sufficient for Vite build output (html, js, css, and common web assets)
 ---
