@@ -200,6 +200,31 @@ describe("DetectionCheckingHooks", () => {
         expect(ctx.variant).toBe("review")
       })
     })
+
+    test("multipart content with /ulw prefix -> variant set, prefix stripped from text part", async () => {
+      await withInstance(async () => {
+        const ctx: HookChain.PreLLMContext = {
+          sessionID: "s1",
+          system: ["You are an assistant."],
+          agent: "build",
+          model: "claude-opus-4-20250514",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "/ulw refactor the auth module" },
+              ],
+            },
+          ],
+        }
+
+        await HookChain.execute("pre-llm", ctx)
+
+        expect(ctx.variant).toBe("max")
+        const parts = (ctx.messages[0] as { content: Array<{ type: string; text: string }> }).content
+        expect(parts[0].text).toBe("refactor the auth module")
+      })
+    })
   })
 
   // --- comment-checker ---
