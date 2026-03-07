@@ -346,3 +346,19 @@ Started: Sat Mar  7 21:18:34 CST 2026
   - Time grouping returns timestamps as strings — sort numerically with `Number(a.group)` for correct time ordering
   - Manual browser verification needed (no browser testing tools configured)
 ---
+
+## 2026-03-07 - US-022
+- Implemented AnalyzePage with categorized optimization suggestion cards, summary metrics, and top large tool outputs table
+- Summary metrics section: cache hit rate, reasoning token ratio, and issues count with threshold indicators
+- Suggestion cards: color-coded by category (oversized tool output=red, cache hit rate=amber, repeated context=orange, high-cost model=purple, reasoning ratio=blue), each showing description, impact estimate (tokens/cost), and recommendation
+- Top large tool outputs table: ranked list with tool name, output size, approximate token impact, and link to log detail page
+- Export JSON button downloads full analysis result as a dated JSON file
+- Fetches data from GET /api/logs/analyze
+- Files changed: `packages/log-viewer/src/pages/AnalyzePage.tsx`
+- **Learnings for future iterations:**
+  - `URL.createObjectURL()` + programmatic `<a>` click is the standard pattern for client-side JSON export/download
+  - Category config map with label/color/icon is cleaner than inline conditionals for styling different suggestion types
+  - Cost impact from analyze API is in microdollars (same as other endpoints) — use formatCost with /1_000_000
+  - Tool output token estimate: ~bytes/4 (rough byte-to-token ratio)
+  - Manual browser verification needed (no browser testing tools configured)
+---
