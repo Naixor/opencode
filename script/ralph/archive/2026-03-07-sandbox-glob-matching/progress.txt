@@ -1,0 +1,65 @@
+# Ralph Progress Log
+Started: Wed 05 Mar 2026
+
+## Codebase Patterns
+- Use `Instance.state()` with synchronous initializer for per-instance state
+- Sandbox profile generation is in src/sandbox/profile.ts, seatbelt wrapper in src/sandbox/seatbelt.ts
+- Security config loaded from .opencode-security.json via src/security/config.ts
+- SandboxConfig interface defined in src/sandbox/index.ts
+- Tests run via: cd packages/opencode && bun run test:parallel --pattern "pattern"
+- seatbelt uses POSIX ERE regex, not PCRE
+- seatbelt rule evaluation is last-match-wins
+- Profile generation order: builtins(deny all writes) -> allowlist rules -> deny rules
+- glob-to-regex: `**` becomes `(/.+)?/` (zero or more dirs) when followed by next segment, or `/.*` when trailing
+- glob-to-regex: `*` becomes `[^/]*` (no dir crossing), `?` becomes `[^/]`
+- Fixed prefix realpath: split by /, stop at first segment with wildcards, realpath the prefix
+
+---
+
+## 2026-03-05 - US-001
+- Implemented `src/sandbox/glob-to-regex.ts`
+- Exports: `isGlobPattern(pattern)` and `globToSbplRegex(pattern, projectRoot)`
+- Fixed prefix realpath resolution: splits path segments, realpath-resolves the concrete prefix, appends glob tail
+- `*` → `[^/]*`, `**` → `(/.+)?/` or `/.*`, `?` → `[^/]`
+- Regex special chars (. ( ) + ^ $ | \ [ ] { }) properly escaped
+- Output is `^...$` anchored POSIX ERE
+- Files changed: `packages/opencode/src/sandbox/glob-to-regex.ts` (new)
+- **Learnings for future iterations:**
+  - `**` in middle of pattern needs careful handling: `(/.+)?/` for zero-or-more dirs before next segment
+  - POSIX ERE (seatbelt) doesn't support `\d`, `\w` etc — use character classes
+  - The `REGEX_SPECIAL` global regex needs `lastIndex` reset awareness when used in loops
+---
+
+## 2026-03-05 - US-002
+- Modified SandboxConfig.deny from string[] to SandboxDenyEntry[] with deniedOperations
+- init.ts filters: only rules with 'read' or 'llm' in deniedOperations go to sandbox
+- Updated seatbelt.ts isDir to skip heuristic for glob patterns
+- Fixed integration.test.ts for new type
+- Files: src/sandbox/index.ts, src/sandbox/init.ts, src/sandbox/seatbelt.ts, test/sandbox/integration.test.ts
+---
+
+## 2026-03-05 - US-003
+- Integrated glob detection in profile.ts resolveAllowlistEntry and resolveDenyEntry
+- Glob patterns produce (regex "...") rules with ;; glob: annotation
+- Non-glob patterns keep literal/subpath behavior
+- Files: src/sandbox/profile.ts
+---
+
+## 2026-03-05 - US-004
+- Already covered by US-002 and US-003 changes
+---
+
+## 2026-03-05 - US-005
+- Created test/sandbox/glob-to-regex.test.ts with 16 tests
+- Full coverage of isGlobPattern + globToSbplRegex
+- Files: test/sandbox/glob-to-regex.test.ts
+---
+
+## 2026-03-05 - US-006
+- Created test/sandbox/profile-glob.test.ts with 9 integration tests
+- Updated test/sandbox/profile.test.ts for glob-aware behavior (src/** now uses regex)
+- Files: test/sandbox/profile-glob.test.ts, test/sandbox/profile.test.ts
+---
+
+## 2026-03-05 - US-007
+- Already covered by US-003 — glob annotations appear in SBPL Profile output via sandbox status command

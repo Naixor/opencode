@@ -418,6 +418,28 @@ function App() {
       },
     },
     {
+      title: local.model.variant.current() === "max" ? "Deactivate ULW mode" : "Activate ULW mode",
+      value: "session.ulw",
+      category: "Session",
+      slash: {
+        name: "ulw",
+      },
+      onSelect: (dialog) => {
+        if (local.model.variant.current() === "max") {
+          local.model.variant.set(undefined)
+          toast.show({ variant: "success", message: "ULW off · normal mode restored", duration: 3000 })
+        } else {
+          local.model.variant.set("max")
+          toast.show({
+            variant: "success",
+            message: "ULW on · 32K thinking, high effort · more tokens & slower",
+            duration: 5000,
+          })
+        }
+        dialog.clear()
+      },
+    },
+    {
       title: "Model cycle reverse",
       value: "model.cycle_recent_reverse",
       keybind: "model_cycle_recent_reverse",

@@ -550,22 +550,6 @@ export function Session() {
       },
     },
     {
-      title: local.model.variant.current() === "max" ? "Deactivate ULW mode" : "Activate ULW mode (next message)",
-      value: "session.ulw",
-      category: "Session",
-      slash: {
-        name: "ulw",
-      },
-      onSelect: (dialog) => {
-        if (local.model.variant.current() === "max") {
-          local.model.variant.set(undefined)
-        } else {
-          local.model.variant.setOneShot("max")
-        }
-        dialog.clear()
-      },
-    },
-    {
       title: sidebarVisible() ? "Hide sidebar" : "Show sidebar",
       value: "session.sidebar.toggle",
       keybind: "sidebar_toggle",

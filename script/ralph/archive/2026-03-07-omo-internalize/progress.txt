@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Started: Fri 07 Mar 2026
+
+## Codebase Patterns
+- Use `Instance.state()` with synchronous initializer for per-instance state
+- Tests run via: cd packages/opencode && bun run test:parallel --pattern "pattern"
+- Hooks registered via HookChain.register(name, chainType, priority, handler) in src/session/hooks/
+- keyword-detector is a pre-llm hook at priority 200 in detection-checking.ts
+- TUI slash commands registered via command.register(() => [...]) returning CommandOption[]
+- Variant state managed in src/cli/cmd/tui/context/local.tsx under local.model.variant
+- variant.set()/current()/list()/cycle() are the existing variant API methods
+- Prompt submission happens in src/cli/cmd/tui/component/prompt/index.tsx submit handler
+- CLI run command in src/cli/cmd/run.ts, already supports --variant flag
+- No semicolons (prettier: semi: false), printWidth: 120
+
+---

@@ -1,65 +1,102 @@
 # Ralph Progress Log
-Started: Wed 05 Mar 2026
+Started: Sat Mar  7 15:29:14 CST 2026
+---
 
 ## Codebase Patterns
-- Use `Instance.state()` with synchronous initializer for per-instance state
-- Sandbox profile generation is in src/sandbox/profile.ts, seatbelt wrapper in src/sandbox/seatbelt.ts
-- Security config loaded from .opencode-security.json via src/security/config.ts
-- SandboxConfig interface defined in src/sandbox/index.ts
-- Tests run via: cd packages/opencode && bun run test:parallel --pattern "pattern"
-- seatbelt uses POSIX ERE regex, not PCRE
-- seatbelt rule evaluation is last-match-wins
-- Profile generation order: builtins(deny all writes) -> allowlist rules -> deny rules
-- glob-to-regex: `**` becomes `(/.+)?/` (zero or more dirs) when followed by next segment, or `/.*` when trailing
-- glob-to-regex: `*` becomes `[^/]*` (no dir crossing), `?` becomes `[^/]`
-- Fixed prefix realpath: split by /, stop at first segment with wildcards, realpath the prefix
+- Keyword detection hooks are in `src/session/hooks/detection-checking.ts`, registered via `HookChain.register(name, chainType, priority, handler)`
+- Tests for hooks use `withInstance()` helper that sets up temp dir, resets HookChain, and registers hooks
+- `getLastUserMessage()` extracts text from last user message (supports string and multipart content)
+- To modify message content in a hook, you need a reference to the message object (not just the text) — use a separate ref-returning function
+- Tests run from `packages/opencode` dir; git operations use repo root paths
+- `bun run typecheck` runs from repo root; `bun run test:parallel` runs from `packages/opencode`
+- TUI local context (`src/cli/cmd/tui/context/local.tsx`) uses `iife()` + closure `let` vars for transient state that shouldn't persist to `model.json`
+- The variant API's `setOneShot` must use `setModelStore()` directly, not `this.set()`, to avoid clearing the one-shot flag
 
 ---
 
-## 2026-03-05 - US-001
-- Implemented `src/sandbox/glob-to-regex.ts`
-- Exports: `isGlobPattern(pattern)` and `globToSbplRegex(pattern, projectRoot)`
-- Fixed prefix realpath resolution: splits path segments, realpath-resolves the concrete prefix, appends glob tail
-- `*` → `[^/]*`, `**` → `(/.+)?/` or `/.*`, `?` → `[^/]`
-- Regex special chars (. ( ) + ^ $ | \ [ ] { }) properly escaped
-- Output is `^...$` anchored POSIX ERE
-- Files changed: `packages/opencode/src/sandbox/glob-to-regex.ts` (new)
+## 2026-03-07 - US-001
+- Removed `[ultrawork]` and bare `ulw` from KEYWORD_MAP
+- Added `/ulw` prefix detection with regex `/^\s*\/ulw\b/i` on last user message
+- When `/ulw` is detected: sets `ctx.variant = 'max'` and strips the prefix from message content
+- Supports both string content and multipart content (array with `type: text`)
+- Updated existing tests: `[ultrawork]` and bare `ulw` now correctly don't trigger
+- Added new tests for `/ulw` prefix detection, leading whitespace, not-at-start, and alone
+- Files changed:
+  - `packages/opencode/src/session/hooks/detection-checking.ts`
+  - `packages/opencode/test/session/hooks/detection-checking.test.ts`
 - **Learnings for future iterations:**
-  - `**` in middle of pattern needs careful handling: `(/.+)?/` for zero-or-more dirs before next segment
-  - POSIX ERE (seatbelt) doesn't support `\d`, `\w` etc — use character classes
-  - The `REGEX_SPECIAL` global regex needs `lastIndex` reset awareness when used in loops
+  - `getLastUserMessage()` returns a copy of the text — to mutate message content in ctx.messages, need a separate function that returns a reference to the message object
+  - Added `getLastUserMessageRef()` and `stripUlwPrefix()` helper functions
+  - The config-driven disable test also referenced `[ultrawork]` — remember to update all test references when changing keyword behavior
+  - Working dir for tests is `packages/opencode` but git operations need repo root paths
 ---
 
-## 2026-03-05 - US-002
-- Modified SandboxConfig.deny from string[] to SandboxDenyEntry[] with deniedOperations
-- init.ts filters: only rules with 'read' or 'llm' in deniedOperations go to sandbox
-- Updated seatbelt.ts isDir to skip heuristic for glob patterns
-- Fixed integration.test.ts for new type
-- Files: src/sandbox/index.ts, src/sandbox/init.ts, src/sandbox/seatbelt.ts, test/sandbox/integration.test.ts
+## 2026-03-07 - US-002
+- Added multipart content test for `/ulw` prefix detection with stripping verification
+- Most tests were already added as part of US-001 implementation — only the multipart `/ulw` test was missing
+- All 28 tests pass, typecheck passes
+- Files changed:
+  - `packages/opencode/test/session/hooks/detection-checking.test.ts`
+- **Learnings for future iterations:**
+  - US-001 already added most US-002 tests inline — when implementing features, check if the PRD has a separate test story and leave those tests for that story
+  - Multipart content messages use `{ content: [{ type: "text", text: "..." }] }` format — to verify stripping, access `ctx.messages[0].content[0].text`
 ---
 
-## 2026-03-05 - US-003
-- Integrated glob detection in profile.ts resolveAllowlistEntry and resolveDenyEntry
-- Glob patterns produce (regex "...") rules with ;; glob: annotation
-- Non-glob patterns keep literal/subpath behavior
-- Files: src/sandbox/profile.ts
+## 2026-03-07 - US-003
+- Added one-shot variant API to `local.model.variant` in `src/cli/cmd/tui/context/local.tsx`
+- New methods: `setOneShot(value)`, `revertOneShot()`, `isOneShot()`
+- `set()` and `cycle()` now clear `_isOneShot` flag so manual selections are persistent
+- One-shot state uses plain `let` variables (not in the solid-js store) so it's NOT persisted to `model.json`
+- `setOneShot()` directly calls `setModelStore()` instead of `this.set()` to avoid clearing `_isOneShot`
+- Wrapped variant object in `iife()` to create closure for transient state
+- Typecheck passes, no test changes needed (API is additive)
+- Files changed:
+  - `packages/opencode/src/cli/cmd/tui/context/local.tsx`
+- **Learnings for future iterations:**
+  - The variant object was previously an inline object literal; wrapping in `iife()` allows closure variables for transient state
+  - `setOneShot` must NOT call `save()` — the one-shot variant change is intentionally transient
+  - `setOneShot` must NOT call `this.set()` because `set()` clears `_isOneShot` — use `setModelStore()` directly
+  - Existing consumers of `variant.set()`, `variant.cycle()`, `variant.current()` are unaffected by additive API changes
 ---
 
-## 2026-03-05 - US-004
-- Already covered by US-002 and US-003 changes
+## 2026-03-07 - US-004
+- Registered `/ulw` slash command in session route's `command.register()` block
+- Command toggles ULW mode: activates one-shot `max` variant when not active, deactivates when already `max`
+- Title is dynamic: shows "Activate ULW mode (next message)" or "Deactivate ULW mode" based on current variant
+- Command is visible in autocomplete and command palette (not hidden)
+- Files changed:
+  - `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx`
+- **Learnings for future iterations:**
+  - Slash commands are registered in `command.register(() => [...])` blocks — the session route at `src/cli/cmd/tui/routes/session/index.tsx` is the primary location for session-scoped commands
+  - Each command entry needs: `title`, `value` (unique ID), `category`, `slash: { name }`, and `onSelect(dialog)` handler
+  - `dialog.clear()` must be called to close the command palette after action
+  - No `hidden: true` means command appears in both autocomplete and command palette
 ---
 
-## 2026-03-05 - US-005
-- Created test/sandbox/glob-to-regex.test.ts with 16 tests
-- Full coverage of isGlobPattern + globToSbplRegex
-- Files: test/sandbox/glob-to-regex.test.ts
+## 2026-03-07 - US-005
+- Added inline `/ulw` prefix detection in the TUI prompt submit handler
+- When user types `/ulw fix the bug`, strips the prefix, sets one-shot variant to 'max', and sends "fix the bug"
+- `/ulw` alone sets one-shot variant but doesn't send (clears prompt and returns)
+- After any prompt/command/shell send, calls `revertOneShot()` to restore previous variant
+- This covers both inline-prefix-activated and slash-command-activated one-shot prompts
+- Files changed:
+  - `packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx`
+- **Learnings for future iterations:**
+  - The submit handler in `prompt/index.tsx` has three send paths: shell, slash command (server-side via `sync.data.command`), and regular prompt — one-shot revert must run after all three
+  - TUI slash commands registered via `command.register()` are NOT in `sync.data.command` — they're handled separately by the command dialog, so `/ulw` prefix won't collide with the slash command detection in submit
+  - `revertOneShot()` is safe to call unconditionally — it's a no-op when no one-shot is active
 ---
 
-## 2026-03-05 - US-006
-- Created test/sandbox/profile-glob.test.ts with 9 integration tests
-- Updated test/sandbox/profile.test.ts for glob-aware behavior (src/** now uses regex)
-- Files: test/sandbox/profile-glob.test.ts, test/sandbox/profile.test.ts
+## 2026-03-07 - US-006
+- Added inline `/ulw` prefix detection in CLI `run` command handler
+- After message assembly (including stdin), detects `/^\s*\/ulw(\s+|$)/i` prefix
+- When detected: strips prefix from message text and sets `args.variant = "max"` (only if `--variant` not already provided)
+- `/ulw` alone with no following text: prints error and exits (CLI requires a message)
+- `--variant` flag takes precedence when both are provided
+- Files changed:
+  - `packages/opencode/src/cli/cmd/run.ts`
+- **Learnings for future iterations:**
+  - The `args` object from yargs is mutable — you can assign `args.variant = "max"` directly
+  - Message assembly in `run.ts` joins positional args + `--` args with space, then appends stdin — `/ulw` detection should happen after all assembly is complete
+  - The empty message check (`message.trim().length === 0`) already exists, so `/ulw` alone detection must happen before it to give a specific error message
 ---
-
-## 2026-03-05 - US-007
-- Already covered by US-003 — glob annotations appear in SBPL Profile output via sandbox status command

@@ -571,15 +571,29 @@ export function Prompt(props: PromptProps) {
     const ulwMatch = inputText.match(/^\s*\/ulw\b\s*/i)
     if (ulwMatch) {
       const stripped = inputText.slice(ulwMatch[0].length)
-      if (!stripped.trim()) {
-        // /ulw alone — set one-shot variant but don't send
-        local.model.variant.setOneShot("max")
+      const arg = stripped.trim().toLowerCase()
+      // /ulw on|off — persistent toggle, don't send
+      if (arg === "on" || arg === "off" || !arg) {
+        if (arg === "on") {
+          local.model.variant.set("max")
+          toast.show({
+            variant: "success",
+            message: "ULW on · 32K thinking, high effort · more tokens & slower",
+            duration: 5000,
+          })
+        }
+        if (arg === "off") {
+          local.model.variant.set(undefined)
+          toast.show({ variant: "success", message: "ULW off · normal mode restored", duration: 3000 })
+        }
+        if (!arg) local.model.variant.setOneShot("max")
         input.extmarks.clear()
         input.clear()
         setStore("prompt", { input: "", parts: [] })
         setStore("extmarkToPartIndex", new Map())
         return
       }
+      // /ulw <message> — one-shot ULW for this message only
       inputText = stripped
       local.model.variant.setOneShot("max")
     }
@@ -1029,7 +1043,15 @@ export function Prompt(props: PromptProps) {
                   <Show when={showVariant()}>
                     <text fg={theme.textMuted}>·</text>
                     <text>
-                      <span style={{ fg: theme.warning, bold: true }}>{local.model.variant.current()}</span>
+                      <span
+                        style={
+                          local.model.variant.current() === "max"
+                            ? { bg: theme.warning, fg: theme.background, bold: true }
+                            : { fg: theme.warning, bold: true }
+                        }
+                      >
+                        {local.model.variant.current() === "max" ? " max " : local.model.variant.current()}
+                      </span>
                     </text>
                   </Show>
                 </box>

@@ -37,7 +37,8 @@ export namespace DetectionCheckingHooks {
       if (Array.isArray(msg.content)) {
         for (let j = 0; j < msg.content.length; j++) {
           const p = msg.content[j] as { type?: string; text?: string }
-          if (p.type === "text" && typeof p.text === "string") return { msg: msg as unknown as Record<string, unknown>, partIndex: j }
+          if (p.type === "text" && typeof p.text === "string")
+            return { msg: msg as unknown as Record<string, unknown>, partIndex: j }
         }
       }
       return null
@@ -56,19 +57,36 @@ export namespace DetectionCheckingHooks {
 
       // Check /ulw prefix first
       if (ULW_PREFIX_RE.test(text)) {
+        const body = stripUlwPrefix(text).toLowerCase()
+        // /ulw off — explicitly disable, don't set variant
+        if (body === "off") {
+          const ref = getLastUserMessageRef(ctx.messages)
+          if (ref) {
+            if (ref.partIndex !== undefined) {
+              const parts = ref.msg.content as Array<{ type: string; text: string }>
+              parts[ref.partIndex].text = ""
+            } else {
+              ref.msg.content = ""
+            }
+          }
+          log.info("keyword detected", { sessionID: ctx.sessionID, keyword: "/ulw off", variant: "none" })
+          return
+        }
+        // /ulw on or /ulw <message> — set variant to max, strip prefix
         ctx.variant = "max"
         const ref = getLastUserMessageRef(ctx.messages)
         if (ref) {
+          const stripped = body === "on" ? "" : stripUlwPrefix(text)
           if (ref.partIndex !== undefined) {
-            const parts = (ref.msg.content as Array<{ type: string; text: string }>)
-            parts[ref.partIndex].text = stripUlwPrefix(parts[ref.partIndex].text)
+            const parts = ref.msg.content as Array<{ type: string; text: string }>
+            parts[ref.partIndex].text = stripped
           } else {
-            ref.msg.content = stripUlwPrefix(ref.msg.content as string)
+            ref.msg.content = stripped
           }
         }
         log.info("keyword detected", {
           sessionID: ctx.sessionID,
-          keyword: "/ulw",
+          keyword: body === "on" ? "/ulw on" : "/ulw",
           variant: "max",
         })
         return

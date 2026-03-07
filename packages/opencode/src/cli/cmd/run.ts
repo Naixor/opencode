@@ -343,13 +343,29 @@ export const RunCommand = cmd({
     const ulwPrefixMatch = message.match(/^\s*\/ulw(\s+|$)/i)
     if (ulwPrefixMatch) {
       const stripped = message.replace(/^\s*\/ulw\s*/i, "")
-      if (stripped.trim().length === 0) {
+      const arg = stripped.trim().toLowerCase()
+      if (arg === "on") {
+        UI.println("ULW on · 32K thinking, high effort · more tokens & slower")
+        UI.println("Note: ULW only applies to this invocation in CLI mode")
+        if (!args.variant) args.variant = "max"
+        message = stripped.slice(stripped.toLowerCase().indexOf("on") + 2).trim()
+        if (!message) {
+          UI.error("/ulw on requires a message in CLI mode")
+          process.exit(1)
+        }
+      } else if (arg === "off") {
+        UI.println("ULW off · normal mode")
+        message = stripped.slice(stripped.toLowerCase().indexOf("off") + 3).trim()
+        if (!message) {
+          UI.error("/ulw off requires a message in CLI mode")
+          process.exit(1)
+        }
+      } else if (!arg) {
         UI.error("/ulw requires a message")
         process.exit(1)
-      }
-      message = stripped
-      if (!args.variant) {
-        args.variant = "max"
+      } else {
+        message = stripped
+        if (!args.variant) args.variant = "max"
       }
     }
 

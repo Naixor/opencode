@@ -1,0 +1,130 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/sandbox-glob-matching",
+  "description": "Sandbox Glob Pattern Matching - Convert glob patterns to seatbelt regex filters for OS-level sandbox deny/allowlist rules",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Glob to regex core conversion module",
+      "description": "As a developer, I need a utility that converts glob patterns to seatbelt-compatible POSIX ERE regex strings so that the sandbox profile generator can use (regex ...) filters for glob patterns.",
+      "acceptanceCriteria": [
+        "Create src/sandbox/glob-to-regex.ts with exported globToSbplRegex(pattern: string, projectRoot: string): string function",
+        "Create exported isGlobPattern(pattern: string): boolean that detects *, ?, [, { wildcards",
+        "* converts to [^/]* (does NOT cross /), ** converts to .* (crosses /), ? converts to [^/]",
+        "Strict standard glob semantics: * does not cross /, must use ** for cross-directory matching",
+        "Relative patterns resolved against projectRoot to produce absolute-path regex",
+        "Fixed prefix realpath resolution: split by /, stop at first segment containing wildcards, realpath the prefix, append remaining glob segments. Example: src/lib*/*.key -> realpath(src) + /lib[^/]*/[^/]*\\.key",
+        "Special regex characters (. ( ) + ^ $ | \\ ] ) are properly escaped before conversion",
+        "Output regex is anchored with ^ and $ for full-path matching",
+        "Output is valid POSIX ERE (no \\d, \\w etc. - use character classes)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "deniedOperations filtering for sandbox deny rules",
+      "description": "As a developer, I need the sandbox init to respect deniedOperations from security rules, so that write-only deny rules don't generate sandbox deny entries (since sandbox deny blocks both read and write).",
+      "acceptanceCriteria": [
+        "Modify src/sandbox/init.ts deny pattern extraction to check deniedOperations",
+        "Only pass rule to sandbox deny when deniedOperations includes 'read' OR includes 'llm' (llm equals read+write)",
+        "When deniedOperations is only ['write'] (no 'read', no 'llm'), do NOT generate sandbox deny for that rule",
+        "Pass deniedOperations info through SandboxConfig instead of just pattern strings - update the deny field type in SandboxConfig interface (src/sandbox/index.ts)",
+        "Update profile.ts resolveDenyEntry to accept the new deny entry format",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Profile generator glob detection and dispatch",
+      "description": "As a developer, I need the profile generator to detect glob patterns and automatically choose between literal/subpath (concrete paths) and regex (glob patterns), so that the generated seatbelt policy correctly handles both cases.",
+      "acceptanceCriteria": [
+        "Modify src/sandbox/profile.ts resolveDenyEntry: when isGlobPattern returns true, call globToSbplRegex to generate (deny file-read* file-write* (regex \"...\")) rule",
+        "Modify src/sandbox/profile.ts resolveAllowlistEntry: when isGlobPattern returns true, call globToSbplRegex to generate (allow file-write* (regex \"...\")) rule",
+        "When isGlobPattern returns false, keep existing literal/subpath behavior unchanged",
+        "Glob patterns ignore type: directory|file field - regex matches full path, does not distinguish files from directories",
+        "Deny regex rules placed AFTER allowlist regex rules in profile output to ensure deny wins (seatbelt last-match-wins)",
+        "Add comment annotation before regex rules showing original glob: ;; glob: *secretchat* followed by the regex rule",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "SandboxConfig interface and seatbelt.ts glob compatibility",
+      "description": "As a developer, I need the SandboxConfig and Sandbox interfaces to support platform-agnostic glob conversion so that Linux Landlock can later implement its own glob handling.",
+      "acceptanceCriteria": [
+        "SandboxConfig in src/sandbox/index.ts preserves original pattern strings in allowlist and deny entries (no glob preprocessing at interface level)",
+        "Glob detection and conversion logic stays in profile.ts (profile generation layer), not in SeatbeltSandbox class, so different platforms can implement their own conversion",
+        "Fix seatbelt.ts generatePolicy isDir detection: patterns containing wildcards must not use !pattern.includes('.') heuristic - pass through original type or skip type inference for glob patterns",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Covered by US-002 (SandboxConfig + seatbelt.ts changes) and US-003 (glob logic in profile.ts)"
+    },
+    {
+      "id": "US-005",
+      "title": "Unit tests for glob to regex conversion",
+      "description": "As a developer, I need comprehensive unit tests for the glob-to-regex conversion to ensure correctness across all supported patterns.",
+      "acceptanceCriteria": [
+        "Create test/sandbox/glob-to-regex.test.ts",
+        "Test *secretchat* -> matches only project root files with secretchat in name (does not cross /)",
+        "Test **/*secretchat* -> matches files at any depth with secretchat in name",
+        "Test **/*.key -> matches .key files at any depth",
+        "Test src/**/*.test.ts -> matches .test.ts files under src/ at any depth",
+        "Test *.swift -> matches .swift files in project root only",
+        "Test src/Crypto*.swift -> matches Crypto-prefixed .swift files in src/",
+        "Test src/lib*/*.key -> fixed prefix is src, matches src/lib-xxx/foo.key",
+        "Test concrete paths (no wildcards) -> isGlobPattern returns false",
+        "Test special character escaping: . ( ) + are not treated as regex metacharacters",
+        "Test projectRoot joining and fixed-prefix realpath resolution",
+        "All tests pass via bun run test:parallel --pattern '**/test/sandbox/glob-to-regex.test.ts'",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Integration tests for sandbox profile with glob rules",
+      "description": "As a developer, I need integration tests verifying that glob patterns in deny/allowlist produce correct seatbelt profiles end-to-end.",
+      "acceptanceCriteria": [
+        "Create test/sandbox/profile-glob.test.ts",
+        "Test generateProfile with deny glob pattern -> outputs (deny ... (regex \"...\")) rule",
+        "Test generateProfile with allowlist glob pattern -> outputs (allow ... (regex \"...\")) rule",
+        "Test mixed concrete + glob patterns -> concrete uses literal/subpath, glob uses regex",
+        "Test deny regex appears AFTER allowlist regex in output (verify last-match-wins ordering)",
+        "Test deniedOperations filtering: ['read','write'] -> generates sandbox deny, ['llm'] -> generates sandbox deny, ['write'] only -> does NOT generate sandbox deny",
+        "Test seatbelt.ts generatePolicy end-to-end with glob patterns",
+        "All tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "sandbox status displays regex rules with glob annotations",
+      "description": "As a user, I want sandbox status to clearly show which rules use regex (from glob) versus literal/subpath, so I can verify my glob patterns are correctly converted.",
+      "acceptanceCriteria": [
+        "lark-opencode sandbox status SBPL Profile output shows regex rules with comment annotation of original glob pattern",
+        "Format: ;; glob: **/*secretchat* on line before (deny file-read* file-write* (regex \"...\"))",
+        "Existing literal/subpath rules display unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Covered by US-003 profile.ts changes - glob annotations already in SBPL output"
+    }
+  ]
+}
