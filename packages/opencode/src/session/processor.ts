@@ -286,6 +286,16 @@ export namespace SessionProcessor {
                   ) {
                     needsCompaction = true
                   }
+                  HookChain.execute("session-lifecycle", {
+                    sessionID: input.sessionID,
+                    event: "step.finished",
+                    data: {
+                      usage,
+                      finishReason: value.finishReason,
+                      model: input.model,
+                      assistantMessage: input.assistantMessage,
+                    },
+                  }).catch(() => {})
                   break
 
                 case "text-start":

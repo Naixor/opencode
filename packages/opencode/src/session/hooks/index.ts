@@ -54,6 +54,7 @@ export namespace HookChain {
     "session.deleted",
     "agent.stopped",
     "agent.error",
+    "step.finished",
   ])
   export type SessionLifecycleEvent = z.infer<typeof SessionLifecycleEvent>
 
