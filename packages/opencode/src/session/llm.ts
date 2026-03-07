@@ -18,6 +18,7 @@ import { Instance } from "@/project/instance"
 import type { Agent } from "@/agent/agent"
 import type { MessageV2 } from "./message-v2"
 import { Plugin } from "@/plugin"
+import { HookChain } from "@/session/hooks"
 import { SystemPrompt } from "./system"
 import { Flag } from "@/flag/flag"
 import { PermissionNext } from "@/permission/next"
@@ -83,19 +84,7 @@ export namespace LLM {
         .join("\n"),
     )
 
-    const header = system[0]
-    await Plugin.trigger(
-      "experimental.chat.system.transform",
-      { sessionID: input.sessionID, model: input.model },
-      { system },
-    )
-    // rejoin to maintain 2-part structure for caching if header unchanged
-    if (system.length > 2 && system[0] === header) {
-      const rest = system.slice(1)
-      system.length = 0
-      system.push(header, rest.join("\n"))
-    }
-
+    // Build variant and providerOptions BEFORE executePreLLM so hooks can modify them
     const variant =
       !input.small && input.model.variants && input.user.variant ? input.model.variants[input.user.variant] : {}
     const base = input.small
@@ -105,7 +94,7 @@ export namespace LLM {
           sessionID: input.sessionID,
           providerOptions: provider.options,
         })
-    const options: Record<string, any> = pipe(
+    let options: Record<string, any> = pipe(
       base,
       mergeDeep(input.model.options),
       mergeDeep(input.agent.options),
@@ -113,6 +102,33 @@ export namespace LLM {
     )
     if (isCodex) {
       options.instructions = SystemPrompt.instructions()
+    }
+
+    const header = system[0]
+    const preLLMCtx: HookChain.PreLLMContext = {
+      sessionID: input.sessionID,
+      system,
+      agent: input.agent.name,
+      model: input.model.id,
+      variant: input.user.variant,
+      messages: input.messages,
+      providerOptions: options,
+    }
+    await HookChain.executePreLLM(
+      "experimental.chat.system.transform",
+      { sessionID: input.sessionID, model: input.model },
+      { system },
+      preLLMCtx,
+    )
+    // Read back any modifications from hooks
+    if (preLLMCtx.providerOptions) {
+      options = preLLMCtx.providerOptions as Record<string, any>
+    }
+    // rejoin to maintain 2-part structure for caching if header unchanged
+    if (system.length > 2 && system[0] === header) {
+      const rest = system.slice(1)
+      system.length = 0
+      system.push(header, rest.join("\n"))
     }
 
     const params = await Plugin.trigger(
