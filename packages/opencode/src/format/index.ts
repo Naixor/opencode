@@ -108,6 +108,7 @@ export namespace Format {
       log.info("formatting", { file })
       const ext = path.extname(file)
 
+      const globalEnv = await Config.env()
       for (const item of await getFormatter(ext)) {
         log.info("running", { command: item.command })
         try {
@@ -115,7 +116,7 @@ export namespace Format {
             item.command.map((x) => x.replace("$FILE", file)),
             {
               cwd: Instance.directory,
-              env: { ...process.env, ...item.environment },
+              env: { ...process.env, ...globalEnv, ...item.env },
               stdout: "ignore",
               stderr: "ignore",
             },
@@ -124,13 +125,13 @@ export namespace Format {
           if (exit !== 0)
             log.error("failed", {
               command: item.command,
-              ...item.environment,
+              ...item.env,
             })
         } catch (error) {
           log.error("failed to format file", {
             error,
             command: item.command,
-            ...item.environment,
+            ...item.env,
             file,
           })
         }

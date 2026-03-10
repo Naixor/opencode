@@ -19,6 +19,7 @@ import { Truncate } from "./truncation"
 import { Plugin } from "@/plugin"
 import { BashScanner } from "../security/bash-scanner"
 import { SecurityAccess } from "../security/access"
+import { Config } from "../config/config"
 import { SecurityConfig } from "../security/config"
 import { SecuritySchema } from "../security/schema"
 import { SecurityAudit } from "../security/audit"
@@ -237,8 +238,10 @@ export const BashTool = Tool.define("bash", async () => {
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
+      const globalEnv = await Config.env()
       const spawnEnv = {
         ...process.env,
+        ...globalEnv,
         ...shellEnv.env,
       }
 

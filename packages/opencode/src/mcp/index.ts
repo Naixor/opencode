@@ -452,6 +452,7 @@ export namespace MCP {
     if (mcp.type === "local") {
       const [cmd, ...args] = mcp.command
       const cwd = Instance.directory
+      const globalEnv = await Config.env()
 
       // Sandbox wrapping: enforced-policy MCP servers run in sandbox, trusted ones skip
       const sandbox = getActiveSandbox()
@@ -466,8 +467,9 @@ export namespace MCP {
         cwd,
         env: {
           ...process.env,
+          ...globalEnv,
           ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
-          ...mcp.environment,
+          ...mcp.env,
         },
       })
       transport.stderr?.on("data", (chunk: Buffer) => {

@@ -32,6 +32,7 @@ import { ulid } from "ulid"
 import { spawn } from "child_process"
 import { Command } from "../command"
 import { $, fileURLToPath, pathToFileURL } from "bun"
+import { Config } from "../config/config"
 import { ConfigMarkdown } from "../config/markdown"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@opencode-ai/util/error"
@@ -1785,12 +1786,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       { cwd, sessionID: input.sessionID, callID: part.callID },
       { env: {} },
     )
+    const globalEnv = await Config.env()
     const proc = spawn(shell, args, {
       cwd,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
+        ...globalEnv,
         ...shellEnv.env,
         TERM: "dumb",
       },

@@ -8,7 +8,7 @@ import { Flag } from "@/flag/flag"
 export interface Info {
   name: string
   command: string[]
-  environment?: Record<string, string>
+  env?: Record<string, string>
   extensions: string[]
   enabled(): Promise<boolean>
 }
@@ -34,7 +34,7 @@ export const mix: Info = {
 export const prettier: Info = {
   name: "prettier",
   command: [BunProc.which(), "x", "prettier", "--write", "$FILE"],
-  environment: {
+  env: {
     BUN_BE_BUN: "1",
   },
   extensions: [
@@ -82,7 +82,7 @@ export const prettier: Info = {
 export const oxfmt: Info = {
   name: "oxfmt",
   command: [BunProc.which(), "x", "oxfmt", "$FILE"],
-  environment: {
+  env: {
     BUN_BE_BUN: "1",
   },
   extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
@@ -104,7 +104,7 @@ export const oxfmt: Info = {
 export const biome: Info = {
   name: "biome",
   command: [BunProc.which(), "x", "@biomejs/biome", "check", "--write", "$FILE"],
-  environment: {
+  env: {
     BUN_BE_BUN: "1",
   },
   extensions: [

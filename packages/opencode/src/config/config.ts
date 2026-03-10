@@ -518,7 +518,7 @@ export namespace Config {
     .object({
       type: z.literal("local").describe("Type of MCP server connection"),
       command: z.string().array().describe("Command and arguments to run the MCP server"),
-      environment: z
+      env: z
         .record(z.string(), z.string())
         .optional()
         .describe("Environment variables to set when running the MCP server"),
@@ -985,6 +985,12 @@ export namespace Config {
   export const Info = z
     .object({
       $schema: z.string().optional().describe("JSON schema reference for configuration validation"),
+      env: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe(
+          "Global environment variables injected into all subprocesses (bash, MCP, formatter, PTY). Per-module env (e.g. mcp.env) takes precedence over global env.",
+        ),
       logLevel: Log.Level.optional().describe("Log level"),
       server: Server.optional().describe("Server configuration for opencode serve and web commands"),
       command: z
@@ -1096,7 +1102,7 @@ export namespace Config {
             z.object({
               disabled: z.boolean().optional(),
               command: z.array(z.string()).optional(),
-              environment: z.record(z.string(), z.string()).optional(),
+              env: z.record(z.string(), z.string()).optional(),
               extensions: z.array(z.string()).optional(),
             }),
           ),
@@ -1396,6 +1402,11 @@ export namespace Config {
 
   export async function get() {
     return state().then((x) => x.config)
+  }
+
+  export async function env(): Promise<Record<string, string>> {
+    const cfg = await get()
+    return cfg.env ?? {}
   }
 
   export async function getGlobal() {

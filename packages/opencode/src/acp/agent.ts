@@ -1201,7 +1201,7 @@ export namespace ACP {
           mcpServers[server.name] = {
             type: "local",
             command: [server.command, ...server.args],
-            environment: server.env.reduce<Record<string, string>>((acc, { name, value }) => {
+            env: server.env.reduce<Record<string, string>>((acc, { name, value }) => {
               acc[name] = value
               return acc
             }, {}),
