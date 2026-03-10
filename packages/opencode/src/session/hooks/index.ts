@@ -1,6 +1,5 @@
 import z from "zod"
 import { Log } from "../../util/log"
-import { Instance } from "../../project/instance"
 import { Plugin } from "../../plugin"
 import { Config } from "../../config/config"
 import { Database } from "../../storage/db"
@@ -98,7 +97,7 @@ export namespace HookChain {
     hooks: ReadonlyArray<HookDefinition<T>>
   }
 
-  // --- State (synchronous, per-instance) ---
+  // --- State (global, not per-instance — hooks are registered once before any instance exists) ---
 
   type ChainState = {
     registered: Map<ChainType, HookDefinition[]>
@@ -106,13 +105,13 @@ export namespace HookChain {
     config: Record<string, { enabled: boolean }>
   }
 
-  const state = Instance.state(
-    (): ChainState => ({
-      registered: new Map(),
-      compiled: undefined,
-      config: {},
-    }),
-  )
+  let _state: ChainState = {
+    registered: new Map(),
+    compiled: undefined,
+    config: {},
+  }
+
+  const state = () => _state
 
   // --- Init (called once at session start to load config) ---
 
@@ -206,7 +205,7 @@ export namespace HookChain {
     let llmLogId: string | undefined
     try {
       const config = await Config.get()
-      if (config.llmLog?.enabled) {
+      if (config.llmLog?.enabled !== false) {
         const sessionID = (ctx as Record<string, unknown>).sessionID as string | undefined
         if (sessionID) {
           llmLogId = getCurrentLogId(sessionID)
@@ -368,10 +367,11 @@ export namespace HookChain {
   // --- Reset (for testing) ---
 
   export function reset(): void {
-    const s = state()
-    s.registered.clear()
-    s.compiled = undefined
-    s.config = {}
+    _state = {
+      registered: new Map(),
+      compiled: undefined,
+      config: {},
+    }
   }
 
 }

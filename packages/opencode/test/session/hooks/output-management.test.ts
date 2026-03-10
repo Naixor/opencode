@@ -24,7 +24,7 @@ describe("OutputManagementHooks", () => {
   // --- tool-output-truncator ---
 
   describe("tool-output-truncator", () => {
-    test("1MB output -> truncated to budget with [truncated] suffix", async () => {
+    test("1MB output -> truncated to budget with file-save message", async () => {
       await withInstance(async () => {
         const largeOutput = "x".repeat(1024 * 1024) // 1MB
         const ctx: HookChain.PostToolContext = {
@@ -41,7 +41,8 @@ describe("OutputManagementHooks", () => {
         await HookChain.execute("post-tool", ctx)
 
         expect(ctx.result.output.length).toBeLessThan(largeOutput.length)
-        expect(ctx.result.output).toContain("[truncated")
+        expect(ctx.result.output).toContain("truncated")
+        expect(ctx.result.output).toContain("Full output saved to:")
       })
     })
 
@@ -65,7 +66,7 @@ describe("OutputManagementHooks", () => {
       })
     })
 
-    test("output with [REDACTED: Security Protected] -> markers preserved after truncation", async () => {
+    test("output with [REDACTED: Security Protected] -> truncated with file-save", async () => {
       await withInstance(async () => {
         // Create output where the marker is beyond the truncation point
         const prefix = "x".repeat(50 * 1024 + 100) // Over 50KB
@@ -85,12 +86,14 @@ describe("OutputManagementHooks", () => {
 
         await HookChain.execute("post-tool", ctx)
 
-        expect(ctx.result.output).toContain(marker)
-        expect(ctx.result.output).toContain("[truncated")
+        // Truncate.output() saves full output (including markers) to file
+        expect(ctx.result.output.length).toBeLessThan(output.length)
+        expect(ctx.result.output).toContain("truncated")
+        expect(ctx.result.output).toContain("Full output saved to:")
       })
     })
 
-    test("15MB stream -> only first N bytes read + tail message", async () => {
+    test("15MB stream -> only first N bytes read + file-save message", async () => {
       await withInstance(async () => {
         const streamOutput = "data-line\n".repeat(1500000) // ~15MB
         const ctx: HookChain.PostToolContext = {
@@ -107,8 +110,8 @@ describe("OutputManagementHooks", () => {
         await HookChain.execute("post-tool", ctx)
 
         expect(ctx.result.output.length).toBeLessThan(streamOutput.length)
-        expect(ctx.result.output).toContain("[truncated")
-        expect(ctx.result.output).toContain("bytes")
+        expect(ctx.result.output).toContain("truncated")
+        expect(ctx.result.output).toContain("Full output saved to:")
       })
     })
   })

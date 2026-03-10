@@ -21,7 +21,7 @@ export namespace LlmLogCapture {
   export function register(): void {
     HookChain.register("llm-log-capture", "pre-llm", 999, async (ctx) => {
       const config = await Config.get()
-      if (!config.llmLog?.enabled) return
+      if (config.llmLog?.enabled === false) return
 
       const llmLogId = Identifier.ascending("log")
       const now = Date.now()
@@ -68,7 +68,7 @@ export namespace LlmLogCapture {
 
     HookChain.register("llm-log-tool-start", "pre-tool", 999, async (ctx) => {
       const config = await Config.get()
-      if (!config.llmLog?.enabled) return
+      if (config.llmLog?.enabled === false) return
 
       const llmLogId = getCurrentLogId(ctx.sessionID)
       if (!llmLogId) return
@@ -109,7 +109,7 @@ export namespace LlmLogCapture {
 
     HookChain.register("llm-log-tool-finish", "post-tool", 0, async (ctx) => {
       const config = await Config.get()
-      if (!config.llmLog?.enabled) return
+      if (config.llmLog?.enabled === false) return
 
       const llmLogId = getCurrentLogId(ctx.sessionID)
       if (!llmLogId) return
@@ -162,7 +162,7 @@ export namespace LlmLogCapture {
       if (ctx.event !== "step.finished") return
 
       const config = await Config.get()
-      if (!config.llmLog?.enabled) return
+      if (config.llmLog?.enabled === false) return
 
       const logState = currentLlmLogState().get(ctx.sessionID)
       if (!logState) return

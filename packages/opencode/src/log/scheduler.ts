@@ -8,9 +8,9 @@ export namespace LlmLogScheduler {
 
   export async function init() {
     const config = await Config.get()
-    if (!config.llmLog?.enabled) return
+    if (config.llmLog?.enabled === false) return
 
-    const intervalHours = config.llmLog.cleanup_interval_hours
+    const intervalHours = config.llmLog?.cleanup_interval_hours ?? 24
     const intervalMs = intervalHours * 60 * 60 * 1000
 
     Scheduler.register({
@@ -19,12 +19,12 @@ export namespace LlmLogScheduler {
       scope: "instance",
       run: async () => {
         const config = await Config.get()
-        if (!config.llmLog?.enabled) return
+        if (config.llmLog?.enabled === false) return
 
         try {
           const result = LlmLog.cleanup({
-            max_age_days: config.llmLog.max_age_days,
-            max_records: config.llmLog.max_records,
+            max_age_days: config.llmLog?.max_age_days,
+            max_records: config.llmLog?.max_records,
           })
           if (result.total_deleted > 0) {
             log.info("cleanup completed", {

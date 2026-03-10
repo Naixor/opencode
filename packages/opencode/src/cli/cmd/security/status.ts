@@ -2,6 +2,7 @@ import { cmd } from "../cmd"
 import { bootstrap } from "../../bootstrap"
 import { SecurityConfig } from "../../../security/config"
 import { SecuritySchema } from "../../../security/schema"
+import { getSandboxStatus } from "../../../sandbox"
 
 export const SecurityStatusCommand = cmd({
   command: "status",
@@ -19,6 +20,18 @@ export const SecurityStatusCommand = cmd({
       }
 
       console.log("=== Security Status ===\n")
+
+      // Sandbox status
+      const sandbox = getSandboxStatus()
+      console.log("Sandbox:")
+      if (sandbox.status === "active") {
+        console.log("  Status: ON")
+      } else if (sandbox.status === "failed") {
+        console.log(`  Status: FAILED (${sandbox.error})`)
+      } else {
+        console.log("  Status: OFF")
+      }
+      console.log()
 
       // Role info
       const roles = config.roles ?? []

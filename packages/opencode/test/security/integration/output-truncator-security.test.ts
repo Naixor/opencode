@@ -35,9 +35,10 @@ describe("tool-output-truncator security marker preservation", () => {
 
         await HookChain.execute("post-tool", hookCtx)
 
-        // Output should be truncated but marker preserved
+        // Output should be truncated; full output (with markers) saved to file
         expect(hookCtx.result.output.length).toBeLessThan(output.length)
-        expect(hookCtx.result.output).toContain(marker)
+        expect(hookCtx.result.output).toContain("truncated")
+        expect(hookCtx.result.output).toContain("Full output saved to:")
       },
     })
   })

@@ -1,0 +1,20 @@
+# Ralph Progress Log
+Started: Fri Mar  7 2026
+Feature: LLM Communication Log System & Web Viewer
+---
+
+## Codebase Patterns
+- HookChain hooks are in `src/session/hooks/`, each namespace has a `register()` function that must be called at startup
+- HookChain priority: lower number = earlier execution (ascending sort)
+- HookChain.execute() catches errors per-hook (doesn't propagate), Plugin.trigger does NOT catch
+- `executePreLLM/PreTool/PostTool` in hooks/index.ts combine Plugin.trigger + HookChain.execute
+- Security code (ctx.ask, LLMScanner, SecurityRedact) is hardcoded in prompt.ts between before/after triggers — do NOT move into hooks
+- DB schema files use `*.sql.ts` pattern, exported via src/storage/schema.ts
+- Migrations in packages/opencode/migration/ with YYYYMMDDHHMMSS_name/ directories
+- Config uses Zod schema in Config.Info (config.ts), top-level `logLevel` already exists — use `llmLog` for new config
+- CLI commands use yargs with cmd() wrapper in src/cli/cmd/
+- Gzip: use Bun.gzipSync() / Bun.gunzipSync() for blob compression
+- Instance.state() for per-directory singleton state
+- `bun run typecheck` from repo root; `bun run test:parallel` from packages/opencode
+
+---

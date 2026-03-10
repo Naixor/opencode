@@ -21,6 +21,22 @@ describe("HookChain", () => {
     })
   }
 
+  // --- Register without Instance context ---
+
+  test("register and execute work without Instance.provide (global startup)", () => {
+    // This reproduces the crash when registerAllHooks() is called in yargs middleware
+    // before any Instance.provide() — HookChain state must not depend on Instance context
+    HookChain.reset()
+    expect(() => {
+      HookChain.register("global-hook", "pre-llm", 100, async () => {})
+    }).not.toThrow()
+
+    const hooks = HookChain.listRegistered("pre-llm")
+    expect(hooks.length).toBe(1)
+    expect(hooks[0].name).toBe("global-hook")
+    HookChain.reset()
+  })
+
   // --- Chain execution order ---
 
   test("chain execution order respects priority (lower number = earlier)", async () => {

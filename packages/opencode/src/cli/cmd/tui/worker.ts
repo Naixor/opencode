@@ -10,6 +10,7 @@ import { GlobalBus } from "@/bus/global"
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
+import { registerAllHooks } from "@/session/hooks/register"
 
 await Log.init({
   print: process.argv.includes("--print-logs"),
@@ -19,6 +20,8 @@ await Log.init({
     return "INFO"
   })(),
 })
+
+registerAllHooks()
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
