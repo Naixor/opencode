@@ -2,6 +2,8 @@ import { Bus } from "../../bus"
 import { Log } from "../../util/log"
 import { SessionStatus } from "../status"
 import { HookChain } from "./index"
+import { tmpdir } from "os"
+import { join } from "path"
 
 // Lazy imports to avoid circular dependency at module load time.
 // Session, SessionPrompt, and TuiEvent are resolved on first use.
@@ -45,12 +47,16 @@ export namespace RalphLoop {
     completionPromise: string
     initialCompletionPromise: string
     prompt: string
-    sessionID: string
+    /** The session where the loop was originally started (for UI association) */
+    originSessionID: string
+    /** The session currently executing (changes each iteration) */
+    currentSessionID: string
     startedAt: string
     ultrawork: boolean
     verificationPending: boolean
     verificationSessionID?: string
-    messageCountAtStart: number
+    /** Path to the memory file in /tmp for cross-iteration context */
+    memoryFile: string
   }
 
   export interface StartOptions {
@@ -59,16 +65,22 @@ export namespace RalphLoop {
     ultrawork?: boolean
   }
 
-  // --- State (module-level, keyed by sessionID) ---
+  // --- State (module-level) ---
 
+  /** Keyed by originSessionID */
   const loops = new Map<string, LoopState>()
+  /** Maps any active currentSessionID → originSessionID for idle event routing */
+  const sessionToOrigin = new Map<string, string>()
   const inFlight = new Set<string>()
 
   // --- Prompt Templates ---
 
-  function buildContinuationPrompt(loopState: LoopState): string {
+  function buildIterationPrompt(loopState: LoopState): string {
     const maxLabel = String(loopState.maxIterations)
     const prefix = loopState.ultrawork ? "ultrawork " : ""
+    const memoryInstruction = loopState.iteration > 1
+      ? `\n\nMEMORY FILE: ${loopState.memoryFile}\nRead this file FIRST to understand what previous iterations accomplished. Update it with your progress before finishing.\n`
+      : `\n\nMEMORY FILE: ${loopState.memoryFile}\nThis file tracks your progress across iterations. Update it with your progress before finishing.\n`
 
     if (loopState.verificationPending) {
       return `${prefix}[SYSTEM DIRECTIVE - ULTRAWORK LOOP VERIFICATION ${loopState.iteration}/${maxLabel}]
@@ -80,22 +92,22 @@ REQUIRED NOW:
 - Ask Oracle to verify whether the original task is actually complete
 - The system will inspect the Oracle session directly for the verification result
 - If Oracle does not verify, continue fixing the task and do not consider it complete
-
+${memoryInstruction}
 Original task:
 ${loopState.prompt}`
     }
 
     return `${prefix}[SYSTEM DIRECTIVE - RALPH LOOP ${loopState.iteration}/${maxLabel}]
 
-Your previous attempt did not output the completion promise. Continue working on the task.
+You are continuing an autonomous work loop. ${loopState.iteration === 1 ? "This is the first iteration." : `This is iteration ${loopState.iteration}.`}
 
 IMPORTANT:
-- Review your progress so far
-- Continue from where you left off
+- ${loopState.iteration === 1 ? "Start working on the task below" : "Read the memory file FIRST, then continue from where the previous iteration left off"}
 - When FULLY complete, output: <promise>${loopState.completionPromise}</promise>
 - Do not stop until the task is truly done
-
-Original task:
+- Do not ask questions or wait for confirmation
+${memoryInstruction}
+Task:
 ${loopState.prompt}`
   }
 
@@ -108,6 +120,7 @@ ${loopState.prompt}`
 Oracle did not emit <promise>VERIFIED</promise>. Verification failed.
 
 REQUIRED NOW:
+- Read the memory file FIRST: ${loopState.memoryFile}
 - Verification failed. Fix the task until Oracle's review is satisfied
 - Oracle does not lie. Treat the verification result as ground truth
 - Do not claim completion early or argue with the failed verification
@@ -124,22 +137,12 @@ ${loopState.prompt}`
     return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   }
 
-  async function detectCompletion(
-    sessionID: string,
-    promise: string,
-    sinceMessageIndex: number,
-  ): Promise<boolean> {
+  async function detectCompletion(sessionID: string, promise: string): Promise<boolean> {
     const Session = await getSession()
     const msgs = await Session.messages({ sessionID })
     const pattern = new RegExp(`<promise>\\s*${escapeRegex(promise)}\\s*</promise>`, "is")
 
-    // msgs are newest-first from Session.messages, take only those after sinceMessageIndex
-    const scopedMsgs =
-      sinceMessageIndex > 0 && sinceMessageIndex < msgs.length
-        ? msgs.slice(0, msgs.length - sinceMessageIndex)
-        : msgs
-
-    for (const msg of scopedMsgs) {
+    for (const msg of msgs) {
       if (msg.info.role !== "assistant") continue
       let text = ""
       for (const part of msg.parts) {
@@ -150,6 +153,59 @@ ${loopState.prompt}`
       if (pattern.test(text)) return true
     }
     return false
+  }
+
+  // --- Memory File ---
+
+  function memoryPath(originSessionID: string): string {
+    return join(tmpdir(), `ralph.memory.${originSessionID}.md`)
+  }
+
+  async function initMemoryFile(loopState: LoopState): Promise<void> {
+    const header = `# ${loopState.ultrawork ? "Ultrawork" : "Ralph"} Loop Memory
+
+- **Task:** ${loopState.prompt}
+- **Started:** ${loopState.startedAt}
+- **Session:** ${loopState.originSessionID}
+
+---
+
+`
+    await Bun.write(loopState.memoryFile, header).catch((err: unknown) => {
+      log.error("failed to create memory file", {
+        path: loopState.memoryFile,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+  }
+
+  async function appendToMemory(loopState: LoopState, label: string, sessionID: string): Promise<void> {
+    const Session = await getSession()
+    const msgs = await Session.messages({ sessionID })
+
+    // msgs are newest-first; find the last assistant message
+    const lastAssistant = msgs.find((m) => m.info.role === "assistant")
+    if (!lastAssistant) return
+
+    const texts: string[] = []
+    for (const part of lastAssistant.parts) {
+      if (part.type === "text" && "text" in part) {
+        const t = (part as { text?: string }).text ?? ""
+        if (t) texts.push(t)
+      }
+    }
+    const fullText = texts.join("\n")
+    const summary = fullText.length > 4000 ? fullText.slice(0, 4000) + "\n... [truncated]" : fullText
+
+    const block = `\n## ${label}\n\n${summary}\n\n---\n`
+
+    const existing = await Bun.file(loopState.memoryFile).text().catch(() => "")
+    await Bun.write(loopState.memoryFile, existing + block).catch((err: unknown) => {
+      log.error("failed to append to memory file", {
+        path: loopState.memoryFile,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
   }
 
   // --- Toast Helper ---
@@ -168,6 +224,7 @@ ${loopState.prompt}`
     const existing = loops.get(sessionID)
     if (existing?.active) {
       log.info("loop already active for session, overwriting", { sessionID })
+      sessionToOrigin.delete(existing.currentSessionID)
     }
 
     const loopState: LoopState = {
@@ -177,28 +234,22 @@ ${loopState.prompt}`
       completionPromise: options?.completionPromise ?? DEFAULT_COMPLETION_PROMISE,
       initialCompletionPromise: options?.completionPromise ?? DEFAULT_COMPLETION_PROMISE,
       prompt,
-      sessionID,
+      originSessionID: sessionID,
+      currentSessionID: sessionID,
       startedAt: new Date().toISOString(),
       ultrawork: options?.ultrawork ?? false,
       verificationPending: false,
-      messageCountAtStart: 0,
+      memoryFile: memoryPath(sessionID),
     }
 
     loops.set(sessionID, loopState)
+    sessionToOrigin.set(sessionID, sessionID)
 
-    // Async: fetch initial message count
-    const Session = await getSession()
-    Session.messages({ sessionID })
-      .then((msgs) => {
-        const current = loops.get(sessionID)
-        if (current?.active) {
-          current.messageCountAtStart = msgs.length
-        }
-      })
-      .catch(() => {})
+    await initMemoryFile(loopState)
 
     log.info("loop started", {
       sessionID,
+      memoryFile: loopState.memoryFile,
       maxIterations: loopState.maxIterations,
       ultrawork: loopState.ultrawork,
       completionPromise: loopState.completionPromise,
@@ -206,7 +257,7 @@ ${loopState.prompt}`
 
     await showToast(
       loopState.ultrawork ? "ULTRAWORK LOOP" : "Ralph Loop",
-      `Loop started. Will continue until <promise>${loopState.completionPromise}</promise> is emitted.`,
+      `Loop started. Memory: ${loopState.memoryFile}`,
       "info",
     )
 
@@ -217,6 +268,7 @@ ${loopState.prompt}`
     const loopState = loops.get(sessionID)
     if (!loopState?.active) return false
 
+    sessionToOrigin.delete(loopState.currentSessionID)
     loops.delete(sessionID)
     log.info("loop cancelled", { sessionID })
 
@@ -234,7 +286,7 @@ ${loopState.prompt}`
     for (const [, loopState] of loops) {
       if (loopState.active) {
         result.push({
-          sessionID: loopState.sessionID,
+          sessionID: loopState.originSessionID,
           iteration: loopState.iteration,
           maxIterations: loopState.maxIterations,
         })
@@ -246,25 +298,31 @@ ${loopState.prompt}`
   // --- Idle Handler ---
 
   async function handleIdle(sessionID: string): Promise<void> {
-    // Prevent concurrent handling
     if (inFlight.has(sessionID)) return
-    const loopState = loops.get(sessionID)
+
+    // Route: find the loop this session belongs to
+    const originID = sessionToOrigin.get(sessionID)
+    const loopState = originID ? loops.get(originID) : undefined
+
     if (!loopState?.active) {
       // Check if this session is an oracle verification session
       for (const [, ls] of loops) {
         if (ls.verificationSessionID === sessionID && ls.active) {
-          if (inFlight.has(ls.sessionID)) return
-          inFlight.add(ls.sessionID)
+          if (inFlight.has(ls.originSessionID)) return
+          inFlight.add(ls.originSessionID)
           try {
             await processIdle(ls, true)
           } finally {
-            inFlight.delete(ls.sessionID)
+            inFlight.delete(ls.originSessionID)
           }
           return
         }
       }
       return
     }
+
+    // Only react when the current session goes idle
+    if (loopState.currentSessionID !== sessionID) return
 
     inFlight.add(sessionID)
     try {
@@ -275,20 +333,18 @@ ${loopState.prompt}`
   }
 
   async function processIdle(loopState: LoopState, isOracleIdle: boolean): Promise<void> {
-    const { sessionID } = loopState
+    const { currentSessionID } = loopState
 
     // Check for ultrawork verification result
     if (loopState.verificationPending && loopState.verificationSessionID) {
       const verified = await detectCompletion(
-        isOracleIdle ? loopState.verificationSessionID : sessionID,
+        isOracleIdle ? loopState.verificationSessionID : currentSessionID,
         ULTRAWORK_VERIFICATION_PROMISE,
-        0,
       )
 
       if (verified) {
-        // Verification passed — loop complete
-        loops.delete(sessionID)
-        log.info("ultrawork loop verified and complete", { sessionID, iteration: loopState.iteration })
+        finishLoop(loopState)
+        log.info("ultrawork loop verified and complete", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
         await showToast(
           "ULTRAWORK LOOP COMPLETE!",
           `Task completed and verified after ${loopState.iteration} iteration(s)`,
@@ -298,7 +354,6 @@ ${loopState.prompt}`
       }
 
       if (isOracleIdle) {
-        // Oracle finished but didn't verify — verification failed
         await handleVerificationFailure(loopState)
         return
       }
@@ -307,59 +362,61 @@ ${loopState.prompt}`
       return
     }
 
-    // Check for completion promise in session messages
-    const completed = await detectCompletion(
-      sessionID,
-      loopState.completionPromise,
-      loopState.messageCountAtStart,
-    )
+    // Check for completion promise in current session messages
+    const completed = await detectCompletion(currentSessionID, loopState.completionPromise)
 
     if (completed) {
       await handleCompletion(loopState)
       return
     }
 
-    // Not completed — continue iteration
+    // Not completed — continue iteration with a new session
     if (loopState.iteration >= loopState.maxIterations) {
-      loops.delete(sessionID)
-      log.info("loop max iterations reached", { sessionID, iteration: loopState.iteration })
+      finishLoop(loopState)
+      log.info("loop max iterations reached", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
       await showToast("Ralph Loop", `Max iterations (${loopState.maxIterations}) reached without completion.`, "warning")
       return
     }
 
-    loopState.iteration++
-    log.info("loop continuing", { sessionID, iteration: loopState.iteration })
+    // Append progress from current session to the memory file
+    await appendToMemory(loopState, `Iteration ${loopState.iteration}`, currentSessionID)
 
-    const prompt = buildContinuationPrompt(loopState)
-    await injectPrompt(sessionID, prompt)
+    loopState.iteration++
+    log.info("loop continuing with new session", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
+
+    await startNewIteration(loopState, buildIterationPrompt(loopState))
   }
 
   async function handleCompletion(loopState: LoopState): Promise<void> {
-    const { sessionID } = loopState
-
     // Ultrawork: transition to verification phase
     if (loopState.ultrawork && !loopState.verificationPending) {
       loopState.verificationPending = true
       loopState.completionPromise = ULTRAWORK_VERIFICATION_PROMISE
 
-      const prompt = buildContinuationPrompt(loopState)
-      await injectPrompt(sessionID, prompt)
+      // Append progress before verification session
+      await appendToMemory(loopState, `Iteration ${loopState.iteration} (DONE emitted)`, loopState.currentSessionID)
+
+      loopState.iteration++
+      await startNewIteration(loopState, buildIterationPrompt(loopState))
 
       await showToast("ULTRAWORK LOOP", "DONE detected. Oracle verification is now required.", "info")
-      log.info("ultrawork verification phase started", { sessionID, iteration: loopState.iteration })
+      log.info("ultrawork verification phase started", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
       return
     }
 
     // Normal completion (or verified ultrawork)
-    loops.delete(sessionID)
+    finishLoop(loopState)
     const title = loopState.ultrawork ? "ULTRAWORK LOOP COMPLETE!" : "Ralph Loop Complete!"
     const message = `Task completed after ${loopState.iteration} iteration(s)`
-    log.info("loop completed", { sessionID, iteration: loopState.iteration })
+    log.info("loop completed", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
     await showToast(title, message, "success")
   }
 
   async function handleVerificationFailure(loopState: LoopState): Promise<void> {
-    const { sessionID } = loopState
+    // Append oracle feedback to memory before resetting
+    if (loopState.verificationSessionID) {
+      await appendToMemory(loopState, "Oracle Verification (FAILED)", loopState.verificationSessionID)
+    }
 
     // Reset to pre-verification state
     loopState.verificationPending = false
@@ -367,37 +424,72 @@ ${loopState.prompt}`
     loopState.verificationSessionID = undefined
     loopState.iteration++
 
-    // Update message count baseline
-    const Session = await getSession()
-    const msgs = await Session.messages({ sessionID }).catch(() => [] as never[])
-    loopState.messageCountAtStart = msgs.length
+    await startNewIteration(loopState, buildVerificationFailurePrompt(loopState))
 
-    const prompt = buildVerificationFailurePrompt(loopState)
-    await injectPrompt(sessionID, prompt)
-
-    log.info("ultrawork verification failed, continuing", { sessionID, iteration: loopState.iteration })
+    log.info("ultrawork verification failed, continuing", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
     await showToast("ULTRAWORK LOOP", "Oracle verification failed. Resuming work.", "warning")
   }
 
-  // --- Prompt Injection ---
+  // --- Session Management ---
 
-  async function injectPrompt(sessionID: string, text: string): Promise<void> {
+  async function startNewIteration(loopState: LoopState, prompt: string): Promise<void> {
+    const Session = await getSession()
     const SessionPrompt = await getSessionPrompt()
-    await SessionPrompt.prompt({
-      sessionID,
-      parts: [{ type: "text", text }],
+
+    // Remove old currentSessionID mapping
+    sessionToOrigin.delete(loopState.currentSessionID)
+
+    // Create a fresh session for this iteration
+    const newSession = await Session.create({
+      parentID: loopState.originSessionID,
+      title: `${loopState.ultrawork ? "ULW" : "Ralph"} Loop #${loopState.iteration}`,
     }).catch((err: unknown) => {
-      log.error("failed to inject continuation prompt", {
-        sessionID,
+      log.error("failed to create iteration session", {
+        originSessionID: loopState.originSessionID,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      return undefined
+    })
+
+    if (!newSession) {
+      finishLoop(loopState)
+      await showToast("Ralph Loop", "Failed to create new session. Loop stopped.", "error")
+      return
+    }
+
+    // Update loop state to point to the new session
+    loopState.currentSessionID = newSession.id
+    sessionToOrigin.set(newSession.id, loopState.originSessionID)
+
+    log.info("new iteration session created", {
+      originSessionID: loopState.originSessionID,
+      currentSessionID: newSession.id,
+      iteration: loopState.iteration,
+    })
+
+    // Send the prompt to the new session
+    await SessionPrompt.prompt({
+      sessionID: newSession.id,
+      parts: [{ type: "text", text: prompt }],
+    }).catch((err: unknown) => {
+      log.error("failed to send iteration prompt", {
+        sessionID: newSession.id,
         error: err instanceof Error ? err.message : String(err),
       })
     })
   }
 
+  function finishLoop(loopState: LoopState): void {
+    sessionToOrigin.delete(loopState.currentSessionID)
+    loops.delete(loopState.originSessionID)
+  }
+
   // --- Track Oracle Sessions ---
 
   export function setVerificationSession(parentSessionID: string, oracleSessionID: string): void {
-    const loopState = loops.get(parentSessionID)
+    // parentSessionID could be the originSessionID or the currentSessionID
+    const originID = sessionToOrigin.get(parentSessionID) ?? parentSessionID
+    const loopState = loops.get(originID)
     if (!loopState?.verificationPending) return
     loopState.verificationSessionID = oracleSessionID
     log.info("oracle verification session bound", { parentSessionID, oracleSessionID })
@@ -485,6 +577,7 @@ ${loopState.prompt}`
   export function reset(): void {
     unregister()
     loops.clear()
+    sessionToOrigin.clear()
     inFlight.clear()
   }
 }
