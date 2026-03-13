@@ -89,11 +89,31 @@ export namespace Config {
         const url = key.replace(/\/+$/, "")
         process.env[value.key] = value.token
         log.debug("fetching remote config", { url: `${url}/.well-known/opencode` })
-        const response = await fetch(`${url}/.well-known/opencode`)
-        if (!response.ok) {
-          throw new Error(`failed to fetch remote config from ${url}: ${response.status}`)
+        let response: Response
+        try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 10000)
+          response = await fetch(`${url}/.well-known/opencode`, { signal: controller.signal })
+          clearTimeout(timeout)
+        } catch (e) {
+          if (e instanceof Error && e.name === "AbortError") {
+            log.error("wellknown fetch timeout", { url })
+          } else {
+            log.error("wellknown fetch failed", { url, error: e instanceof Error ? e.message : String(e) })
+          }
+          continue
         }
-        const wellknown = (await response.json()) as any
+        if (!response.ok) {
+          log.error("wellknown fetch returned error", { url, status: response.status })
+          continue
+        }
+        let wellknown: any
+        try {
+          wellknown = await response.json()
+        } catch {
+          log.error("wellknown returned invalid JSON", { url })
+          continue
+        }
         const remoteConfig = wellknown.config ?? {}
         // Add $schema to prevent load() from trying to write back to a non-existent file
         if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
@@ -1208,14 +1228,8 @@ export namespace Config {
           z.string(),
           z.object({
             description: z.string().describe("Description of when to use this category"),
-            model: z
-              .string()
-              .optional()
-              .describe("Model to use for tasks in this category (provider/model format)"),
-            prompt_append: z
-              .string()
-              .optional()
-              .describe("Additional prompt text appended for tasks in this category"),
+            model: z.string().optional().describe("Model to use for tasks in this category (provider/model format)"),
+            prompt_append: z.string().optional().describe("Additional prompt text appended for tasks in this category"),
           }),
         )
         .optional()
@@ -1227,10 +1241,7 @@ export namespace Config {
       sandbox: z
         .object({
           enabled: z.boolean().optional().default(false).describe("Enable OS-level sandbox for bash and MCP commands"),
-          paths: z
-            .array(z.string())
-            .optional()
-            .describe("Additional paths to allow read-write access in the sandbox"),
+          paths: z.array(z.string()).optional().describe("Additional paths to allow read-write access in the sandbox"),
         })
         .optional()
         .describe("OS-native sandbox configuration for kernel-level file system isolation"),
@@ -1243,7 +1254,11 @@ export namespace Config {
         .describe("Notification settings for task completion events"),
       llmLog: z
         .object({
-          enabled: z.boolean().optional().default(true).describe("Enable or disable LLM communication logging (default: true)"),
+          enabled: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe("Enable or disable LLM communication logging (default: true)"),
           max_records: z
             .number()
             .int()

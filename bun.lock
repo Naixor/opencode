@@ -244,6 +244,18 @@
         "vite": "catalog:",
       },
     },
+    "packages/feishu-server": {
+      "name": "@opencode-ai/feishu-server",
+      "version": "0.1.0",
+      "dependencies": {
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/function": {
       "name": "@opencode-ai/function",
       "version": "1.2.16",
@@ -1339,6 +1351,8 @@
     "@opencode-ai/desktop": ["@opencode-ai/desktop@workspace:packages/desktop"],
 
     "@opencode-ai/enterprise": ["@opencode-ai/enterprise@workspace:packages/enterprise"],
+
+    "@opencode-ai/feishu-server": ["@opencode-ai/feishu-server@workspace:packages/feishu-server"],
 
     "@opencode-ai/function": ["@opencode-ai/function@workspace:packages/function"],
 

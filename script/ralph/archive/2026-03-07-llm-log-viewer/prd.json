@@ -1,0 +1,416 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/llm-log-viewer",
+  "description": "LLM Communication Log System & Web Viewer - Complete tracing of LLM requests/responses, tool calls, hook processing with a web-based log viewer",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "HookChain: Register all hooks + add metadata to Context schemas",
+      "description": "As a developer, I need all HookChain hook namespaces registered at startup and Context schemas extended with metadata so hooks actually execute in production.",
+      "acceptanceCriteria": [
+        "Add `metadata: z.record(z.string(), z.any()).optional()` field to PreLLMContext, PreToolContext, PostToolContext, and SessionLifecycleContext schemas in hooks/index.ts",
+        "Create a registration entry point that calls register() for all 7 hook namespaces: ContextInjectionHooks, DetectionCheckingHooks, ErrorRecoveryHooks, OutputManagementHooks, AgentEnforcementHooks, LLMParameterHooks, SessionLifecycleHooks",
+        "Call the registration entry point during app initialization in src/index.ts",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "This is prerequisite work. Hook namespaces exist in src/session/hooks/ but their register() functions are never called in production."
+    },
+    {
+      "id": "US-002",
+      "title": "HookChain: Replace Plugin.trigger in llm.ts with executePreLLM",
+      "description": "As a developer, I want the pre-llm hook chain to execute before LLM calls so that context injection, thinking mode, and other hooks actually run.",
+      "acceptanceCriteria": [
+        "Replace Plugin.trigger('experimental.chat.system.transform') call in llm.ts with HookChain.executePreLLM()",
+        "Construct PreLLMContext with sessionID, system, agent name, model id, variant, messages, and providerOptions",
+        "Adjust code order in llm.ts so providerOptions is available before executePreLLM call (currently built after Plugin.trigger)",
+        "After executePreLLM, read back modified system and providerOptions from context",
+        "Existing Plugin hooks still execute (executePreLLM calls Plugin.trigger internally)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "executePreLLM in hooks/index.ts already combines Plugin.trigger + HookChain.execute. Key challenge: providerOptions is built at llm.ts:108, after the current Plugin.trigger at line 87. Need to reorder."
+    },
+    {
+      "id": "US-003",
+      "title": "HookChain: Replace Plugin.trigger in prompt.ts with executePreTool/PostTool",
+      "description": "As a developer, I want pre-tool and post-tool hook chains to execute around tool calls so that tool interception, output truncation, and error recovery hooks actually run.",
+      "acceptanceCriteria": [
+        "Replace Plugin.trigger('tool.execute.before') with HookChain.executePreTool() for built-in tools (prompt.ts ~line 842)",
+        "Replace Plugin.trigger('tool.execute.after') with HookChain.executePostTool() for built-in tools (prompt.ts ~line 863)",
+        "Replace Plugin.trigger('tool.execute.before') with HookChain.executePreTool() for MCP tools (prompt.ts ~line 910)",
+        "Replace Plugin.trigger('tool.execute.after') with HookChain.executePostTool() for MCP tools (prompt.ts ~line 987)",
+        "Construct PreToolContext and PostToolContext with sessionID, toolName, args, agent",
+        "Security code between the two triggers (ctx.ask, LLMScanner, SecurityRedact) remains untouched",
+        "Existing Plugin hooks still execute (executePreTool/PostTool call Plugin.trigger internally)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "There are 2 tool execute wrappers in prompt.ts: one for built-in tools (~line 840) and one for MCP tools (~line 907). Both need updating. Security logic stays between the before/after calls."
+    },
+    {
+      "id": "US-004",
+      "title": "HookChain: Migrate truncation logic to hook chain",
+      "description": "As a developer, I want tool output truncation handled exclusively by HookChain post-tool hooks to eliminate duplicate truncation logic.",
+      "acceptanceCriteria": [
+        "Remove direct Truncate.output() call in prompt.ts (around line 1026) \u2014 post-tool hook tool-output-truncator handles this",
+        "Verify tool-output-truncator hook in output-management.ts works correctly with the new HookChain integration",
+        "Verify grep-output-truncator hook does not conflict with grep.ts built-in truncation (grep internal truncation is more precise, hook may need adjustment)",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Truncate.output() is called in prompt.ts. The hook tool-output-truncator in output-management.ts:63 does similar work. Grep has built-in truncation in grep.ts:198-242 which is more precise than the hook version."
+    },
+    {
+      "id": "US-005",
+      "title": "LLM Log DB Schema and Migration",
+      "description": "As a developer, I need database tables to store LLM communication logs so that all request/response data persists reliably.",
+      "acceptanceCriteria": [
+        "Create src/log/log.sql.ts with Drizzle table definitions for 7 tables: llm_log, llm_log_request, llm_log_response, llm_log_tokens, llm_log_tool_call (with call_id field), llm_log_hook (with modified_fields instead of snapshots), llm_log_annotation",
+        "llm_log_request has system_prompt and messages as blob columns (for gzip storage)",
+        "llm_log_response has raw_response as blob column (for gzip storage)",
+        "All tables use llm_log_id as FK with CASCADE delete",
+        "Export tables from src/storage/schema.ts",
+        "Generate Drizzle migration in packages/opencode/migration/ directory",
+        "Migration uses IF NOT EXISTS for all tables",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Follow existing patterns: timestamps from schema.sql.ts, text PKs with Identifier.ascending, FK cascade delete. See session.sql.ts for reference."
+    },
+    {
+      "id": "US-006",
+      "title": "llmLog config segment",
+      "description": "As a developer, I want a config segment to control LLM log behavior so that logging can be enabled/disabled and storage limits configured.",
+      "acceptanceCriteria": [
+        "Add llmLog field to Config.Info Zod schema in config.ts with sub-fields: enabled (boolean, default true), max_records (number, default 10000), max_age_days (number, default 30), cleanup_interval_hours (number, default 24)",
+        "All fields are optional with defaults",
+        "Config is accessible via Config.get() like other config segments",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Use llmLog (not log) to avoid confusion with existing top-level logLevel field. Follow existing config pattern in config.ts."
+    },
+    {
+      "id": "US-007",
+      "title": "step.finished session-lifecycle event",
+      "description": "As a developer, I need a step.finished lifecycle event emitted after each LLM step completes so that the log system can capture response data.",
+      "acceptanceCriteria": [
+        "Add 'step.finished' to SessionLifecycleEvent enum in hooks/index.ts",
+        "In processor.ts finish-step case (around line 289), after all existing processing, emit HookChain.execute('session-lifecycle', { sessionID, event: 'step.finished', data: { usage, finishReason, model, assistantMessage } })",
+        "The data payload includes token usage, cost, finish reason, model info, and message reference",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "This event is the capture point for US-009 (response/token logging). The data object should carry everything needed to write llm_log_response + llm_log_tokens."
+    },
+    {
+      "id": "US-008",
+      "title": "Pre-LLM log capture hook",
+      "description": "As a developer, I want to capture the complete input context before each LLM call so I can analyze what was sent to the model.",
+      "acceptanceCriteria": [
+        "Create src/log/capture.ts with LlmLogCapture namespace",
+        "Register pre-llm hook 'llm-log-capture' with priority 999 (last to execute)",
+        "Hook creates llm_log record (session_id, agent, model, provider, variant, time_start, status='pending')",
+        "Hook creates llm_log_request record with gzip-compressed system_prompt and messages (using Bun.gzipSync), plus tools and options as JSON",
+        "Store current llm_log_id in Instance.state() Map keyed by sessionID for cross-chain access",
+        "Skip entirely when llmLog.enabled is false (zero overhead)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Uses Instance.state() to maintain Map<sessionID, currentLlmLogId> for bridging to pre-tool/post-tool hooks. Gzip with Bun.gzipSync()."
+    },
+    {
+      "id": "US-009",
+      "title": "Response and token log capture hook",
+      "description": "As a developer, I want to capture the LLM response and token usage after each call so I can analyze output quality and costs.",
+      "acceptanceCriteria": [
+        "Register session-lifecycle hook 'llm-log-response-capture' that listens for 'step.finished' event",
+        "Write llm_log_response record: completion_text, tool_calls JSON, gzip-compressed raw_response, error JSON",
+        "Write llm_log_tokens record: input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, cost calculations per Provider.Model.cost",
+        "Update llm_log main record: time_end, duration_ms, status (success/error/aborted)",
+        "Handle streaming abort: still record partial data with status='aborted'",
+        "Log writes are async (don't block response flow)",
+        "Skip when llmLog.enabled is false",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Depends on US-007 (step.finished event) and US-008 (llm_log_id in Instance.state). Cost calculation follows Session.getUsage() pattern including >200K pricing tier."
+    },
+    {
+      "id": "US-010",
+      "title": "Tool call log capture hooks",
+      "description": "As a developer, I want to log every tool call's input/output so I can trace the complete agent loop.",
+      "acceptanceCriteria": [
+        "Register pre-tool hook 'llm-log-tool-start' with priority 999 that records tool call start: llm_log_id (from Instance.state), call_id (from metadata or generated), tool_name, input args JSON, time_start",
+        "Register post-tool hook 'llm-log-tool-finish' with priority 0 (first to execute) that records: output JSON, title, duration_ms, status, output byte size",
+        "Tool call records written to llm_log_tool_call table",
+        "Skip when llmLog.enabled is false",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Depends on US-008 for llm_log_id access via Instance.state. call_id field stores AI SDK toolCallId for disambiguation."
+    },
+    {
+      "id": "US-011",
+      "title": "Hook chain instrumentation",
+      "description": "As a developer, I want to see hook execution metadata so I can debug prompt construction and tool interception.",
+      "acceptanceCriteria": [
+        "Modify HookChain.execute() in hooks/index.ts to track per-hook execution: measure duration_ms, shallow-compare context keys before/after to detect modified_fields",
+        "When llmLog.enabled is true, write hook execution records to llm_log_hook table: hook_name, chain_type, priority, modified_fields JSON array, duration_ms",
+        "Associate records with current llm_log_id from Instance.state",
+        "No JSON diff, no content snapshots \u2014 only field names that changed",
+        "Skip instrumentation when llmLog.enabled is false",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Shallow compare: snapshot Object.keys() of context before hook, compare after. If any key's value reference changed, include in modified_fields."
+    },
+    {
+      "id": "US-012",
+      "title": "LlmLog query API \u2014 list and get",
+      "description": "As a developer, I want to query log data for the web viewer to display.",
+      "acceptanceCriteria": [
+        "Create src/log/query.ts with LlmLog namespace",
+        "LlmLog.list(filters) \u2014 paginated list with filters: session_id, agent, model, provider, time_range, status. Only returns main table fields, does NOT load gzip blob columns",
+        "LlmLog.get(id) \u2014 returns full detail including decompressed system_prompt, messages, raw_response (using Bun.gunzipSync), plus joined tool_calls, hooks, annotations",
+        "Filters validated with Zod schemas",
+        "Uses Drizzle query builder",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "list() must exclude blob columns for performance. get() decompresses with Bun.gunzipSync(). Follow namespace pattern."
+    },
+    {
+      "id": "US-013",
+      "title": "LlmLog query API \u2014 stats and analyze",
+      "description": "As a developer, I want aggregation and optimization analysis queries.",
+      "acceptanceCriteria": [
+        "LlmLog.stats(filters) \u2014 aggregated token totals, cost totals, avg response time, grouped by model/agent/session/time dimensions",
+        "LlmLog.analyze(filters) \u2014 optimization suggestions: top-10 largest tool outputs, cache hit rate, repeated context ratio, high-cost model usage detection, reasoning token ratio",
+        "Each suggestion includes: description, impact estimate (tokens/cost), recommended action",
+        "Filters validated with Zod schemas",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Stats uses SQL aggregations (SUM, AVG, GROUP BY). Analyze performs multiple queries and computes ratios."
+    },
+    {
+      "id": "US-014",
+      "title": "LlmLog query API \u2014 annotate and cleanup",
+      "description": "As a developer, I want annotation CRUD and cleanup with annotation protection.",
+      "acceptanceCriteria": [
+        "LlmLog.annotate(llm_log_id, annotation) \u2014 create annotation with type (hallucination/quality/note), content, marked_text",
+        "LlmLog.deleteAnnotation(annotation_id) \u2014 delete single annotation",
+        "LlmLog.cleanup(options) \u2014 delete records by max_age_days first, then by max_records. Records with annotations protected unless force:true. Cascade deletes child records",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Annotation protection: skip records with annotations during cleanup, unless force:true or age > 2x max_age_days."
+    },
+    {
+      "id": "US-015",
+      "title": "Auto cleanup scheduler",
+      "description": "As a developer, I want automatic background cleanup of old log records based on config.",
+      "acceptanceCriteria": [
+        "Implement background cleanup that runs at llmLog.cleanup_interval_hours interval",
+        "Uses LlmLog.cleanup() with config values for max_records and max_age_days",
+        "Runs in background, does not block main flow",
+        "Only runs when llmLog.enabled is true",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Use setInterval or similar. Consider using Bus events for decoupling."
+    },
+    {
+      "id": "US-016",
+      "title": "HTTP API Server for log viewer",
+      "description": "As a developer, I need an HTTP API server that bridges the web viewer and the log query module.",
+      "acceptanceCriteria": [
+        "Create src/log/server.ts using Bun.serve()",
+        "Routes: GET /api/logs (list), GET /api/logs/stats, GET /api/logs/analyze, GET /api/logs/:id (detail) \u2014 static paths matched before :id param",
+        "Routes: POST /api/logs/:id/annotations, DELETE /api/logs/annotations/:id, POST /api/logs/cleanup, GET /api/health",
+        "CORS headers for localhost in dev mode",
+        "Default port 19836, configurable via --port",
+        "Auto-increment port when occupied",
+        "Serve static files from embedded log-viewer assets",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Route matching: check /api/logs/stats and /api/logs/analyze BEFORE /api/logs/:id to avoid conflicts."
+    },
+    {
+      "id": "US-017",
+      "title": "CLI: opencode log-viewer command",
+      "description": "As a user, I want a CLI command to quickly launch the log viewer.",
+      "acceptanceCriteria": [
+        "Register CLI subcommand 'log-viewer' in src/cli/cmd/ using existing cmd() pattern with yargs",
+        "Starts HTTP API server from src/log/server.ts",
+        "Auto-opens browser to http://localhost:{port}",
+        "Supports --port and --no-open flags",
+        "Supports --reset flag to clear all log table data (preserve table structure)",
+        "Shows access URL and Ctrl+C hint in terminal",
+        "Register command in src/index.ts command chain",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "Follow existing CLI command patterns (e.g., SecurityCommand in src/cli/cmd/security/index.ts)."
+    },
+    {
+      "id": "US-018",
+      "title": "Log Viewer: Package scaffolding and routing",
+      "description": "As a developer, I need the log-viewer web app package set up with routing.",
+      "acceptanceCriteria": [
+        "Create packages/log-viewer/ with package.json, tsconfig.json, vite.config.ts, tailwind.config.ts",
+        "Tech stack: Vite + React + Tailwind CSS",
+        "Set up React Router with routes: / (list), /logs/:id (detail), /stats (statistics), /analyze (suggestions)",
+        "Create basic App shell with navigation header",
+        "Configure build and dev scripts in package.json",
+        "Dark theme as default, consistent with opencode TUI style",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "Lightweight package. Use packages/ui components if available (Button, Input etc)."
+    },
+    {
+      "id": "US-019",
+      "title": "Log Viewer: Log list page with filters",
+      "description": "As a developer, I want to browse LLM logs with filtering and pagination.",
+      "acceptanceCriteria": [
+        "Log list page at / route showing paginated table of log entries",
+        "Filter panel with: session_id, agent, model, provider dropdowns, time range picker, status filter",
+        "Table columns: time, agent, model, status, tokens (input/output), cost, duration",
+        "Click row to navigate to detail page",
+        "Fetches data from GET /api/logs with query params",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Log Viewer: Log detail page \u2014 request and response panels",
+      "description": "As a developer, I want to inspect the full request and response of each LLM call.",
+      "acceptanceCriteria": [
+        "Detail page at /logs/:id with left-right split layout",
+        "Request panel: collapsible system prompt sections, chat-bubble messages (user/assistant/tool roles), Markdown rendering with code highlighting, JSON tree for tool schemas, key-value table for provider options",
+        "Response panel: Markdown-rendered completion, tool call cards (name, args, output, duration), token detail table, red error panel",
+        "Tab navigation: Overview / Request / Response / Tools / Hooks",
+        "Fetches data from GET /api/logs/:id",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": "This is the main detail view. Annotation and Diff tabs are added in later stories."
+    },
+    {
+      "id": "US-021",
+      "title": "Log Viewer: Token stats panel with charts",
+      "description": "As a developer, I want visual charts showing token usage and costs.",
+      "acceptanceCriteria": [
+        "Stats page at /stats with summary cards (total requests, total tokens, total cost, avg tokens/request)",
+        "Line chart: token usage and cost over time (hourly/daily toggle)",
+        "Bar chart: token consumption by model",
+        "Pie chart: token distribution by agent",
+        "Table: per-session token totals and costs",
+        "All charts support time range filtering",
+        "Uses recharts library",
+        "Fetches data from GET /api/logs/stats",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Log Viewer: Optimization suggestions page",
+      "description": "As a developer, I want to see automated optimization suggestions.",
+      "acceptanceCriteria": [
+        "Suggestions page at /analyze showing categorized optimization cards",
+        "Categories: oversized tool outputs, cache hit rate, repeated context, high-cost model usage, reasoning token ratio",
+        "Each card: problem description, impact estimate (tokens/cost), recommended action",
+        "Export suggestions as JSON button",
+        "Fetches data from GET /api/logs/analyze",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Log Viewer: Annotation feature",
+      "description": "As a developer, I want to select and annotate text in LLM responses.",
+      "acceptanceCriteria": [
+        "Add Annotations tab to log detail page",
+        "Text selection in response panel shows floating toolbar with annotation type options: hallucination (red), quality (yellow), note (blue)",
+        "Creating annotation sends POST /api/logs/:id/annotations",
+        "Annotations overlay on response text with colored highlights",
+        "View and delete existing annotations",
+        "Delete sends DELETE /api/logs/annotations/:id",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Log Viewer: Diff view",
+      "description": "As a developer, I want to compare LLM completion text with actual tool call results side by side.",
+      "acceptanceCriteria": [
+        "Add Diff tab to log detail page",
+        "Left panel: completion text segments associated with each tool call (by position)",
+        "Right panel: corresponding tool call input args and execution output",
+        "Diff highlighting for visual comparison",
+        "If tool call failed but LLM didn't mention failure, auto-flag as potential hallucination",
+        "No natural language intent extraction \u2014 show raw completion text",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Embed log-viewer in CLI binary",
+      "description": "As a developer, I want the log-viewer static assets embedded in the CLI binary for single-file distribution.",
+      "acceptanceCriteria": [
+        "Build log-viewer package produces dist/ with static HTML/JS/CSS",
+        "CLI build process embeds dist/ contents into the binary using Bun embed",
+        "HTTP server in src/log/server.ts serves embedded assets from memory instead of filesystem",
+        "opencode log-viewer command works without any external files",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": "This is the final integration step. Bun supports embedding files into the binary at build time."
+    }
+  ]
+}
