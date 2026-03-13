@@ -1,4 +1,5 @@
 import { Auth } from "../../auth"
+import { FeishuAuth } from "../../auth/feishu"
 import { cmd } from "./cmd"
 import * as prompts from "@clack/prompts"
 import { UI } from "../ui"
@@ -213,10 +214,15 @@ export const AuthListCommand = cmd({
     prompts.intro(`Credentials ${UI.Style.TEXT_DIM}${displayPath}`)
     const results = Object.entries(await Auth.all())
     const database = await ModelsDev.get()
+    const feishu = await FeishuAuth.read()
 
     for (const [providerID, result] of results) {
       const name = database[providerID]?.name || providerID
-      prompts.log.info(`${name} ${UI.Style.TEXT_DIM}${result.type}`)
+      if (result.type === "wellknown" && feishu && feishu.wellknown_url === providerID && feishu.name && feishu.email) {
+        prompts.log.info(`Feishu oauth (${feishu.name} / ${feishu.email}) ${UI.Style.TEXT_DIM}${result.type}`)
+      } else {
+        prompts.log.info(`${name} ${UI.Style.TEXT_DIM}${result.type}`)
+      }
     }
 
     prompts.outro(`${results.length} credentials`)
@@ -264,19 +270,55 @@ export const AuthLoginCommand = cmd({
         prompts.intro("Add credential")
         if (args.url) {
           const url = args.url.replace(/\/+$/, "")
-          const wellknown = await fetch(`${url}/.well-known/opencode`).then((x) => x.json() as any)
+          let wellknown: any
+          try {
+            const controller = new AbortController()
+            const timeout = setTimeout(() => controller.abort(), 10000)
+            const res = await fetch(`${url}/.well-known/opencode`, { signal: controller.signal })
+            clearTimeout(timeout)
+            if (!res.ok) {
+              prompts.log.error(`服务端返回错误 (${res.status})，请联系管理员`)
+              prompts.outro("Done")
+              return
+            }
+            wellknown = await res.json().catch(() => null)
+            if (!wellknown || !wellknown.auth?.command) {
+              prompts.log.error("服务端返回格式异常，请联系管理员检查 /.well-known/opencode 配置")
+              prompts.outro("Done")
+              return
+            }
+          } catch (e) {
+            if (e instanceof Error && e.name === "AbortError") {
+              prompts.log.error("连接超时，请检查网络")
+            } else {
+              prompts.log.error(`无法连接到 ${url}，请检查网络或 URL 是否正确`)
+            }
+            prompts.outro("Done")
+            return
+          }
           prompts.log.info(`Running \`${wellknown.auth.command.join(" ")}\``)
           const proc = Process.spawn(wellknown.auth.command, {
             stdout: "pipe",
+            stderr: "pipe",
           })
           if (!proc.stdout) {
             prompts.log.error("Failed")
             prompts.outro("Done")
             return
           }
-          const [exit, token] = await Promise.all([proc.exited, text(proc.stdout)])
+          const [exit, token, stderr] = await Promise.all([
+            proc.exited,
+            text(proc.stdout),
+            proc.stderr ? text(proc.stderr) : Promise.resolve(""),
+          ])
           if (exit !== 0) {
-            prompts.log.error("Failed")
+            if (stderr.includes("unknown command") || stderr.includes("Unknown command")) {
+              prompts.log.error("当前 opencode 版本不支持此认证方式，请升级到最新版本")
+            } else if (stderr.trim()) {
+              prompts.log.error(stderr.trim())
+            } else {
+              prompts.log.error("Failed")
+            }
             prompts.outro("Done")
             return
           }
@@ -444,6 +486,11 @@ export const AuthLogoutCommand = cmd({
       })),
     })
     if (prompts.isCancel(providerID)) throw new UI.CancelledError()
+    // Clean up feishu-auth.json if this is a Feishu wellknown entry
+    const feishu = await FeishuAuth.read()
+    if (feishu && feishu.wellknown_url === providerID) {
+      await FeishuAuth.remove()
+    }
     await Auth.remove(providerID)
     prompts.outro("Logout successful")
   },

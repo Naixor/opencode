@@ -1,0 +1,414 @@
+# Ralph Progress Log
+Started: Sat Mar  7 21:18:34 CST 2026
+---
+
+## Codebase Patterns
+- `executePostTool` pluginOutput type is `Record<string, any>` — supports both built-in tools (`{ title, output, metadata }`) and MCP tools (`{ content, metadata }`)
+- For MCP tools, PostToolContext.result.output is constructed by joining text content items; the raw `result` object is passed to Plugin.trigger for backwards compat
+- Hook registration files must avoid circular imports: hook files import from `./index` (HookChain), so `registerAll` lives in a separate `register.ts` file
+- All hook namespaces have `register()` functions that call `HookChain.register()` internally
+- Typecheck for the main opencode package: `cd packages/opencode && bun run typecheck` (or `bun run typecheck` from repo root)
+- Drizzle migration generation: `cd packages/opencode && bun drizzle-kit generate --name <name>` — must manually add IF NOT EXISTS after
+- New `*.sql.ts` files auto-discovered by drizzle config; new table exports must be added to `src/storage/schema.ts`
+- Git paths must be relative to repo root (`/Users/bytedance/GithubWorkspace/@Naixor/opencode`), not packages/opencode
+- Working directory may be `packages/opencode` due to turbo — always use absolute or repo-root-relative paths for git
+- `executePostTool` writeback requires `pluginOutput` to have an `output` field — MCP result objects need a wrapper object
+- `Identifier` prefixes must be registered in `src/id/id.ts` before using `Identifier.ascending(prefix)` — added `log: "log"` for llm_log tables
+- `LlmLogCapture.getCurrentLogId(sessionID)` provides cross-chain access to the current llm_log_id (used by US-009, US-010, US-011)
+- Instance.state for llm-log stores `{ logId, timeStart }` — use `currentLogState().get(sessionID)` for both values
+- `metadata: { callID }` is passed on all PreToolContext/PostToolContext in prompt.ts — hooks access via `ctx.metadata?.callID`
+- Pre/post tool hook correlation key: `${sessionID}:${callID ?? toolName}` stored in `toolCallStartState` Instance.state
+- Shared Instance.state between modules: extract to a separate `log-state.ts` file to avoid circular imports between `hooks/index.ts` and `capture.ts`
+- Drizzle `.run()` on delete/insert/update returns `void` — count records before deleting if you need the count
+- Zod `.optional()` schema `parse()` returns `undefined` when no input — use `parsed?.field` for safe access
+- Background periodic tasks use `Scheduler.register({ id, interval, run, scope })` from `src/scheduler/index.ts`; init calls go in `src/project/bootstrap.ts`
+- React packages in this monorepo: must add `"react": ["./node_modules/@types/react"]` to tsconfig paths to fix duplicate @types/react resolution (monorepo has @types/react@18.0.25 hoisted, conflicts with package-level @types/react@19.x)
+- Use `react-router` v7 (not `react-router-dom`) — v7 primary package, `react-router-dom` is compat layer
+- Use `createBrowserRouter` + `RouterProvider` API (not `BrowserRouter` + `Routes`) — better types and data loading support
+- Recharts tooltip/label callbacks: don't annotate param types explicitly — use `(value) => ...` and cast with `Number(value)` inside to avoid strict type mismatches
+- Build-time asset embedding: use `define` with `JSON.stringify(assets)` in build.ts, `declare const NAME: Type | undefined` in source, check `typeof NAME !== "undefined"` at runtime
+
+## 2026-03-07 - US-001
+- Added `metadata: z.record(z.string(), z.any()).optional()` to PreLLMContext, PreToolContext, PostToolContext, SessionLifecycleContext
+- Created `src/session/hooks/register.ts` with `registerAllHooks()` that calls register() for all 7 hook namespaces
+- Called `registerAllHooks()` in `src/index.ts` middleware after Log.init()
+- Files changed: `src/session/hooks/index.ts`, `src/session/hooks/register.ts` (new), `src/index.ts`
+- **Learnings for future iterations:**
+  - Circular import hazard: hook files (e.g., context-injection.ts) import HookChain from `./index`, so a registration function that imports all hook files cannot live in `./index.ts`
+  - Solution: separate `register.ts` file breaks the cycle
+  - The `Instance.state()` pattern provides per-directory singleton state — used by HookChain for its chain registry
+---
+
+## 2026-03-07 - US-002
+- Replaced `Plugin.trigger('experimental.chat.system.transform')` in llm.ts with `HookChain.executePreLLM()`
+- Moved `variant`/`options` (providerOptions) construction BEFORE the hook call so hooks can access and modify them
+- Constructed `PreLLMContext` with sessionID, system, agent name, model id, variant, messages, providerOptions
+- After `executePreLLM`, reads back potentially-modified `providerOptions` from context
+- Changed `options` from `const` to `let` to allow reassignment from hook modifications
+- Files changed: `src/session/llm.ts`
+- **Learnings for future iterations:**
+  - `executePreLLM` syncs system array between pluginOutput and ctx internally — no need to manually sync
+  - `options` variable is used downstream by `params` Plugin.trigger and `streamText` — any reordering must preserve availability
+  - Import `HookChain` from `@/session/hooks` (not `@/session/hooks/index`)
+---
+
+## 2026-03-07 - US-003
+- Replaced all 4 `Plugin.trigger("tool.execute.before/after")` calls in prompt.ts with `HookChain.executePreTool()`/`executePostTool()`
+- Built-in tools (line ~842, ~863): straightforward replacement with PreToolContext/PostToolContext
+- MCP tools (line ~910, ~987): adapted for different output shape (MCP `result` has `content[]` not `output/title`)
+- Widened `executePostTool` pluginOutput type from `{ title; output; metadata }` to `Record<string, any>` to support both tool types
+- Security code (ctx.ask, LLMScanner, SecurityRedact) between before/after hooks remains untouched
+- Files changed: `src/session/prompt.ts`, `src/session/hooks/index.ts`
+- **Learnings for future iterations:**
+  - Built-in tools return `{ title, output, metadata, attachments? }`, MCP tools return `{ content: [...], metadata? }`
+  - `executePostTool` must handle both shapes: for built-in tools, reads `pluginOutput.output`; for MCP, PostToolContext constructs output from content array
+  - The `preToolPluginOutput.args` may be modified by hooks — pass modified args to `item.execute()` for hook interception to work
+  - MCP pre-tool: `args` var from closure is not reassigned (MCP tools use it directly), but `mcpPreToolPluginOutput.args` captures modifications
+---
+
+## 2026-03-07 - US-004
+- Updated `tool-output-truncator` hook in output-management.ts to use `Truncate.output()` instead of simple `truncateOutput()` — now does line-aware truncation with file saving
+- Restructured MCP tool path in prompt.ts: moved textParts/attachments extraction before `executePostTool`, created proper `mcpOutput` object with `output` field so hook modifications flow back through `pluginOutput`
+- Removed direct `Truncate.output()` call and unused `Truncate` import from prompt.ts
+- Grep built-in truncation (500 matches, line-level) is more precise and runs first inside the tool; grep-output-truncator hook (50 matches) provides additional safety net — no conflict
+- Files changed: `src/session/hooks/output-management.ts`, `src/session/prompt.ts`
+- **Learnings for future iterations:**
+  - `executePostTool` writes back to `pluginOutput.output` only if `"output" in pluginOutput` — MCP result objects don't have `output` field, so a wrapper object with `output` is needed for writeback to work
+  - When migrating inline logic to hooks, ensure the hook's output flows back to the caller via `pluginOutput`; the PostToolContext `ctx.result` modifications alone are not enough
+  - `Truncate.output()` accepts optional `agent` param for task-tool hints — when called from hooks without agent context, omitting it gives a generic hint which is fine
+---
+
+## 2026-03-07 - US-005
+- Created `src/log/log.sql.ts` with 7 Drizzle table definitions: llm_log, llm_log_request, llm_log_response, llm_log_tokens, llm_log_tool_call, llm_log_hook, llm_log_annotation
+- llm_log_request.system_prompt and messages use `blob()` for gzip storage; llm_log_response.raw_response also blob
+- All child tables use llm_log_id FK with CASCADE delete
+- Exported all tables from `src/storage/schema.ts`
+- Generated Drizzle migration at `migration/20260307133626_llm_log_tables/` with IF NOT EXISTS on all CREATE TABLE and CREATE INDEX statements
+- Files changed: `src/log/log.sql.ts` (new), `src/storage/schema.ts`, `migration/20260307133626_llm_log_tables/` (new)
+- **Learnings for future iterations:**
+  - Drizzle config at `packages/opencode/drizzle.config.ts` uses `schema: "./src/**/*.sql.ts"` — any new `*.sql.ts` file is auto-discovered
+  - Migration generation: `cd packages/opencode && bun drizzle-kit generate --name <name>`
+  - Drizzle generates `CREATE TABLE` without IF NOT EXISTS — must manually add after generation
+  - `blob()` columns in Drizzle map to SQLite `blob` type — suitable for gzip-compressed data
+  - `text({ mode: "json" })` stores JSON as text with automatic parse/stringify
+  - Timestamps helper from `@/storage/schema.sql` provides `time_created` and `time_updated` integer columns
+  - Existing tables export from `src/storage/schema.ts` — new table exports must be added here
+---
+
+## 2026-03-07 - US-006
+- Added `llmLog` field to `Config.Info` Zod schema in config.ts with 4 sub-fields: enabled, max_records, max_age_days, cleanup_interval_hours
+- All fields optional with defaults via `.optional().default(value)` pattern
+- Config accessible via `Config.get()` — the `llmLog` field is part of the Info schema which `.strict()` validates
+- Files changed: `src/config/config.ts`
+- **Learnings for future iterations:**
+  - Config fields use `.optional().default(value)` pattern — `.optional()` makes the field not required in input, `.default()` provides fallback in output
+  - The Info schema has `.strict()` — any unknown fields will cause validation errors
+  - Access pattern: `const config = await Config.get(); config.llmLog?.enabled` — the outer object is optional, inner fields have defaults when the object is provided
+  - Config segments don't need separate registration — just add to the Info schema and they're accessible via Config.get()
+---
+
+## 2026-03-07 - US-007
+- Added `step.finished` to `SessionLifecycleEvent` enum in hooks/index.ts
+- Emitted `HookChain.execute("session-lifecycle", ...)` with `step.finished` event in processor.ts finish-step case, after all existing processing (usage calc, message update, compaction check)
+- Data payload includes: usage (tokens + cost), finishReason, model (Provider.Model), assistantMessage reference
+- Fire-and-forget with `.catch(() => {})` — lifecycle hooks must not block the stream processing loop
+- Files changed: `src/session/hooks/index.ts`, `src/session/processor.ts`
+- **Learnings for future iterations:**
+  - Session-lifecycle events are fire-and-forget: use `HookChain.execute(...).catch(() => {})` to avoid blocking the main loop
+  - The `usage` object from `Session.getUsage()` contains `{ tokens: { input, output, reasoning, cacheRead, cacheWrite }, cost }` — this is the complete usage data for the step
+  - `value.finishReason` in the finish-step case is the AI SDK finish reason (e.g., "stop", "tool-calls", "length")
+  - `input.model` is the full `Provider.Model` object with providerID, modelID, cost info, etc.
+---
+
+## 2026-03-07 - US-008
+- Created `src/log/capture.ts` with `LlmLogCapture` namespace
+- Registered pre-llm hook 'llm-log-capture' at priority 999 (last to execute)
+- Hook creates `llm_log` record (session_id, agent, model, provider, variant, time_start, status='pending')
+- Hook creates `llm_log_request` record with gzip-compressed system_prompt and messages via `Bun.gzipSync()`
+- Stores current llm_log_id in `Instance.state()` Map keyed by sessionID for cross-chain access
+- Skips entirely when `llmLog.enabled` is false (zero overhead)
+- Added "log" prefix to `Identifier` prefixes in `src/id/id.ts`
+- Registered `LlmLogCapture.register()` in `src/session/hooks/register.ts`
+- Files changed: `src/log/capture.ts` (new), `src/id/id.ts`, `src/session/hooks/register.ts`
+- **Learnings for future iterations:**
+  - `Identifier` prefixes need a new entry for each table domain — added `log: "log"` for llm_log tables
+  - `Database.use((db) => { ... })` is the standard pattern for synchronous DB operations; it auto-handles transaction context
+  - `Bun.gzipSync()` accepts `Buffer` input — use `Buffer.from(string)` to convert
+  - `Config.get()` is async — hooks are async so this is fine
+  - `LlmLogCapture.getCurrentLogId(sessionID)` exported for cross-chain access (US-009, US-010, US-011)
+  - Provider extraction from model string: `ctx.model.split("/")[0]` — model IDs typically formatted as `provider/model-name`
+---
+
+## 2026-03-07 - US-009
+- Registered session-lifecycle hook `llm-log-response-capture` at priority 999, listening for `step.finished` event
+- Writes `llm_log_response` record: completion_text extracted from assistant message parts, tool_calls JSON, gzip-compressed raw_response metadata, error JSON
+- Writes `llm_log_tokens` record: input_tokens, output_tokens, reasoning_tokens, cache_read/write_tokens, cost (stored as microdollars via `Math.round(cost * 1_000_000)`)
+- Updates `llm_log` main record: time_end, duration_ms, status (success/error/aborted)
+- Changed `currentLogId` Instance.state from `Map<string, string>` to `Map<string, { logId, timeStart }>` to avoid a DB subquery for duration calculation
+- Skips when `llmLog.enabled` is false
+- Files changed: `src/log/capture.ts`
+- **Learnings for future iterations:**
+  - `step.finished` data payload: `{ usage: { cost, tokens: { total, input, output, reasoning, cache: { write, read } } }, finishReason, model, assistantMessage }`
+  - `assistantMessage.parts` is where completion text and tool calls live — iterate parts by type ("text", "tool-invocation"/"tool-call")
+  - Cost from `Session.getUsage()` is a float in dollars — multiply by 1M and round for integer storage in microdollars
+  - Storing `timeStart` alongside `logId` in Instance.state avoids an extra DB read when computing duration_ms
+  - finishReason mapping: "error" → "error", "abort" → "aborted", everything else → "success"
+---
+
+## 2026-03-07 - US-010
+- Registered pre-tool hook `llm-log-tool-start` at priority 999 that inserts `llm_log_tool_call` record with call_id, tool_name, input args, time_start, status='running'
+- Registered post-tool hook `llm-log-tool-finish` at priority 0 that updates the record with output, title, duration_ms, status='success', output_bytes
+- Added `metadata: { callID }` to all 4 PreToolContext/PostToolContext constructions in prompt.ts (built-in + MCP, pre + post)
+- Used `toolCallStartState` Instance.state Map keyed by `${sessionID}:${callID}` for duration tracking across pre/post hooks
+- Post-tool hook uses `and()` with `eq()` on llm_log_id + call_id + status='running' to find the correct record to update
+- Files changed: `src/log/capture.ts`, `src/session/prompt.ts`
+- **Learnings for future iterations:**
+  - callID (AI SDK toolCallId) is available in prompt.ts via `ctx.callID` for built-in tools and `opts.toolCallId` for MCP tools
+  - To pass data from prompt.ts to hooks, use the `metadata` field on PreToolContext/PostToolContext — it's designed for cross-chain state
+  - Pre-tool and post-tool hooks need a shared key to correlate start/finish — `${sessionID}:${callID}` works when callID is available, falls back to toolName
+  - `and()` from drizzle-orm combines multiple conditions in WHERE clauses
+---
+
+## 2026-03-07 - US-011
+- Modified `HookChain.execute()` in hooks/index.ts to add per-hook instrumentation: measures duration_ms via `performance.now()`, detects modified fields via shallow reference comparison of context keys before/after
+- Created `src/log/log-state.ts` as shared state module to avoid circular imports between `hooks/index.ts` and `capture.ts`
+- Updated `capture.ts` to import `currentLlmLogState` and `getCurrentLogId` from `log-state.ts` instead of defining locally
+- Instrumentation writes to `llm_log_hook` table: hook_name, chain_type, priority, modified_fields (JSON string array), duration_ms
+- Skips instrumentation when `llmLog.enabled` is false or no active llm_log_id exists for the session
+- All DB writes wrapped in try/catch to avoid breaking hook execution on instrumentation failure
+- Files changed: `src/session/hooks/index.ts`, `src/log/capture.ts`, `src/log/log-state.ts` (new)
+- **Learnings for future iterations:**
+  - Circular import hazard between hooks/index.ts and capture.ts: both need access to the same Instance.state Map — solved by extracting to `log-state.ts`
+  - `Instance.state()` creates per-instance singletons keyed by factory function reference — calling it from different modules with different factory functions creates separate Maps
+  - `performance.now()` provides sub-millisecond precision for hook duration tracking
+  - Shallow comparison for modified_fields: snapshot `Object.keys()` values before hook, compare references after — no deep diff needed per spec
+  - Re-exporting imports inside TypeScript namespaces (`export { importedName }`) doesn't work — use a wrapper function instead
+---
+
+## 2026-03-07 - US-012
+- Created `src/log/query.ts` with `LlmLog` namespace containing `list()` and `get()` functions
+- `LlmLog.list(filters)` — paginated list with filters: session_id, agent, model, provider, time_range, status. Uses explicit column selection to exclude blob columns for performance. Returns `{ items, total }`
+- `LlmLog.get(id)` — full detail with decompressed system_prompt, messages, raw_response (Bun.gunzipSync), plus joined tool_calls, hooks, annotations
+- Filters validated with Zod schema (`ListFilters`)
+- Uses Drizzle query builder with `sql<number>` template for count aggregation
+- Files changed: `src/log/query.ts` (new)
+- **Learnings for future iterations:**
+  - `z.object({...}).default({})` causes type issues with tsgo — use `.optional()` instead and handle undefined at call site
+  - Drizzle `sql<number>\`count(*)\`` template literal for aggregation count queries
+  - Blob columns (system_prompt, messages, raw_response) must be explicitly excluded from list queries — use `.select({...})` with specific columns instead of `.select()`
+  - `Bun.gunzipSync()` needs `Buffer.from(value as ArrayBuffer)` when reading blob columns from Drizzle (they come as ArrayBuffer)
+  - `NotFoundError` from `../storage/db` is the standard error for missing records
+---
+
+## 2026-03-07 - US-013
+- Added `LlmLog.stats(filters)` — aggregated token totals, cost totals, avg response time with grouping by model/agent/session/hour/day
+- Added `LlmLog.analyze(filters)` — optimization suggestions: top-10 largest tool outputs, cache hit rate, repeated context ratio, high-cost model usage detection, reasoning token ratio
+- Each suggestion has: category, description, impact (tokens/cost), recommended_action
+- Both functions share `buildStatsConditions()` helper for consistent filter application
+- Filters validated with Zod schemas (`StatsFilters`, `AnalyzeFilters`)
+- Files changed: `src/log/query.ts`
+- **Learnings for future iterations:**
+  - `sum`, `avg`, `count` are exported from `drizzle-orm` (re-exported via `../storage/db`) but raw `sql<number>` templates with `coalesce()` are more reliable for nullable aggregations
+  - For time-based grouping in SQLite, use integer division: `time_start / 3600000 * 3600000` for hourly, `/ 86400000 * 86400000` for daily
+  - `innerJoin` vs `leftJoin`: use `innerJoin` when you only want records that have matching token data; `leftJoin` for summary that includes records without tokens
+  - `.having(sql\`count(*) > N\`)` works with Drizzle's query builder for post-GROUP BY filtering
+  - Cost is stored in microdollars (integer) — divide by 1_000_000 for display in suggestions
+---
+
+## 2026-03-07 - US-014
+- Added `LlmLog.annotate(llmLogId, input)` — creates annotation with type (hallucination/quality/note), content, and optional marked_text. Validates llm_log exists first.
+- Added `LlmLog.deleteAnnotation(annotationId)` — deletes single annotation by ID. Throws NotFoundError if missing.
+- Added `LlmLog.cleanup(options)` — deletes records by max_age_days first, then by max_records. Annotated records protected unless force:true. Records older than 2x max_age_days deleted even if annotated (without force). Cascade deletes child records.
+- Added `CleanupResult` interface tracking deleted_by_age, deleted_by_count, total_deleted, protected_count
+- Imported `Identifier` for annotation ID generation, `inArray` from drizzle-orm for batch operations
+- Files changed: `src/log/query.ts`
+- **Learnings for future iterations:**
+  - `.run()` on Drizzle delete returns void (not a result with `.changes`) — count records before deleting instead
+  - `CleanupOptions.parse(options)` with `.optional()` returns `undefined` when no input — destructure with `parsed?.field` pattern
+  - `countWhere` helper defined inside `Database.use()` callback captures `db` from closure — don't pass `db` as argument
+  - `sql.join(items, separator)` for building NOT IN clauses: `sql\`\${col} NOT IN (\${sql.join(ids.map(id => sql\`\${id}\`), sql\`,\`)})\``
+  - `inArray()` from drizzle-orm works for WHERE IN clauses on arrays of string IDs
+---
+
+## 2026-03-07 - US-015
+- Implemented auto cleanup scheduler using existing `Scheduler` namespace pattern
+- Created `src/log/scheduler.ts` with `LlmLogScheduler` namespace that registers a periodic cleanup task
+- Uses `Scheduler.register()` with `scope: "instance"` and interval from `config.llmLog.cleanup_interval_hours`
+- Cleanup task re-reads config on each run (respects runtime config changes), calls `LlmLog.cleanup()` with config values
+- Added `await LlmLogScheduler.init()` to `src/project/bootstrap.ts`
+- Skips registration entirely when `llmLog.enabled` is false
+- Files changed: `src/log/scheduler.ts` (new), `src/project/bootstrap.ts`
+- **Learnings for future iterations:**
+  - `Scheduler` namespace in `src/scheduler/index.ts` is the standard way to run periodic background tasks — use `Scheduler.register({ id, interval, run, scope })`
+  - `scope: "instance"` runs per-directory, `scope: "global"` runs once across all instances
+  - `Scheduler.register()` runs the task immediately on registration, then at the interval — first cleanup happens at startup
+  - Background task init calls go in `src/project/bootstrap.ts` alongside `Snapshot.init()` and `Truncate.init()`
+  - `timer.unref()` is called internally by Scheduler so intervals don't keep the process alive
+---
+
+## 2026-03-07 - US-016
+- Created `src/log/server.ts` with `LogServer` namespace using `Bun.serve()`
+- API routes: GET /api/logs (list), GET /api/logs/stats, GET /api/logs/analyze, GET /api/logs/:id (detail) — static paths matched before :id param
+- Routes: POST /api/logs/:id/annotations, DELETE /api/logs/annotations/:id, POST /api/logs/cleanup, GET /api/health
+- CORS headers on all responses for localhost dev mode
+- Default port 19836, auto-increment when occupied (up to 10 attempts)
+- Static file serving with SPA fallback (serves index.html for non-file paths)
+- Fallback HTML page when no static assets available
+- Files changed: `src/log/server.ts` (new)
+- **Learnings for future iterations:**
+  - `Bun.serve()` returns a server with `.port` that may be `number | undefined` — use fallback `server.port ?? port`
+  - Route matching order matters: `/api/logs/stats` and `/api/logs/analyze` must be checked before `/api/logs/:id` regex to avoid conflicts
+  - `Bun.file(path).exists()` is async — use in static file serving
+  - SPA fallback: serve `index.html` for any non-API, non-file path to support client-side routing
+  - `server.stop(true)` immediately closes all connections; without `true`, it waits for pending requests
+---
+
+## 2026-03-07 - US-017
+- Created `src/cli/cmd/log-viewer.ts` with `LogViewerCommand` using existing `cmd()` pattern
+- Supports `--port` (default 19836), `--no-open` (skip browser auto-open), `--reset` (clear all log data)
+- Starts `LogServer.start()` from `src/log/server.ts`, auto-opens browser via `open` package
+- Shows access URL and Ctrl+C hint using `UI.println()` with styled output
+- Added `LlmLog.reset()` function in `src/log/query.ts` — deletes all records from `llm_log` table (cascade deletes children)
+- Registered `LogViewerCommand` in `src/index.ts` command chain
+- Files changed: `src/cli/cmd/log-viewer.ts` (new), `src/log/query.ts`, `src/index.ts`
+- **Learnings for future iterations:**
+  - CLI commands follow `cmd()` pattern from `./cmd` — export a const with `command`, `describe`, `builder`, `handler`
+  - `open` package is already a dependency (used by `web.ts`) — no need to install
+  - yargs `--no-open` flag maps to `args.noOpen` (camelCase) in the handler
+  - `await new Promise(() => {})` is the pattern for keeping the process alive (used by web.ts)
+  - `LlmLog.reset()` only deletes from `LlmLogTable` — FK CASCADE handles child tables
+---
+
+## 2026-03-07 - US-018
+- Created `packages/log-viewer/` with Vite + React 19 + Tailwind CSS v4 + react-router v7
+- Set up 4 routes: `/` (LogListPage), `/logs/:id` (LogDetailPage), `/stats` (StatsPage), `/analyze` (AnalyzePage)
+- App shell with dark-themed navigation header using NavLink with active state styling
+- Layout component with `Outlet` for nested routing via `createBrowserRouter` API
+- Vite dev server proxies `/api` to `http://localhost:19836` (log-viewer API server)
+- Files changed: `packages/log-viewer/` (new package: package.json, tsconfig.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, src/Layout.tsx, src/env.d.ts, src/index.css, src/pages/*.tsx), `bun.lock`
+- **Learnings for future iterations:**
+  - Monorepo has multiple `@types/react` versions (18.0.25, 18.3.x, 19.x) — TypeScript resolves react types from react-router's directory and finds the wrong version. Fix: add `"react": ["./node_modules/@types/react"]` path mapping in tsconfig.json
+  - `react-router` v7 is the primary package; `react-router-dom` is a backwards-compat wrapper. Import everything from `react-router`
+  - Use `createBrowserRouter([...])` + `<RouterProvider router={router} />` pattern instead of `<BrowserRouter><Routes>` — better types and data loading
+  - Tailwind CSS v4 uses `@import "tailwindcss"` in CSS and `@tailwindcss/vite` plugin — no `tailwind.config.ts` file needed
+  - `NavLink`'s `end` prop needed on `/` route to prevent it from matching all paths
+  - Vite proxy config in `vite.config.ts` avoids CORS issues during dev
+---
+
+## 2026-03-07 - US-019
+- Implemented LogListPage with paginated table of log entries and filter panel
+- Enhanced `LlmLog.list()` query to LEFT JOIN `llm_log_tokens` to include input_tokens, output_tokens, cost in list results
+- Table columns: time, agent, model, status, input tokens, output tokens, cost, duration
+- Filter panel with text inputs for session_id, agent, model, provider, status with Apply/Clear buttons
+- Pagination with Prev/Next buttons, URL search params sync for shareable URLs
+- Click row navigates to `/logs/:id` detail page
+- Files changed: `packages/log-viewer/src/pages/LogListPage.tsx`, `packages/opencode/src/log/query.ts`
+- **Learnings for future iterations:**
+  - List API originally didn't include token data — added LEFT JOIN to llm_log_tokens to get input_tokens, output_tokens, cost without loading blob columns
+  - Cost is stored as microdollars (integer) in DB — divide by 1_000_000 for display as dollars
+  - `useSearchParams` from react-router v7 for URL query state sync — use `{ replace: true }` to avoid polluting browser history
+  - Tailwind `tabular-nums` class aligns numeric columns nicely
+  - Manual browser verification needed (no browser testing tools configured)
+---
+
+## 2026-03-07 - US-020
+- Implemented full LogDetailPage with 5 tabs: Overview, Request, Response, Tools, Hooks
+- Overview tab: left-right grid with request metadata (key-value table) and token usage summary
+- Request tab: collapsible system prompt, chat-bubble messages (color-coded by role: user/assistant/tool/system), JSON tree for tool schemas, key-value table for provider options
+- Response tab: completion text, tool calls from response, token detail table with all categories, error panel in red
+- Tools tab: expandable tool call cards with name, status, duration, output bytes; expanded view shows input/output JSON with collapsible tree viewer
+- Hooks tab: grouped by chain_type (pre-llm/pre-tool/post-tool/session-lifecycle), table with hook name, priority, modified fields as tags, duration
+- Reusable components: JsonTree (collapsible JSON viewer), CollapsibleSection, MessageBubble, KeyValueTable, ToolCallCard
+- Files changed: `packages/log-viewer/src/pages/LogDetailPage.tsx`
+- **Learnings for future iterations:**
+  - TypeScript strict mode doesn't allow destructuring `[key, value]` from `.map()` on `any[][]` — use `entry[0]`/`entry[1]` access instead
+  - `modified_fields` from the API may be a JSON string or already parsed array — handle both cases with try/catch fallback
+  - Chat bubble role colors: blue=user, emerald=assistant, amber=tool, purple=system — consistent with common LLM UI conventions
+  - `tabular-nums` Tailwind class essential for aligning numeric columns in tables
+  - Manual browser verification needed (no browser testing tools configured)
+---
+
+## 2026-03-07 - US-021
+- Implemented StatsPage with summary cards and 4 chart/table views
+- Summary cards: total requests, total tokens (in/out), total cost, avg tokens/request
+- Line chart: token usage & cost over time (hourly/daily) with dual Y-axes (tokens left, cost right)
+- Bar chart: token consumption by model (input vs output stacked)
+- Pie chart: token distribution by agent with percentage labels
+- Session table: per-session token totals, request count, cost, avg duration
+- All views share a time range filter (1h/6h/24h/7d/30d/all)
+- Each chart component fetches its own data with the appropriate `group_by` parameter
+- Installed `recharts@3.8.0` as dependency
+- Files changed: `packages/log-viewer/src/pages/StatsPage.tsx`, `packages/log-viewer/package.json`, `bun.lock`
+- **Learnings for future iterations:**
+  - Recharts `Tooltip` `formatter` and `labelFormatter` callbacks have loose types — use `(value) => ...` without explicit type annotations and cast with `Number(value)` / `String(label)` inside
+  - Recharts `Pie` `label` callback: `percent` can be undefined — use `(percent ?? 0)`
+  - Dual Y-axis pattern: use `yAxisId` on both `<YAxis>` and `<Line>` to associate them
+  - Cost is stored as microdollars (integer) in the API — divide by 1_000_000 for display
+  - Time grouping returns timestamps as strings — sort numerically with `Number(a.group)` for correct time ordering
+  - Manual browser verification needed (no browser testing tools configured)
+---
+
+## 2026-03-07 - US-022
+- Implemented AnalyzePage with categorized optimization suggestion cards, summary metrics, and top large tool outputs table
+- Summary metrics section: cache hit rate, reasoning token ratio, and issues count with threshold indicators
+- Suggestion cards: color-coded by category (oversized tool output=red, cache hit rate=amber, repeated context=orange, high-cost model=purple, reasoning ratio=blue), each showing description, impact estimate (tokens/cost), and recommendation
+- Top large tool outputs table: ranked list with tool name, output size, approximate token impact, and link to log detail page
+- Export JSON button downloads full analysis result as a dated JSON file
+- Fetches data from GET /api/logs/analyze
+- Files changed: `packages/log-viewer/src/pages/AnalyzePage.tsx`
+- **Learnings for future iterations:**
+  - `URL.createObjectURL()` + programmatic `<a>` click is the standard pattern for client-side JSON export/download
+  - Category config map with label/color/icon is cleaner than inline conditionals for styling different suggestion types
+  - Cost impact from analyze API is in microdollars (same as other endpoints) — use formatCost with /1_000_000
+  - Tool output token estimate: ~bytes/4 (rough byte-to-token ratio)
+  - Manual browser verification needed (no browser testing tools configured)
+---
+
+## 2026-03-07 - US-023
+- Added "Annotations" tab to LogDetailPage with full annotation CRUD
+- Text selection on completion text shows floating toolbar with 3 annotation types: hallucination (red), quality (yellow), note (blue)
+- Creating annotation sends POST /api/logs/:id/annotations with type, content, and marked_text
+- Annotations overlay on completion text as colored highlights with tooltip showing type and content
+- View existing annotations in a list with type badge, content, marked text preview, timestamp
+- Delete annotations via DELETE /api/logs/annotations/:id
+- Data refresh after create/delete uses lightweight re-fetch (no loading spinner)
+- Optional note input appears when text is selected for annotation context
+- Files changed: `packages/log-viewer/src/pages/LogDetailPage.tsx`
+- **Learnings for future iterations:**
+  - `AnnotationToolbar` uses `fixed` positioning with `window.scrollY` offset for correct placement relative to selection
+  - Text highlight segments: build markers array from annotations' `marked_text` positions in completion text, sort by start, skip overlapping
+  - `useCallback` for `refreshData` avoids full loading state — just silently re-fetches and updates state
+  - `window.getSelection()?.removeAllRanges()` clears selection after annotation is created for clean UX
+  - Manual browser verification needed (no browser testing tools configured)
+---
+
+## 2026-03-07 - US-024
+- Added "Diff" tab to LogDetailPage showing LLM completion text side-by-side with actual tool call inputs/outputs
+- `buildDiffPairs()` associates tool calls with completion text segments by searching for tool name mentions and extracting surrounding context (200 chars before, up to 500 chars after or next paragraph break)
+- Auto-detects potential hallucinations: tool call failed but completion text doesn't mention failure/error keywords
+- `DiffPairCard` component renders left-right split: completion segment (left) vs actual tool input + output (right)
+- Hallucination banner at top shows count of detected issues
+- Failed tool outputs displayed with red background for visual distinction
+- Files changed: `packages/log-viewer/src/pages/LogDetailPage.tsx`
+- **Learnings for future iterations:**
+  - Tool name matching in completion text: try variants (underscores → spaces, hyphens → spaces) for better coverage
+  - Segment extraction: `lastIndexOf("\n", bestIdx - 200)` finds a clean line boundary for context start
+  - Hallucination heuristic: regex for failure keywords `/\b(fail|error|issue|problem|couldn't|unable|sorry)\b/i` — simple but effective for flagging
+  - `&apos;` needed for apostrophe in JSX text to satisfy some linters
+  - Manual browser verification needed (no browser testing tools configured)
+---
+
+## 2026-03-07 - US-025
+- Updated `build.ts` to build log-viewer package before CLI binary compilation, collect dist/ files as base64, inject via `OPENCODE_LOG_VIEWER_ASSETS` define
+- Updated `server.ts` to serve embedded assets from memory: `getEmbeddedAssets()` lazily decodes base64 to `Uint8Array` and caches; `serveEmbeddedAsset()` serves with correct content types and SPA fallback
+- Embedded assets take priority over filesystem `staticDir` (production mode), filesystem preserved as fallback (dev mode)
+- No changes needed to `log-viewer.ts` CLI command — it already calls `LogServer.start()` without `staticDir`, and embedded assets are auto-detected
+- Files changed: `packages/opencode/script/build.ts`, `packages/opencode/src/log/server.ts`
+- **Learnings for future iterations:**
+  - Build-time defines follow `declare const NAME: Type | undefined` pattern in source, `NAME: JSON.stringify(value)` in build.ts
+  - `Uint8Array` is not assignable to `BodyInit` in strict TypeScript — use `.buffer as ArrayBuffer` for `new Response()`
+  - Base64 encoding adds ~33% overhead but is simple and works with `JSON.stringify()` for the define mechanism
+  - `Buffer.from(base64String, "base64")` returns a `Buffer` (which extends `Uint8Array`) — works for both storage and serving
+  - Recursive `collectAssets()` function handles nested dist/ directory structure (e.g., `assets/` subfolder)
+  - Content type mapping by file extension is sufficient for Vite build output (html, js, css, and common web assets)
+---

@@ -89,11 +89,31 @@ export namespace Config {
         const url = key.replace(/\/+$/, "")
         process.env[value.key] = value.token
         log.debug("fetching remote config", { url: `${url}/.well-known/opencode` })
-        const response = await fetch(`${url}/.well-known/opencode`)
-        if (!response.ok) {
-          throw new Error(`failed to fetch remote config from ${url}: ${response.status}`)
+        let response: Response
+        try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 10000)
+          response = await fetch(`${url}/.well-known/opencode`, { signal: controller.signal })
+          clearTimeout(timeout)
+        } catch (e) {
+          if (e instanceof Error && e.name === "AbortError") {
+            log.error("wellknown fetch timeout", { url })
+          } else {
+            log.error("wellknown fetch failed", { url, error: e instanceof Error ? e.message : String(e) })
+          }
+          continue
         }
-        const wellknown = (await response.json()) as any
+        if (!response.ok) {
+          log.error("wellknown fetch returned error", { url, status: response.status })
+          continue
+        }
+        let wellknown: any
+        try {
+          wellknown = await response.json()
+        } catch {
+          log.error("wellknown returned invalid JSON", { url })
+          continue
+        }
         const remoteConfig = wellknown.config ?? {}
         // Add $schema to prevent load() from trying to write back to a non-existent file
         if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
