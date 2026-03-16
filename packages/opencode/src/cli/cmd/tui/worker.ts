@@ -3,9 +3,9 @@ import { Server } from "@/server/server"
 import { Log } from "@/util/log"
 import { Instance } from "@/project/instance"
 import { Config } from "@/config/config"
-import { Flag } from "@/flag/flag"
 import { registerAllHooks } from "@/session/hooks/register"
 import { Lockfile } from "@/server/lockfile"
+import { Lifecycle } from "@/server/lifecycle"
 import type { BunWebSocketData } from "hono/bun"
 
 await Log.init({
@@ -31,7 +31,7 @@ process.on("uncaughtException", (e) => {
   })
 })
 
-// Parse --mode argument: "auto" (TUI-launched detached) or "serve" (opencode serve)
+// Parse CLI arguments
 const mode = (() => {
   const idx = process.argv.indexOf("--mode")
   if (idx === -1 || idx + 1 >= process.argv.length) return undefined
@@ -45,52 +45,64 @@ if (!mode) {
   process.exit(1)
 }
 
+const hostname = (() => {
+  const idx = process.argv.indexOf("--hostname")
+  if (idx === -1 || idx + 1 >= process.argv.length) return "127.0.0.1"
+  return process.argv[idx + 1]
+})()
+
+const port = (() => {
+  const idx = process.argv.indexOf("--port")
+  if (idx === -1 || idx + 1 >= process.argv.length) return 0
+  return parseInt(process.argv[idx + 1], 10) || 0
+})()
+
 let server: Bun.Server<BunWebSocketData> | undefined
 
 // Start HTTP server and write lock file
 const dir = process.cwd()
-server = Server.listen({ port: 0, hostname: "127.0.0.1" })
-const port = server.port!
+server = Server.listen({ port, hostname })
+const bound = server.port!
 
 const ok = await Lockfile.create(dir, {
   pid: process.pid,
-  port,
+  port: bound,
   token: null,
   createdAt: Date.now(),
 })
 
 if (!ok) {
-  // Another Worker won the race — shut down
   Log.Default.info("lock file already exists, another worker is running")
   server.stop(true)
   process.exit(0)
 }
 
-Log.Default.info("worker started", { mode, pid: process.pid, port })
+Log.Default.info("worker started", { mode, pid: process.pid, port: bound, hostname })
 
-// Clean up lock file on exit signals
-const cleanup = async () => {
-  Log.Default.info("worker received exit signal, cleaning up")
+// Clean up and exit
+const shutdown = async () => {
+  Log.Default.info("worker shutting down")
   await Instance.disposeAll()
   if (server) server.stop(true)
   await Lockfile.remove(dir)
   process.exit(0)
 }
 
-process.on("SIGTERM", cleanup)
-process.on("SIGINT", cleanup)
+// Enable auto-exit lifecycle for auto mode
+if (mode === "auto") {
+  Lifecycle.enable(shutdown)
+}
+
+process.on("SIGTERM", shutdown)
+process.on("SIGINT", shutdown)
 
 // RPC exports retained for type compatibility but no longer used at runtime.
-// TUI connects via HTTP/SSE directly to the Worker's HTTP server.
 export const rpc = {
   async reload() {
     Config.global.reset()
     await Instance.disposeAll()
   },
   async shutdown() {
-    Log.Default.info("worker shutting down")
-    await Instance.disposeAll()
-    if (server) server.stop(true)
-    await Lockfile.remove(dir)
+    await shutdown()
   },
 }

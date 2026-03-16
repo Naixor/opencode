@@ -56,7 +56,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "This is the core architecture unification. After this, all TUI (local and remote) use the same HTTP/SSE path. sdk.tsx abstraction layer means TUI components should not need changes. Must preserve existing server.instance.disposed → bootstrap() chain in sync.tsx."
     },
     {
