@@ -42,6 +42,7 @@ import { errors } from "./error"
 import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
 import { GlobalRoutes } from "./routes/global"
+import crypto from "crypto"
 import { MDNS } from "./mdns"
 import { Lifecycle } from "./lifecycle"
 import { AuthToken } from "./auth-token"
@@ -566,11 +567,39 @@ export namespace Server {
             const remoteIP = c.req.header("X-Forwarded-For") ?? c.req.header("X-Real-IP") ?? "127.0.0.1"
             const directory = c.req.header("x-opencode-directory") ?? process.cwd()
 
-            const registration = Client.add({
-              directory,
-              type: clientType,
-              remoteIP,
-            })
+            // Reconnect token handling
+            const reconnectToken = c.req.header("X-OpenCode-Reconnect-Token")
+            let registration: ReturnType<typeof Client.add>
+
+            if (reconnectToken) {
+              const existing = Client.findByReconnectToken(reconnectToken)
+              if (existing) {
+                // Reconnect: reuse old clientID, cancel grace period, generate new token
+                Client.cancelGrace(existing)
+                const entry = Client.get(existing)!
+                const newToken = crypto.randomUUID()
+                Client.setReconnectToken(existing, newToken)
+                registration = {
+                  clientID: existing,
+                  reconnectToken: newToken,
+                  role: entry.role,
+                  ownerClientID: Client.ownerID(),
+                }
+              } else {
+                // Token expired/invalid — new client as observer
+                registration = Client.add({
+                  directory,
+                  type: clientType,
+                  remoteIP,
+                })
+              }
+            } else {
+              registration = Client.add({
+                directory,
+                type: clientType,
+                remoteIP,
+              })
+            }
 
             return streamSSE(c, async (stream) => {
               stream.writeSSE({
@@ -609,7 +638,7 @@ export namespace Server {
                   clearInterval(heartbeat)
                   unsub()
                   Lifecycle.disconnect()
-                  Client.remove(registration.clientID)
+                  Client.disconnect(registration.clientID)
                   resolve()
                   log.info("event disconnected", { clientID: registration.clientID })
                 })

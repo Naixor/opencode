@@ -159,7 +159,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Core client infrastructure. server.connected stays as connection-level inline event (not broadcast). client.connected/disconnected are broadcast-level events. Reconnect token and grace period logic is in next story. Non-persisted state update_seq counters are simple in-memory integers, incremented on each change."
     },
     {

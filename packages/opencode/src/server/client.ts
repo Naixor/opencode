@@ -73,8 +73,35 @@ export namespace Client {
     return { clientID, reconnectToken, role, ownerClientID: owner }
   }
 
-  /** Remove a client. */
+  const graceTimers = new Map<string, Timer>()
+
+  /** Start a grace period for a disconnected client. If no reconnect within TIMEOUT, fully remove. */
+  export function disconnect(clientID: string) {
+    const entry = clients.get(clientID)
+    if (!entry) return
+
+    log.info("client disconnected, starting grace period", { clientID, timeout: TIMEOUT })
+
+    // Start grace period timer
+    const timer = setTimeout(() => {
+      graceTimers.delete(clientID)
+      remove(clientID)
+    }, TIMEOUT)
+    graceTimers.set(clientID, timer)
+  }
+
+  /** Cancel grace period for a reconnecting client. */
+  export function cancelGrace(clientID: string) {
+    const timer = graceTimers.get(clientID)
+    if (timer) {
+      clearTimeout(timer)
+      graceTimers.delete(clientID)
+    }
+  }
+
+  /** Fully remove a client (after grace period or immediate). */
   export function remove(clientID: string) {
+    cancelGrace(clientID)
     const entry = clients.get(clientID)
     if (!entry) return
     clients.delete(clientID)
