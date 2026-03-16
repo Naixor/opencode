@@ -10,11 +10,12 @@ import { useKeybind } from "../../context/keybind"
 import { useTerminalDimensions } from "@opentui/solid"
 import { SecurityConfig } from "@/security/config"
 
-const Title = (props: { session: Accessor<Session> }) => {
+const Title = (props: { session: Accessor<Session>; sessionID: string }) => {
   const { theme } = useTheme()
   return (
-    <text fg={theme.text}>
-      <span style={{ bold: true }}>#</span> <span style={{ bold: true }}>{props.session().title}</span>
+    <text fg={theme.text} wrapMode="none">
+      <span style={{ bold: true }}>#</span> <span style={{ bold: true }}>{props.session().title}</span>{" "}
+      <span style={{ fg: theme.textMuted }}>[{props.sessionID.substring(0, 8)}]</span>
     </text>
   )
 }
@@ -145,7 +146,7 @@ export function Header() {
           </Match>
           <Match when={true}>
             <box flexDirection={narrow() ? "column" : "row"} justifyContent="space-between" gap={1}>
-              <Title session={session} />
+              <Title session={session} sessionID={route.sessionID} />
               <box flexDirection="row" gap={1} flexShrink={0}>
                 <SecurityIndicator />
                 <ContextInfo context={context} cost={cost} />

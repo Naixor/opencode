@@ -177,13 +177,13 @@ export namespace LlmLog {
         let systemPrompt = ""
         let messages: any[] = []
         try {
-          systemPrompt = Bun.gunzipSync(Buffer.from(requestRow.system_prompt as ArrayBuffer)).toString()
+          systemPrompt = Buffer.from(Bun.gunzipSync(Buffer.from(requestRow.system_prompt as ArrayBuffer))).toString("utf-8")
         } catch {
           systemPrompt = "(decompression failed)"
         }
         try {
           messages = JSON.parse(
-            Bun.gunzipSync(Buffer.from(requestRow.messages as ArrayBuffer)).toString(),
+            Buffer.from(Bun.gunzipSync(Buffer.from(requestRow.messages as ArrayBuffer))).toString("utf-8"),
           )
         } catch {
           messages = []
@@ -208,7 +208,7 @@ export namespace LlmLog {
         if (responseRow.raw_response) {
           try {
             rawResponse = JSON.parse(
-              Bun.gunzipSync(Buffer.from(responseRow.raw_response as ArrayBuffer)).toString(),
+              Buffer.from(Bun.gunzipSync(Buffer.from(responseRow.raw_response as ArrayBuffer))).toString("utf-8"),
             )
           } catch {
             rawResponse = null
