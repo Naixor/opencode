@@ -1,94 +1,108 @@
 # Ralph Progress Log
-Started: Sat Mar 14 2026
+Started: Tue Mar 17 00:00:18 CST 2026
 ---
 
 ## Codebase Patterns
-- Typecheck for the main opencode package: `cd packages/opencode && bun run typecheck` (or `bun run typecheck` from repo root)
-- Git paths must be relative to repo root (`/Users/bytedance/GithubWorkspace/@Naixor/opencode`), not packages/opencode
-- Working directory may be `packages/opencode` due to turbo — always use absolute or repo-root-relative paths for git
-- `Identifier` prefixes must be registered in `src/id/id.ts` before using `Identifier.ascending(prefix)`
-- Drizzle migration generation: `cd packages/opencode && bun drizzle-kit generate --name <name>` — must manually add IF NOT EXISTS after
-- New `*.sql.ts` files auto-discovered by drizzle config; new table exports must be added to `src/storage/schema.ts`
-- Background periodic tasks use `Scheduler.register({ id, interval, run, scope })` from `src/scheduler/index.ts`
-- `BusEvent.define()` + `Bus.publish()` for broadcast events; `stream.writeSSE()` for connection-level inline events
-- SDK wrapper layer is `packages/sdk/js/v2/client.ts` — custom logic goes here, not in auto-generated gen/ directory
-- `sdk.tsx` handles SSE event processing; `sync.tsx` manages data sync and bootstrap
-- `worker.ts` has SSE reconnect loop (250ms fixed) that should be removed in favor of SDK exponential backoff
-- `createWorkerFetch()` and `createEventSource()` are the RPC code paths to remove
-- `SessionPrompt.state()` is Record<string, { abort, callbacks }> — assertNotBusy checks if sessionID exists in state
-- Session parent-child: child session prompts are server-initiated, not via client HTTP API
-- `Global.Path.data` gives XDG data home path for opencode — use for lock files and persistent data
-- Atomic file creation: use `fs.openSync()` with `O_WRONLY | O_CREAT | O_EXCL` flags, catch EEXIST
-- `Bun.file().text()` for reads, `node:fs` sync for atomic O_EXCL writes
-- `Filesystem.write()` helper exists for normal writes with mode support, but doesn't do atomic O_EXCL
-- Auth token: `AuthToken.set()` then middleware validates `Authorization: Bearer <token>` header
-- Client tracking: `Client.add()` on SSE connect, `Client.disconnect()` (grace period) on SSE abort
-- Lifecycle: `Lifecycle.enable(shutdown)` for auto-exit mode, `Lifecycle.connect()/disconnect()` for SSE tracking
-- Session.LockedError → 423 Locked response in server.ts onError handler
-- `sql\`update_seq + 1\`` in Drizzle `.set()` calls for atomic counter increment
+- TUI sync context is in `packages/opencode/src/cli/cmd/tui/context/sync.tsx`, web app sync is in `packages/app/src/context/sync.tsx` — they have different implementations
+- `Binary.search()` is the standard pattern for sorted array lookups across the TUI codebase (returns `{ found, index }`)
+- SolidJS `produce()` from `solid-js/store` is used for immutable-style draft mutations in store updates
+- `fullSyncedSessions` Set in TUI sync prevents redundant full syncs — only tracks completed full syncs, not SSE-partial population
+- Web app sync already calls `sync.session.sync()` unconditionally via `createEffect` — TUI was the only place with the guard bug
+- Message IDs are ULIDs — `lt()` on ID column gives chronological cursor-based pagination for free
+- `MessageV2.stream()` takes `{ sessionID, before? }` object — all callers must use object form
+- TUI scrollbox (`ScrollBoxRenderable`) has no onScroll callback — scroll is commanded via keybinds; check `scroll.y` after scroll commands to detect top
+- SDK generated types are in `packages/sdk/js/src/v2/gen/{sdk,types}.gen.ts` — update both when adding API params; also update `packages/sdk/openapi.json`
+- `Session.fork()` reads all messages from SQLite server-side — it's immune to client-side message limits and works correctly for remote-attached sessions
 
-## Mon Mar 16 2026 - US-001
-- Implemented Worker lock file module at `packages/opencode/src/server/lockfile.ts`
-- Files changed: `packages/opencode/src/server/lockfile.ts` (new)
-- Features:
-  - `Lockfile.Schema` — Zod schema with pid, port, token, createdAt
-  - `Lockfile.filepath(dir)` — path convention: `$XDG_DATA_HOME/opencode/<encoded-dir>/worker.lock`
-  - `Lockfile.create(dir, data)` — atomic creation with O_EXCL, permissions 0o600, returns false if exists
-  - `Lockfile.read(dir)` — reads and validates with Zod, returns undefined on failure
-  - `Lockfile.acquire(dir)` — reads + stale detection via kill -0, cleans up stale locks
-  - `Lockfile.remove(dir)` — deletes lock file, ignores if missing
-- **Learnings for future iterations:**
-  - `encode()` replaces `/` with `_` and truncates + SHA-256 suffix if over 200 bytes
-  - Lock file path uses `Global.Path.data` (xdg data home) not project directory
-  - `process.kill(pid, 0)` is the Node/Bun way to check if a process is alive (signal 0)
 ---
 
-## Mon Mar 16 2026 - US-002
-- Implemented Worker detached process launcher
+## 2026-03-17 - US-002
+- Removed `limit: 100` from `sdk.client.session.messages()` call in TUI sync so all messages are fetched
+- Server endpoint already supports unlimited fetch when no limit is specified (`Session.messages` iterates full stream)
+- Web app uses its own pagination approach with `prefetchChunk = 200` — left as-is since it has different architecture
 - Files changed:
-  - `packages/opencode/src/cli/cmd/tui/worker.ts` — added `--mode=auto|serve` parameter, detached process mode with lock file creation and signal handlers
-  - `packages/opencode/src/cli/cmd/tui/thread.ts` — check lock file for existing Worker, spawn detached Worker or connect to existing, added `spawnDetached()` and `waitForLockfile()` helpers
-  - `packages/opencode/src/cli/cmd/stop.ts` — new `opencode stop` command that reads lock file PID and sends SIGTERM
-  - `packages/opencode/src/index.ts` — registered StopCommand
+  - `packages/opencode/src/cli/cmd/tui/context/sync.tsx` (removed limit: 100)
 - **Learnings for future iterations:**
-  - Worker detached mode uses `Bun.spawn()` with `stdio: ["ignore", "ignore", "ignore"]` and `child.unref()` to fully detach
-  - Lock file polling uses exponential backoff (50ms → 500ms) with 10s timeout
-  - In detached mode, Worker handles its own SIGTERM/SIGINT for lock file cleanup
-  - External mode (--port/--hostname/--mdns) still uses Worker thread (not detached) for backward compat
-  - `server.port!` needs non-null assertion since Bun types mark it optional
+  - `Session.messages()` in `src/session/index.ts` uses `MessageV2.stream()` which loads all messages by default — limit is only applied client-side
+  - The web app (`packages/app`) has a completely different sync architecture with its own `fetchMessages` helper that takes a limit param and tracks `complete` status — changes there require different approach
+  - Server route at `GET /:sessionID/message` already accepts optional `limit` query param — no server changes needed
 ---
 
-## Mon Mar 16 2026 - US-003
-- Removed in-process RPC and unified to HTTP/SSE
-- Files changed: worker.ts (removed RPC, GlobalBus, event stream), thread.ts (removed createWorkerFetch, createEventSource), sdk.tsx (removed EventSource type, custom event source branch), app.tsx (removed events prop)
+## 2026-03-17 - US-001
+- Removed guard `if (!sync.data.message[sessionId]?.length)` in TUI session route so `sync.session.sync()` always runs on mount
+- Modified `sync.session.sync()` to merge fetched history with SSE-delivered messages using ID-based dedup instead of replacing
+- Fetched set is authoritative for ordering; SSE messages newer than last fetched message are appended
+- Files changed:
+  - `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx` (removed guard)
+  - `packages/opencode/src/cli/cmd/tui/context/sync.tsx` (merge logic in sync)
+- **Learnings for future iterations:**
+  - The web app (`packages/app`) has a completely separate sync implementation that doesn't use `fullSyncedSessions` — fixes may need to be applied in both places
+  - `Binary.search` returns `{ found: boolean, index: number }` — `index` is the insertion point when not found
+  - The `message.updated` SSE handler at lines 235-273 has a rolling window eviction (100 messages) — US-003 will address this
 ---
 
-## Mon Mar 16 2026 - US-004
-- Worker lifecycle modes and idle watchdog
-- Files: lifecycle.ts (new), worker.ts (--mode, --hostname, --port), serve.ts (lock file, mutual exclusion, auth)
+## 2026-03-17 - US-003
+- Raised in-memory message eviction threshold from 100 to 500 in the `message.updated` SSE handler
+- The eviction logic itself is preserved as a safety bound — it now only triggers at 500+ messages
+- Files changed:
+  - `packages/opencode/src/cli/cmd/tui/context/sync.tsx` (line 254: changed `> 100` to `> 500`)
+- **Learnings for future iterations:**
+  - The eviction code also deletes associated parts from the `part` store when evicting a message — any future changes to eviction must account for this coupling
+  - The web app (`packages/app`) has its own separate message management and may have a similar threshold — check independently if needed
 ---
 
-## Mon Mar 16 2026 - US-005 + US-006
-- Auth token middleware and local TUI auto-auth
-- Files: auth-token.ts (new), server.ts (Bearer middleware), worker.ts (auth token generation), thread.ts (lock file token), attach.ts (--auth-token), SDK v2/client.ts (authToken param)
+## 2026-03-17 - US-004
+- Added cursor-based pagination (`before` parameter) to the session messages API
+- Changed `MessageV2.stream()` from accepting a single `sessionID` string to an object `{ sessionID, before? }`
+- When `before` is provided, adds `WHERE id < :before` via drizzle's `lt()` and `and()` operators
+- Server route now accepts optional `before` query parameter alongside existing `limit`
+- `Session.messages()` passes `before` through to `MessageV2.stream()`
+- Updated all 5 callers of `MessageV2.stream()` to use the new object signature
+- Files changed:
+  - `packages/opencode/src/session/message-v2.ts` (stream signature + cursor WHERE clause)
+  - `packages/opencode/src/session/index.ts` (messages fn accepts/passes before)
+  - `packages/opencode/src/server/routes/session.ts` (before query param)
+  - `packages/opencode/src/session/prompt.ts` (3 call sites updated to object form)
+  - `packages/opencode/src/share/share-next.ts` (1 call site updated)
+  - `packages/opencode/src/tool/plan.ts` (1 call site updated)
+- **Learnings for future iterations:**
+  - `MessageV2.stream()` is used in 5 places across the codebase — changing its signature requires updating all callers
+  - Drizzle operators (`lt`, `and`, `eq`, etc.) are re-exported from `@/storage/db` via `export * from "drizzle-orm"`
+  - The `fn()` helper wraps functions with Zod validation — changing from a scalar to an object schema is the clean way to add optional params
+  - Message IDs are string ULIDs, so `lt()` on `MessageTable.id` gives chronological ordering (ULIDs sort lexicographically by time)
 ---
 
-## Mon Mar 16 2026 - US-007 + US-008
-- update_seq DB migration and increment integration
-- Files: session.sql.ts (update_seq columns), migration (ALTER TABLE), session/index.ts (sql`update_seq + 1` on updates), message-v2.ts (updateSeq in schemas/fromRow)
+## 2026-03-17 - US-005
+- Added TUI scroll-to-top lazy loading for older messages
+- Added `loadOlder()` method to sync context that fetches paginated older messages via `sdk.client.session.messages({ sessionID, limit, before })` and prepends them
+- Added `checkScrollTop()` helper in session route that triggers `loadOlder` when scroll reaches top (scroll.y <= 0)
+- Wired `checkScrollTop()` into all upward scroll commands: page up, half page up, line up, first message, previous message
+- Added loading indicator ("Loading older messages…" with spinner) at top of scrollbox, shown via `loadingOlder` signal
+- Added `noMoreOlder` signal to prevent redundant fetches once all history is loaded; resets on session change
+- After prepending, scroll position is restored via `scroll.scrollTo(delta)` where delta = new scrollHeight - old scrollHeight
+- Updated SDK openapi.json, types.gen.ts, and sdk.gen.ts to include `before` query parameter on `session.messages` endpoint
+- Files changed:
+  - `packages/opencode/src/cli/cmd/tui/context/sync.tsx` (added `loadOlder` method)
+  - `packages/opencode/src/cli/cmd/tui/routes/session/index.tsx` (scroll-to-top detection, loading indicator, checkScrollTop wiring)
+  - `packages/sdk/openapi.json` (added `before` query param)
+  - `packages/sdk/js/src/v2/gen/sdk.gen.ts` (added `before` param to messages method)
+  - `packages/sdk/js/src/v2/gen/types.gen.ts` (added `before` to SessionMessagesData query type)
+- **Learnings for future iterations:**
+  - TUI scrollbox has no `onScroll` event — all scrolling is commanded programmatically via keybinds, so scroll-top detection must be added to each upward scroll command handler
+  - `ScrollBoxRenderable` exposes `.y` (current scroll offset), `.scrollHeight` (total content height), `.height` (viewport height), `.scrollTo(y)`, `.scrollBy(delta)`
+  - SDK has generated types that must be updated in 3 places: openapi.json (spec), types.gen.ts (TypeScript types), sdk.gen.ts (client methods + buildClientParams args)
+  - Scroll position restoration after prepending uses a setTimeout(50ms) to let the DOM update before reading new scrollHeight
+  - SolidJS `on()` helper for createEffect allows watching specific signals — used for resetting `noMoreOlder` when sessionID changes
 ---
 
-## Mon Mar 16 2026 - US-009..US-018
-- Client tracking, reconnect tokens, grace period, owner/observer model, takeover, activity heartbeat
-- Files: client.ts (new - full client state machine), server.ts (SSE client tracking, /clients, /instance/activity, /instance/takeover, clientID validation middleware), lifecycle.ts (TIMEOUT constant), prompt.ts (assertCanWrite, LockedError)
----
-
-## Mon Mar 16 2026 - US-019..US-026
-- SSE reconnect bootstrap, typing broadcast, owner recovery persistence
-- Files: sync.tsx (server.connected → bootstrap), sdk.tsx (ConnectionState signal), client.ts (typing event, persistOwner, loadPersistedOwner), server.ts (typing endpoint)
-- **Learnings:**
-  - `BusEvent.define()` auto-registers events for SSE broadcast
-  - Client module is singleton state — no Instance scoping needed
-  - LockedError (423) handled in server.ts onError handler
-  - Owner persistence uses simple JSON file in Global.Path.data
+## 2026-03-17 - US-006
+- Verified that Session.fork() already operates entirely server-side — reads ALL messages from SQLite via MessageV2.stream() with no limit or client-side dependency
+- Fork endpoint (POST /:sessionID/fork) copies all messages and parts with new IDs, remapping parentID references
+- TUI fork triggers (dialog-fork-from-timeline, dialog-message, --fork CLI flag) all go through sdk.client.session.fork() API call — no client-side message filtering
+- No code changes needed — fork correctly preserves full history regardless of client-side visibility
+- Files changed: none (verification only)
+- **Learnings for future iterations:**
+  - Session.fork() at src/session/index.ts:236 reads from DB not client store — it's inherently immune to client-side message limits
+  - Fork remaps message IDs (ascending ULIDs) and parentID references via an idMap — ordering is preserved
+  - The fork can be scoped to a point in time via optional `messageID` param — messages with ID >= messageID are excluded
 ---

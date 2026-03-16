@@ -1,455 +1,94 @@
 {
   "project": "OpenCode",
-  "branchName": "ralph/remote-attach-session-sharing",
-  "description": "Remote Attach Session Sharing - Multi-client collaboration with owner/observer roles, reconnect tokens, and unified TUI architecture",
+  "branchName": "ralph/remote-attach-history-restore",
+  "description": "Remote Attach Session History Restoration - Fix incomplete message history when attaching to remote sessions",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Worker lock file module",
-      "description": "As a developer, I need a lock file module that handles Worker discovery, creation, validation, and cleanup so that TUI and Worker processes can coordinate.",
+      "title": "Fix SSE race condition — always perform full sync on session entry",
+      "description": "As an observer attaching to a remote session, I want the full session history to load when I enter the session view, even if SSE events have already delivered some recent messages.",
       "acceptanceCriteria": [
-        "Create lock file module at packages/opencode/src/server/lockfile.ts",
-        "Path convention: $XDG_DATA_HOME/opencode/<dir-hash>/worker.lock where dir-hash encodes absolute path (/ replaced with _), truncated + SHA-256 suffix if over 255 bytes",
-        "Lock file format: JSON with pid, port, token, createdAt fields — validated with Zod schema",
-        "Lock file permissions set to 0600 (owner-only read/write)",
-        "Atomic creation using O_EXCL or equivalent to prevent TOCTOU races",
-        "Read function validates JSON structure and returns parsed lock data",
-        "Stale lock detection: kill -0 PID check, clean up if process not alive",
-        "Delete function for cleanup on Worker exit",
+        "sync.session.sync(sessionID) always runs when navigating to a session, regardless of whether store.message[sessionID] already has entries from SSE events",
+        "The sync merges fetched history with any SSE-delivered messages (no duplicates, no gaps) using message ID-based deduplication",
+        "fullSyncedSessions flag is only set after a successful full sync, not after partial SSE population",
+        "Existing local session navigation continues to work correctly (no regression)",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Pure utility module, no server/Worker changes yet. See PRD Technical Considerations → Lock File 规格 for full spec. Use Bun.file() for reads, node:fs for O_EXCL atomic write."
+      "notes": "The guard `if (!sync.data.message[sessionId]?.length)` causes the bug — SSE events populate messages before sync runs, so sync gets skipped. The fetched set is authoritative for ordering; SSE-delivered messages newer than the fetched set should be appended."
     },
     {
       "id": "US-002",
-      "title": "Worker detached process launcher",
-      "description": "As a developer, I need Worker to run as a detached background process so that TUI can exit without killing the server.",
+      "title": "Remove hard 100-message cap on initial sync",
+      "description": "As a user viewing any session (local or remote), I want to see all messages in the session history, not just the latest 100.",
       "acceptanceCriteria": [
-        "Worker starts as detached process via Bun.spawn() with detached: true and stdio: ignore, then calls process.unref() to ensure parent TUI process can exit cleanly",
-        "Worker accepts --mode=auto|serve startup parameter (auto for TUI-launched, serve for opencode serve)",
-        "Worker binds HTTP server to localhost:random-port, then atomically creates lock file with pid + port + token + createdAt",
-        "If lock file atomic creation fails (another Worker won the race), Worker closes its HTTP server and exits",
-        "TUI startup checks for existing lock file: if valid Worker running, connect to it; if stale, clean up and start new Worker",
-        "TUI waits for lock file to appear after spawning Worker, reads port and token from it",
-        "Worker registers SIGTERM/SIGINT handlers that clean up lock file before exit",
-        "opencode stop command reads lock file PID and sends SIGTERM",
+        "sync.session.sync() fetches all messages for the session (remove limit: 100 or use a sufficiently large default)",
+        "Server endpoint GET /session/:sessionID/message supports unlimited fetch when no limit is specified",
+        "Performance remains acceptable for sessions with up to 500 messages",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Modifies worker.ts to become a detached process model. TUI thread.ts connects via HTTP using lock file port. Does NOT yet remove RPC paths — that's the next story."
+      "notes": "Currently sdk.client.session.messages({ sessionID, limit: 100 }) hard-caps at 100. Check both the SDK call site and the server endpoint for the limit."
     },
     {
       "id": "US-003",
-      "title": "Remove in-process RPC and unify to HTTP/SSE",
-      "description": "As a developer, I need to remove the dual code paths (RPC + HTTP) so all TUI communication goes through HTTP/SSE uniformly.",
+      "title": "Remove rolling window eviction for active sessions",
+      "description": "As an observer watching an active session, I want new messages to accumulate without evicting old ones, so I can review the full conversation.",
       "acceptanceCriteria": [
-        "Remove createWorkerFetch() and createEventSource() in-process RPC code paths from thread.ts",
-        "Local TUI connects to Worker HTTP server via standard HTTP/SSE (same as remote attach)",
-        "sdk.tsx simplified to use only SSE path (remove custom event source branch)",
-        "Remove worker.ts redundant SSE reconnect loop (fixed 250ms retry) — SDK-side exponential backoff handles reconnection",
-        "Add .catch() protection around sdk.tsx's sdk.event.subscribe() call to prevent loop termination on subscribe errors",
-        "Preserve existing server.instance.disposed → bootstrap() trigger chain during RPC removal refactoring",
-        "Local TUI as first client connects via HTTP/SSE and becomes first attach client",
+        "The message.updated handler no longer evicts the oldest message when count exceeds 100",
+        "Raise the in-memory message threshold to 500 as a safety bound",
+        "Memory usage remains reasonable for sessions up to 500 messages",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "This is the core architecture unification. After this, all TUI (local and remote) use the same HTTP/SSE path. sdk.tsx abstraction layer means TUI components should not need changes. Must preserve existing server.instance.disposed → bootstrap() chain in sync.tsx."
+      "notes": "The message.updated event handler currently evicts the oldest message when the in-memory array exceeds 100. Raise to 500 as a safe upper bound until pagination is implemented."
     },
     {
       "id": "US-004",
-      "title": "Worker lifecycle modes and idle watchdog",
-      "description": "As a developer, I need Worker lifecycle rules so auto-launched Workers clean up when idle and serve-mode Workers persist.",
+      "title": "Add cursor-based pagination to session messages API",
+      "description": "As a developer, I need cursor-based pagination on the messages API so clients can lazily load older messages.",
       "acceptanceCriteria": [
-        "--mode=auto: Worker auto-exits when all clients disconnect and grace period (60s) expires with no reconnects",
-        "--mode=auto: Idle watchdog — if no active SSE connections AND no active sessions (busy/retry) for 5 minutes, Worker self-exits and cleans lock file",
-        "--mode=serve (opencode serve): Worker never auto-exits regardless of client connections; no idle watchdog",
-        "opencode serve runs Worker as foreground process (not detached), with its own SIGINT/SIGTERM handlers, writes lock file, listens on port",
-        "opencode serve supports --port parameter to specify a fixed port (e.g., opencode serve --port 8080); default is random port",
-        "Mutual exclusion: if lock file exists with live process, opencode serve exits with error; TUI connects to existing Worker",
-        "Worker accepts --hostname parameter to bind to specified address (default localhost); opencode serve supports --hostname 0.0.0.0 for network exposure",
-        "Define shared TIMEOUT constant (60_000ms) for reuse by later ownership stories",
+        "Server endpoint GET /session/:sessionID/message supports 'before' query parameter (message ID) for cursor-based pagination",
+        "When 'before' is provided, return messages with ID < before, ordered descending, limited to batch size",
+        "MessageV2.stream() or equivalent query adds WHERE id < :before clause when cursor provided",
+        "Endpoint continues to return all messages when neither limit nor before is specified",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Depends on US-002 (detached process model). Grace period timeout constant should be defined as a shared constant (TIMEOUT = 60_000) for reuse by later ownership stories. opencode serve is a foreground process (not detached) — distinct from TUI-launched detached Workers."
+      "notes": "Server-side only. MessageV2.stream() already loads from SQLite ordered by ID. Adding WHERE id < :before is straightforward. TUI scroll-to-top trigger is in the next story."
     },
     {
       "id": "US-005",
-      "title": "Auth token middleware for network exposure",
-      "description": "As a server admin, when I expose the server on the network via --hostname 0.0.0.0, I need auth middleware to prevent unauthorized access.",
+      "title": "TUI scroll-to-top lazy loading for older messages",
+      "description": "As a user viewing a session with hundreds of messages, I want to load older messages on demand when I scroll to the top of the message list.",
       "acceptanceCriteria": [
-        "When --hostname is not localhost/127.0.0.1/::1, server auto-generates a random UUID auth token and prints it to terminal",
-        "User can specify custom token via --auth-token <token> parameter",
-        "Auth token written to lock file (token field); when --hostname is localhost/127.0.0.1/::1, token field is null",
-        "Auth check implemented as Hono middleware, runs before any other route checks",
-        "Client sends token via Authorization: Bearer <token> header",
-        "Server validates token on all requests (SSE + REST); mismatch returns HTTP 401 Unauthorized",
-        "When --hostname 0.0.0.0, ALL connections (including local 127.0.0.1) require auth token — auth based on server bind hostname not client IP",
+        "TUI detects when the user scrolls to the top of the message list",
+        "Triggers sdk.client.session.messages({ sessionID, limit: 50, before: oldestMessageID }) to fetch older messages",
+        "A loading indicator appears while older messages are being fetched",
+        "Fetched older messages are prepended to the existing list without disrupting scroll position",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Focus on server-side middleware only. CLI parameter --auth-token for 'opencode attach' is handled in US-006."
+      "notes": "Depends on US-004 (server pagination). The TUI uses ink-based rendering. Scroll-to-top detection may require tracking viewport offset in the message list component."
     },
     {
       "id": "US-006",
-      "title": "Local TUI auto-auth and attach --auth-token",
-      "description": "As a user, local TUI should auto-authenticate via lock file token, and remote attach should support --auth-token parameter.",
+      "title": "Fork preserves full history for remote-attached sessions",
+      "description": "As a user who attaches remotely and then forks the session, I want the forked session to contain the complete message history.",
       "acceptanceCriteria": [
-        "Local TUI reads token from lock file automatically and passes it as Authorization: Bearer header (transparent to user)",
-        "opencode attach <url> supports --auth-token <token> CLI parameter for remote connections",
-        "SDK client wrapper (v2/client.ts) supports optional authToken parameter passed through to Authorization header",
-        "No modifications to auto-generated code (gen/ directory)",
+        "Session.fork() on the server always copies all messages regardless of client-side visibility",
+        "Verify fork works correctly when initiated by an observer-turned-owner",
+        "Fork does not depend on client-side message count — operates entirely on server-side data",
         "Typecheck passes"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "Depends on US-005 (auth middleware). Modifies thread.ts for local TUI and SDK wrapper for auth header injection."
-    },
-    {
-      "id": "US-007",
-      "title": "update_seq DB migration",
-      "description": "As a developer, I need update_seq columns on mutable entities so clients can detect stale data.",
-      "acceptanceCriteria": [
-        "Session table gets new update_seq integer column via DB migration (default value 0)",
-        "Message table gets new update_seq integer column via DB migration (default value 0)",
-        "Part table gets new update_seq integer column via DB migration (default value 0)",
-        "Migration uses IF NOT EXISTS pattern",
-        "Export updated table definitions from src/storage/schema.ts if needed",
-        "Generate Drizzle migration with: cd packages/opencode && bun drizzle-kit generate --name add-update-seq",
-        "Typecheck passes"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": "Session table has existing 'version' column storing software version string like '0.0.3' — cannot be reused. time_updated is millisecond timestamp which isn't monotonically incrementing for same-ms writes. This is schema-only — incrementing logic comes in next story."
-    },
-    {
-      "id": "US-008",
-      "title": "update_seq increment and API/SSE integration",
-      "description": "As a developer, I need update_seq to increment on every write and be included in API responses and SSE events.",
-      "acceptanceCriteria": [
-        "Each entity independently maintains its own update_seq (per-entity counter, not global)",
-        "Every write to session, message, and part tables increments update_seq",
-        "All REST API responses include entity's update_seq field",
-        "All SSE broadcast events (message.updated, session.status, etc.) include entity's update_seq field",
-        "After server restart, persisted entity update_seq recovered from DB (SELECT MAX(update_seq) FROM <table> WHERE id = ?)",
-        "Typecheck passes"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": "Depends on US-007 (migration). Non-persisted state (client list, ownership) will use server in-memory per-entity incrementing counters — added in later stories. This story touches every write path for session/message/part + all API responses + all SSE events — if too large for one iteration, consider splitting into 'session update_seq' and 'message/part update_seq'."
-    },
-    {
-      "id": "US-009",
-      "title": "Client tracking and server.connected event extension",
-      "description": "As a server, I need to track connected clients with unique IDs so that ownership and reconnection can work.",
-      "acceptanceCriteria": [
-        "SSE /event connection assigns unique clientID (UUID) to each client",
-        "Server maintains in-memory ConnectedClients Map: clientID → { directory, connectedAt, reconnectToken, role, type, remoteIP }",
-        "Client type detected from X-OpenCode-Client-Type header (tui or cli); remote IP extracted from request",
-        "server.connected inline event properties extended with: clientID, reconnectToken, role ('owner' or 'observer'), ownerClientID, timeout (unified TIMEOUT constant in ms)",
-        "First client to connect automatically becomes instance owner (ownerClientID set in memory)",
-        "New broadcast events registered via BusEvent.define: client.connected, client.disconnected",
-        "Non-persisted state (client list entries) maintains in-memory per-entity update_seq counters for SSE event versioning",
-        "Typecheck passes"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": "Core client infrastructure. server.connected stays as connection-level inline event (not broadcast). client.connected/disconnected are broadcast-level events. Reconnect token and grace period logic is in next story. Non-persisted state update_seq counters are simple in-memory integers, incremented on each change."
-    },
-    {
-      "id": "US-010",
-      "title": "Reconnect token and grace period",
-      "description": "As a server, I need reconnect tokens so that disconnected clients can recover their identity within a grace period.",
-      "acceptanceCriteria": [
-        "Server generates reconnectToken (UUID) for each client, returned in server.connected event",
-        "Client reconnection via X-OpenCode-Reconnect-Token header: server validates token, reuses old clientID, issues new reconnectToken",
-        "Reconnect token is one-time use: after successful reconnect, old token invalidated, new token issued",
-        "Client disconnect enters grace period (TIMEOUT constant, default 60s); reconnect within grace period restores identity",
-        "Grace period timeout with no reconnect: clean up client record, broadcast client.disconnected event",
-        "During grace period after owner disconnect, new clients join as observer (owner may reconnect)",
-        "When all clients disconnect AND grace period expires, ownerClientID resets to null; next client becomes owner",
-        "Typecheck passes"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": "Depends on US-009 (client tracking). This adds reconnect token validation and grace period timer to the client tracking infrastructure. Note: TIMEOUT constant (60s) is shared across grace period, activity timeout, idle timeout, and takeover cooldown. Do not exceed 60s — grace period also determines takeover condition C wait time; too long means observers can't operate the instance after owner disconnects."
-    },
-    {
-      "id": "US-011",
-      "title": "GET /clients API endpoint",
-      "description": "As a client, I need an API to query the list of connected clients and their roles.",
-      "acceptanceCriteria": [
-        "GET /clients API returns: ownerClientID, takeoverAvailable (hardcode false for now), clients array",
-        "Each client entry: clientID, role, type, remoteIP, connectedAt, duration (server-computed)",
-        "Response validated with Zod schema",
-        "Only returns clients for the same directory as the requesting client",
-        "Typecheck passes"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": "Depends on US-009 (client tracking). takeoverAvailable will be computed properly when takeover endpoint is implemented."
-    },
-    {
-      "id": "US-012",
-      "title": "SDK clientID header injection and ready gate",
-      "description": "As an SDK client, I need to receive my clientID from server.connected and inject it into all subsequent requests.",
-      "acceptanceCriteria": [
-        "sdk.tsx intercepts server.connected event in SSE stream, extracts clientID, reconnectToken, role, ownerClientID into shared state",
-        "SDK wrapper (v2/client.ts) extended to support dynamic header values (function-form headers) for X-OpenCode-Client-ID and X-OpenCode-Reconnect-Token",
-        "No modifications to auto-generated code (gen/ directory)",
-        "All subsequent requests include X-OpenCode-Client-ID header",
-        "SSE connections (first + reconnect) include X-OpenCode-Client-ID (if available), X-OpenCode-Reconnect-Token, and X-OpenCode-Client-Type headers — X-OpenCode-Client-ID on SSE is used for server restart owner recovery (US-026)",
-        "Ready gate: write operations (non-GET) wait for clientID to be available before sending; GET requests not gated",
-        "Typecheck passes"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": "Depends on US-009 (server-side client tracking). config.headers in v2/client.ts is currently static — needs extension to support dynamic/function-form values."
-    },
-    {
-      "id": "US-013",
-      "title": "Server-side clientID validation middleware",
-      "description": "As a server, I need to validate that incoming requests carry a valid clientID from a connected client.",
-      "acceptanceCriteria": [
-        "Write requests without X-OpenCode-Client-ID return HTTP 400 with 'upgrade SDK' hint",
-        "GET requests don't require clientID (allows debugging and monitoring tools)",
-        "Server validates clientID exists in ConnectedClients Map; invalid clientID returns HTTP 403 (distinct from auth 401)",
-        "Validation implemented as Hono middleware, runs after auth check but before route handlers",
-        "Typecheck passes"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "Depends on US-009 (ConnectedClients Map). This middleware enforces that write operations come from known clients."
-    },
-    {
-      "id": "US-014",
-      "title": "Instance-level owner/observer role model",
-      "description": "As a system, I need a per-instance owner model where exactly one client has write access and others are read-only observers.",
-      "acceptanceCriteria": [
-        "Instance gets in-memory ownerClientID field (nullable), tracking which client has write permission",
-        "First client to connect becomes owner (coordinated with US-009)",
-        "Owner has write permission to all sessions in the instance including child sessions (ultrawork loop, subagent task)",
-        "Child session prompts (server-initiated) bypass ownership checks",
-        "Ownership transfers only via takeover or all-clients-disconnect + grace-period-timeout",
-        "New broadcast event: instance.owner.changed (via BusEvent.define), includes ownerClientID and in-memory update_seq counter",
-        "All clients receive owner change notifications via SSE",
-        "Typecheck passes"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": "Depends on US-009/010 (client tracking + reconnect). This establishes the ownership model without the enforcement (US-015) or takeover (US-017/018). Ownership state uses in-memory update_seq counter (non-persisted) for SSE event versioning consistency."
-    },
-    {
-      "id": "US-015",
-      "title": "Observer write operation interception (assertCanWrite)",
-      "description": "As an observer, when I try to send a message, the system should return a clear 423 Locked error instead of an ambiguous error.",
-      "acceptanceCriteria": [
-        "assertNotBusy enhanced to assertCanWrite(clientID): first checks instance ownership (non-owner → HTTP 423 Locked), then existing busy/retry logic unchanged",
-        "423 response includes ownerClientID so client knows who is operating",
-        "Observer requests return 423 immediately — do NOT enter callback queue",
-        "Child session internal prompts (server-initiated) bypass assertCanWrite entirely",
-        "Permission reply and question reply endpoints also check owner — non-owner gets 423",
-        "Typecheck passes"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": "Depends on US-014. Modifies prompt.ts assertNotBusy → assertCanWrite. Server-side enforcement — TUI-side UI changes come later."
-    },
-    {
-      "id": "US-016",
-      "title": "Owner activity heartbeat endpoint",
-      "description": "As a server, I need to know if the owner is actively using the instance so that takeover conditions can be evaluated.",
-      "acceptanceCriteria": [
-        "New POST /instance/activity endpoint accepting { active: boolean } body",
-        "Only owner can call this — non-owner returns HTTP 403",
-        "Server records lastReport timestamp (any activity call) and lastActiveReport timestamp (last active: true call) in memory",
-        "TUI owner sends activity heartbeat every 10s with active field reflecting recent user interaction (input, keypress, focus)",
-        "OwnerState interface: { clientID, lastReport, lastActiveReport, takeoverAvailable }",
-        "Typecheck passes"
-      ],
-      "priority": 16,
-      "passes": true,
-      "notes": "Depends on US-014. Prerequisite for takeover conditions. Uses separate POST endpoint (not SSE) because SSE is server→client only."
-    },
-    {
-      "id": "US-017",
-      "title": "Observer takeover endpoint core logic",
-      "description": "As an observer, when the owner is inactive or disconnected, I can take over instance ownership.",
-      "acceptanceCriteria": [
-        "New POST /instance/takeover endpoint accepting { force?: boolean }",
-        "Takeover available when ANY condition met: (A) owner activity report timeout (lastReport > TIMEOUT), (B) all sessions idle AND owner lastActiveReport > TIMEOUT, (C) owner disconnected and grace period expired",
-        "Conditions not met → HTTP 409 { reason: 'owner_active', ownerClientID }",
-        "Active sessions (busy/retry) without force → HTTP 409 { reason: 'active_sessions', ownerClientID, sessions: [...] }",
-        "Takeover success with active sessions + force: abort all active session prompts, mark assistant messages incomplete",
-        "Takeover success: set ownerClientID to requester, publish instance.owner.changed event",
-        "Typecheck passes"
-      ],
-      "priority": 17,
-      "passes": true,
-      "notes": "Depends on US-016 (activity heartbeat). retry status treated same as busy for all takeover logic. See PRD pseudocode for handleTakeover flow. Full /instance/takeover API schema has 4 different 409 response variants: { reason: 'cooldown', retryAfter } (US-018), { reason: 'owner_active', ownerClientID }, { reason: 'active_sessions', ownerClientID, sessions }, { reason: 'owner_changed', ownerClientID } (US-018). Success 200: { ownerClientID }."
-    },
-    {
-      "id": "US-018",
-      "title": "Takeover cooldown, race handling, and availability event",
-      "description": "As a system, I need takeover cooldown to prevent ownership ping-pong, race handling for concurrent takeover, and availability broadcasting.",
-      "acceptanceCriteria": [
-        "Cooldown period after takeover (TIMEOUT constant) — no takeover allowed during cooldown → 409 { reason: 'cooldown', retryAfter }",
-        "Concurrent takeover race: first succeeds, second gets 409 { reason: 'owner_changed', ownerClientID }",
-        "Owner can takeover self (for reconnect token expiry recovery), also subject to cooldown",
-        "Server publishes takeover.available broadcast event (via BusEvent.define) when availability changes (false→true or true→false)",
-        "Server schedules a timer after each owner activity report; if no new report arrives within TIMEOUT, re-evaluate takeover conditions and broadcast takeover.available if state changed. Also re-evaluate on discrete events (client disconnect, activity report, session status change)",
-        "GET /clients includes takeoverAvailable field computed server-side (update the hardcoded false from US-011)",
-        "Typecheck passes"
-      ],
-      "priority": 18,
-      "passes": true,
-      "notes": "Depends on US-017 (takeover core). Adds cooldown, race protection, self-takeover, and broadcast event on top of core takeover logic. Conditions A and B are time-based (Date.now() - lastReport > TIMEOUT), so server needs a timer mechanism to detect when these conditions become true due to time passing."
-    },
-    {
-      "id": "US-019",
-      "title": "SSE reconnect with identity recovery and bootstrap refresh",
-      "description": "As an attach client, when SSE disconnects I need automatic reconnection with identity recovery and full state refresh.",
-      "acceptanceCriteria": [
-        "SSE reconnection uses SDK exponential backoff (3s → 6s → 12s → ... → 30s max), sseMaxRetryAttempts stays undefined (infinite)",
-        "Reconnect sends X-OpenCode-Reconnect-Token header automatically",
-        "Valid token: server reuses old clientID, owner identity preserved, new token issued",
-        "Expired token (grace period passed): server assigns new clientID, client joins as observer",
-        "Client resets store on reconnect (clear all cached data and update_seq values)",
-        "Reconnect triggers bootstrap() full refresh to compensate for missed events",
-        "Bootstrap and SSE events use unified update_seq version check: only apply when incoming.update_seq > stored.update_seq",
-        "Typecheck passes"
-      ],
-      "priority": 19,
-      "passes": true,
-      "notes": "Depends on US-007/008 (update_seq), US-010 (reconnect token), US-012 (SDK headers). sync.tsx needs to listen for server.connected event and trigger bootstrap()."
-    },
-    {
-      "id": "US-020",
-      "title": "Reconnecting overlay and disconnection UI",
-      "description": "As a TUI user, when my connection drops I need clear visual feedback and interaction freeze until reconnected.",
-      "acceptanceCriteria": [
-        "SSE disconnect immediately shows full-screen semi-transparent overlay with 'Reconnecting...' text and countdown timer (timer reflects SDK's current exponential backoff interval)",
-        "Overlay freezes all user interaction (prompt input, keyboard shortcuts) to prevent lost operations",
-        "Reconnect success automatically dismisses overlay and restores interaction",
-        "On reconnect, client resets store (clears all cached data and update_seq values) before triggering bootstrap() — coordinates with US-019 store reset logic",
-        "After reconnect, bootstrap() runs and restores full state including: sessions (with child sessions), messages, parts, permissions, questions, todos, diffs, LSP, MCP, formatter, sandbox, vcs status",
-        "Client list fetched via GET /clients in non-blocking phase (role info already available from server.connected event)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 20,
-      "passes": true,
-      "notes": "Depends on US-019 (reconnect mechanism). sync.tsx currently does NOT listen for server.connected event. The complete bootstrap data list must match all data types managed by sync.tsx."
-    },
-    {
-      "id": "US-021",
-      "title": "TUI observer mode UI and role display",
-      "description": "As an observer, I need clear visual indicators showing my role and disabled write controls.",
-      "acceptanceCriteria": [
-        "TUI sidebar shows current role: 'Owner' or 'Observer'",
-        "TUI sidebar shows connected client list with clientID abbreviation and role",
-        "Observer mode: prompt input box becomes disabled, shows 'Instance in use by another client' message",
-        "Owner/Observer status change has visual transition (e.g., color flash)",
-        "Observer sees permission/question dialogs but without interactive shortcuts (view only, with 'View Only' label)",
-        "Verify permission.asked, permission.replied, question.asked, and question.replied events are received by observer clients (existing broadcast behavior)",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 21,
-      "passes": true,
-      "notes": "Depends on US-014 (owner model), US-015 (write interception). Modifies TUI sidebar, prompt components, and permission/question dialogs."
-    },
-    {
-      "id": "US-022",
-      "title": "TUI takeover button for observers",
-      "description": "As an observer, when takeover conditions are met, I can take over ownership from the TUI.",
-      "acceptanceCriteria": [
-        "Observer input area shows 'Takeover' button when takeoverAvailable is true (from takeover.available event or GET /clients)",
-        "Takeover button hidden/disabled when conditions not met",
-        "Clicking Takeover with active sessions shows confirmation dialog with force warning",
-        "Clicking Takeover without active sessions executes immediately (no force needed)",
-        "Successful takeover transitions UI to owner mode (prompt enabled, role updated)",
-        "Failed takeover shows error message with reason",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 22,
-      "passes": true,
-      "notes": "Depends on US-017/018 (takeover endpoint), US-021 (observer UI). Listen for takeover.available event to toggle button visibility."
-    },
-    {
-      "id": "US-023",
-      "title": "Commands panel Connected Clients detail",
-      "description": "As a user, I can view detailed information about all connected clients through the Commands panel.",
-      "acceptanceCriteria": [
-        "Commands panel (Ctrl+P) has new 'Show Connected Clients' command",
-        "Command opens dialog showing each client: clientID, role (owner/observer), type (TUI/CLI), remote IP, connected time, duration",
-        "Client list updates in real-time (refreshes on client.connected/client.disconnected events)",
-        "Current client highlighted with 'You' label",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 23,
-      "passes": true,
-      "notes": "Depends on US-011 (GET /clients API). Uses client.connected/disconnected events for real-time updates."
-    },
-    {
-      "id": "US-024",
-      "title": "Typing status broadcast",
-      "description": "As an observer, I want to see when the owner is typing so I know new messages are coming.",
-      "acceptanceCriteria": [
-        "New POST /session/:sessionID/typing endpoint; server returns 200 ok or 403 (non-owner); does not validate sessionID existence",
-        "Server publishes session.typing broadcast event (via BusEvent.define) with sessionID and clientID",
-        "TUI owner sends typing with 300ms throttle during prompt input, only in existing sessions, only when other clients connected",
-        "Client count tracked locally via client.connected/client.disconnected events, initialized from GET /clients",
-        "Observer shows 'Owner is typing...' in message area only when viewing the matching session",
-        "Typing indicator auto-hides after 2s with no new typing event",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 24,
-      "passes": true,
-      "notes": "Known limitation: typing not visible for first message in new session (session doesn't exist yet on server)."
-    },
-    {
-      "id": "US-025",
-      "title": "CLI run --attach owner/observer adaptation",
-      "description": "As a CLI user using opencode run --attach, if I'm not the owner I should get a clear error and exit.",
-      "acceptanceCriteria": [
-        "CLI opencode run --attach connects to remote server, performs agent validation (existing logic)",
-        "After agent validation, checks role from server.connected event",
-        "If role is observer: outputs clear error message including ownerClientID, exits with non-zero code",
-        "If role is owner: proceeds with normal prompt execution",
-        "During execution, if ownership is taken over (instance.owner.changed event), current prompt is aborted, CLI exits with non-zero code",
-        "No --wait blocking functionality (direct exit for observers)",
-        "Typecheck passes"
-      ],
-      "priority": 25,
-      "passes": true,
-      "notes": "Depends on US-014 (owner model), US-015 (write interception). Modifies run.ts attach mode."
-    },
-    {
-      "id": "US-026",
-      "title": "Server restart owner recovery",
-      "description": "As a server, after restart I need to recover the previous owner identity so the original owner can seamlessly reconnect.",
-      "acceptanceCriteria": [
-        "ownerClientID persisted to SQLite (or local file) on every owner change",
-        "After server restart, read persisted ownerClientID; enter grace period",
-        "During grace period, client connecting with X-OpenCode-Client-ID matching persisted ownerClientID automatically becomes owner (even without valid reconnect token)",
-        "Grace period timeout with no matching client: clear persisted record, next connecting client becomes owner",
-        "Non-matching clients during grace period join as observer",
-        "Security note: this relies on trusted clients (auth token is the trust boundary, not clientID — documented in Non-Goals)",
-        "Typecheck passes"
-      ],
-      "priority": 26,
-      "passes": true,
-      "notes": "Depends on US-009/010 and US-014. This is the server restart recovery mechanism. Memory-state counters (update_seq for non-persisted state) restart from 0 — paired with client-side store reset on reconnect."
+      "notes": "Session.fork() should already operate on server-side data. This story verifies the behavior and fixes if needed. May be a quick verification + minor fix."
     }
   ]
 }
