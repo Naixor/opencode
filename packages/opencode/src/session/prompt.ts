@@ -102,8 +102,8 @@ export namespace SessionPrompt {
   export function assertCanWrite(sessionID: string, clientID?: string) {
     // If clientID provided, check ownership
     if (clientID) {
-      const { Client } = require("@/server/client") as typeof import("@/server/client")
-      const ownerID = Client.ownerID()
+      const { getOwner } = require("@/server/owner") as typeof import("@/server/owner")
+      const ownerID = getOwner()
       if (ownerID && ownerID !== clientID) {
         throw new Session.LockedError(sessionID, ownerID)
       }

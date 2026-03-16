@@ -7,6 +7,7 @@ import { Bus } from "@/bus"
 import { Log } from "@/util/log"
 import { Global } from "@/global"
 import { TIMEOUT } from "./lifecycle"
+import { setOwnerState } from "./owner"
 
 const log = Log.create({ service: "client" })
 
@@ -72,7 +73,10 @@ export namespace Client {
     const clientID = crypto.randomUUID()
     const reconnectToken = crypto.randomUUID()
     const role: Role = owner === null ? "owner" : "observer"
-    if (role === "owner") owner = clientID
+    if (role === "owner") {
+      owner = clientID
+      setOwnerState(clientID)
+    }
 
     clients.set(clientID, {
       directory: opts.directory,
@@ -135,6 +139,7 @@ export namespace Client {
     // If owner left and no clients remain, reset owner
     if (owner === clientID) {
       owner = null
+      setOwnerState(null)
     }
   }
 
@@ -178,6 +183,7 @@ export namespace Client {
   /** Set owner (for takeover). */
   export function setOwner(clientID: string | null) {
     owner = clientID
+    setOwnerState(clientID)
     if (clientID) {
       const entry = clients.get(clientID)
       if (entry) entry.role = "owner"
