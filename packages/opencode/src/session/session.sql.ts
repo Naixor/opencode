@@ -31,6 +31,7 @@ export const SessionTable = sqliteTable(
     ...Timestamps,
     time_compacting: integer(),
     time_archived: integer(),
+    update_seq: integer().notNull().default(0),
   },
   (table) => [
     index("session_project_idx").on(table.project_id),
@@ -48,6 +49,7 @@ export const MessageTable = sqliteTable(
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     ...Timestamps,
     data: text({ mode: "json" }).notNull().$type<InfoData>(),
+    update_seq: integer().notNull().default(0),
   },
   (table) => [index("message_session_idx").on(table.session_id)],
 )
@@ -62,6 +64,7 @@ export const PartTable = sqliteTable(
     session_id: text().notNull(),
     ...Timestamps,
     data: text({ mode: "json" }).notNull().$type<PartData>(),
+    update_seq: integer().notNull().default(0),
   },
   (table) => [index("part_message_idx").on(table.message_id), index("part_session_idx").on(table.session_id)],
 )

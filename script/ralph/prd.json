@@ -108,7 +108,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-005 (auth middleware). Modifies thread.ts for local TUI and SDK wrapper for auth header injection."
     },
     {
