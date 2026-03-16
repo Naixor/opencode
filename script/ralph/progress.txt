@@ -37,3 +37,18 @@ Started: Sat Mar 14 2026
   - Lock file path uses `Global.Path.data` (xdg data home) not project directory
   - `process.kill(pid, 0)` is the Node/Bun way to check if a process is alive (signal 0)
 ---
+
+## Mon Mar 16 2026 - US-002
+- Implemented Worker detached process launcher
+- Files changed:
+  - `packages/opencode/src/cli/cmd/tui/worker.ts` — added `--mode=auto|serve` parameter, detached process mode with lock file creation and signal handlers
+  - `packages/opencode/src/cli/cmd/tui/thread.ts` — check lock file for existing Worker, spawn detached Worker or connect to existing, added `spawnDetached()` and `waitForLockfile()` helpers
+  - `packages/opencode/src/cli/cmd/stop.ts` — new `opencode stop` command that reads lock file PID and sends SIGTERM
+  - `packages/opencode/src/index.ts` — registered StopCommand
+- **Learnings for future iterations:**
+  - Worker detached mode uses `Bun.spawn()` with `stdio: ["ignore", "ignore", "ignore"]` and `child.unref()` to fully detach
+  - Lock file polling uses exponential backoff (50ms → 500ms) with 10s timeout
+  - In detached mode, Worker handles its own SIGTERM/SIGINT for lock file cleanup
+  - External mode (--port/--hostname/--mdns) still uses Worker thread (not detached) for backward compat
+  - `server.port!` needs non-null assertion since Bun types mark it optional
+---

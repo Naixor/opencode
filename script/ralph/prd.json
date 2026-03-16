@@ -38,7 +38,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Modifies worker.ts to become a detached process model. TUI thread.ts connects via HTTP using lock file port. Does NOT yet remove RPC paths — that's the next story."
     },
     {

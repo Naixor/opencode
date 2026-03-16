@@ -3,19 +3,9 @@ import { createSimpleContext } from "./helper"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { batch, onCleanup, onMount } from "solid-js"
 
-export type EventSource = {
-  on: (handler: (event: Event) => void) => () => void
-}
-
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
-  init: (props: {
-    url: string
-    directory?: string
-    fetch?: typeof fetch
-    headers?: RequestInit["headers"]
-    events?: EventSource
-  }) => {
+  init: (props: { url: string; directory?: string; fetch?: typeof fetch; headers?: RequestInit["headers"] }) => {
     const abort = new AbortController()
     const sdk = createOpencodeClient({
       baseUrl: props.url,
@@ -47,7 +37,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       })
     }
 
-    const handleEvent = (event: Event) => {
+    const handle = (event: Event) => {
       queue.push(event)
       const elapsed = Date.now() - last
 
@@ -62,25 +52,25 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     }
 
     onMount(async () => {
-      // If an event source is provided, use it instead of SSE
-      if (props.events) {
-        const unsub = props.events.on(handleEvent)
-        onCleanup(unsub)
-        return
-      }
-
-      // Fall back to SSE
+      // All connections use SSE
       while (true) {
         if (abort.signal.aborted) break
-        const events = await sdk.event.subscribe(
-          {},
-          {
-            signal: abort.signal,
-          },
-        )
+        const events = await sdk.event
+          .subscribe(
+            {},
+            {
+              signal: abort.signal,
+            },
+          )
+          .catch(() => undefined)
+
+        if (!events) {
+          await new Promise((r) => setTimeout(r, 3000))
+          continue
+        }
 
         for await (const event of events.stream) {
-          handleEvent(event)
+          handle(event)
         }
 
         // Flush any remaining events

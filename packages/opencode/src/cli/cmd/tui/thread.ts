@@ -1,56 +1,18 @@
 import { cmd } from "@/cli/cmd/cmd"
 import { tui } from "./app"
-import { Rpc } from "@/util/rpc"
-import { type rpc } from "./worker"
 import path from "path"
-import { fileURLToPath } from "url"
 import { UI } from "@/cli/ui"
 import { Log } from "@/util/log"
-import { withTimeout } from "@/util/timeout"
 import { withNetworkOptions, resolveNetworkOptions } from "@/cli/network"
 import { Filesystem } from "@/util/filesystem"
-import type { Event } from "@opencode-ai/sdk/v2"
-import type { EventSource } from "./context/sdk"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
 import { Lockfile } from "@/server/lockfile"
+import { fileURLToPath } from "url"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
-}
-
-type RpcClient = ReturnType<typeof Rpc.client<typeof rpc>>
-
-function createWorkerFetch(client: RpcClient): typeof fetch {
-  const fn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const request = new Request(input, init)
-    const body = request.body ? await request.text() : undefined
-    const result = await client.call("fetch", {
-      url: request.url,
-      method: request.method,
-      headers: Object.fromEntries(request.headers.entries()),
-      body,
-    })
-    return new Response(result.body, {
-      status: result.status,
-      headers: result.headers,
-    })
-  }
-  return fn as typeof fetch
-}
-
-function createEventSource(client: RpcClient): EventSource {
-  return {
-    on: (handler) => client.on<Event>("event", handler),
-  }
-}
-
-async function target() {
-  if (typeof OPENCODE_WORKER_PATH !== "undefined") return OPENCODE_WORKER_PATH
-  const dist = new URL("./cli/cmd/tui/worker.js", import.meta.url)
-  if (await Filesystem.exists(fileURLToPath(dist))) return dist
-  return new URL("./worker.ts", import.meta.url)
 }
 
 /** Resolve the worker script path as a string for Bun.spawn(). */
@@ -68,8 +30,8 @@ async function input(value?: string) {
   return piped + "\n" + value
 }
 
-/** Spawn Worker as a detached background process. Returns the child process. */
-async function spawnDetached(cwd: string): Promise<Bun.Subprocess> {
+/** Spawn Worker as a detached background process. */
+async function spawnDetached(cwd: string): Promise<void> {
   const script = await workerPath()
   const args = ["bun", "run", script, "--mode", "auto"]
   if (process.argv.includes("--print-logs")) args.push("--print-logs")
@@ -82,8 +44,6 @@ async function spawnDetached(cwd: string): Promise<Bun.Subprocess> {
     ),
   })
   child.unref()
-
-  return child
 }
 
 /** Wait for lock file to appear and return its data. Polls with backoff. */
@@ -153,7 +113,6 @@ export const TuiThreadCommand = cmd({
       // Resolve relative paths against PWD to preserve behavior when using --cwd flag
       const root = process.env.PWD ?? process.cwd()
       const cwd = args.project ? path.resolve(root, args.project) : process.cwd()
-      const file = await target()
       try {
         process.chdir(cwd)
       } catch {
@@ -161,89 +120,18 @@ export const TuiThreadCommand = cmd({
         return
       }
 
-      const network = await resolveNetworkOptions(args)
-      const external =
-        process.argv.includes("--port") ||
-        process.argv.includes("--hostname") ||
-        process.argv.includes("--mdns") ||
-        network.mdns ||
-        network.port !== 0 ||
-        network.hostname !== "127.0.0.1"
-
       // Check for existing Worker via lock file
       const existing = await Lockfile.acquire(cwd)
 
-      let transport: {
-        url: string
-        fetch: typeof fetch | undefined
-        events: EventSource | undefined
-      }
-
-      let cleanup: () => Promise<void>
-
+      let url: string
       if (existing) {
         // Connect to existing Worker via HTTP
-        const url = `http://127.0.0.1:${existing.port}`
-        transport = { url, fetch: undefined, events: undefined }
-        cleanup = async () => {
-          // TUI doesn't own this Worker, just disconnect
-        }
-      } else if (external) {
-        // External mode: spawn Worker thread (existing behavior for network-exposed servers)
-        const worker = new Worker(file, {
-          env: Object.fromEntries(
-            Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-          ),
-        })
-        worker.onerror = (e) => {
-          Log.Default.error(e)
-        }
-
-        const client = Rpc.client<typeof rpc>(worker)
-        const error = (e: unknown) => {
-          Log.Default.error(e)
-        }
-        const reload = () => {
-          client.call("reload", undefined).catch((err: unknown) => {
-            Log.Default.warn("worker reload failed", {
-              error: err instanceof Error ? err.message : String(err),
-            })
-          })
-        }
-        process.on("uncaughtException", error)
-        process.on("unhandledRejection", error)
-        process.on("SIGUSR2", reload)
-
-        transport = {
-          url: (await client.call("server", network)).url,
-          fetch: undefined,
-          events: undefined,
-        }
-
-        let stopped = false
-        cleanup = async () => {
-          if (stopped) return
-          stopped = true
-          process.off("uncaughtException", error)
-          process.off("unhandledRejection", error)
-          process.off("SIGUSR2", reload)
-          await withTimeout(client.call("shutdown", undefined), 5000).catch((err: unknown) => {
-            Log.Default.warn("worker shutdown failed", {
-              error: err instanceof Error ? err.message : String(err),
-            })
-          })
-          worker.terminate()
-        }
+        url = `http://127.0.0.1:${existing.port}`
       } else {
-        // Default: spawn detached Worker process
+        // Spawn detached Worker process and wait for it to be ready
         await spawnDetached(cwd)
         const lock = await waitForLockfile(cwd)
-        const url = `http://127.0.0.1:${lock.port}`
-        transport = { url, fetch: undefined, events: undefined }
-        cleanup = async () => {
-          // TUI launched this Worker but doesn't own its lifecycle.
-          // Worker runs independently (detached) and will self-manage.
-        }
+        url = `http://127.0.0.1:${lock.port}`
       }
 
       const prompt = await input(args.prompt)
@@ -253,7 +141,6 @@ export const TuiThreadCommand = cmd({
       })
 
       setTimeout(() => {
-        // Upgrade check — fire and forget
         Instance.provide({
           directory: cwd,
           fn: async () => {
@@ -262,13 +149,15 @@ export const TuiThreadCommand = cmd({
         }).catch(() => {})
       }, 1000).unref?.()
 
+      const cleanup = async () => {
+        // TUI doesn't own the Worker lifecycle — it runs independently (detached).
+      }
+
       try {
         await tui({
-          url: transport.url,
+          url,
           config,
           directory: cwd,
-          fetch: transport.fetch,
-          events: transport.events,
           args: {
             continue: args.continue,
             sessionID: args.session,

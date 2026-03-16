@@ -101,8 +101,6 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   })
 }
 
-import type { EventSource } from "./context/sdk"
-
 export function tui(input: {
   url: string
   args: Args
@@ -110,7 +108,6 @@ export function tui(input: {
   directory?: string
   fetch?: typeof fetch
   headers?: RequestInit["headers"]
-  events?: EventSource
   onExit?: () => Promise<void>
 }) {
   // promise to prevent immediate exit
@@ -147,7 +144,6 @@ export function tui(input: {
                           directory={input.directory}
                           fetch={input.fetch}
                           headers={input.headers}
-                          events={input.events}
                         >
                           <SyncProvider>
                             <ThemeProvider mode={mode}>
