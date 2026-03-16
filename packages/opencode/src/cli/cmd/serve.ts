@@ -5,17 +5,26 @@ import { Flag } from "../../flag/flag"
 import { Lockfile } from "../../server/lockfile"
 import { Instance } from "../../project/instance"
 import { AuthToken } from "../../server/auth-token"
+import { Lifecycle } from "../../server/lifecycle"
 
 export const ServeCommand = cmd({
   command: "serve",
   builder: (yargs) =>
-    withNetworkOptions(yargs).option("auth-token", {
-      type: "string",
-      describe: "auth token for Bearer authentication (auto-generated when hostname is not loopback)",
-    }),
+    withNetworkOptions(yargs)
+      .option("auth-token", {
+        type: "string",
+        describe: "auth token for Bearer authentication (auto-generated when hostname is not loopback)",
+      })
+      .option("auto", {
+        type: "boolean",
+        describe: "auto-exit when no clients are connected (used by TUI worker)",
+        hidden: true,
+      }),
   describe: "starts a headless opencode server",
   handler: async (args) => {
-    if (!Flag.OPENCODE_SERVER_PASSWORD) {
+    const auto = !!(args as Record<string, unknown>).auto
+
+    if (!auto && !Flag.OPENCODE_SERVER_PASSWORD) {
       console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
 
@@ -37,7 +46,7 @@ export const ServeCommand = cmd({
       if (AuthToken.loopback(opts.hostname)) return null
       const val = ((args as Record<string, unknown>)["auth-token"] as string | undefined) ?? AuthToken.generate()
       AuthToken.set(val)
-      console.log(`Auth token: ${val}`)
+      if (!auto) console.log(`Auth token: ${val}`)
       return val
     })()
 
@@ -58,7 +67,7 @@ export const ServeCommand = cmd({
       return
     }
 
-    console.log(`opencode server listening on http://${server.hostname}:${port}`)
+    if (!auto) console.log(`opencode server listening on http://${server.hostname}:${port}`)
 
     const shutdown = async () => {
       await Instance.disposeAll()
@@ -67,10 +76,15 @@ export const ServeCommand = cmd({
       process.exit(0)
     }
 
+    // Enable auto-exit lifecycle when spawned by TUI
+    if (auto) {
+      Lifecycle.enable(shutdown)
+    }
+
     process.on("SIGTERM", shutdown)
     process.on("SIGINT", shutdown)
 
-    // Keep process alive — serve mode never auto-exits
+    // Keep process alive
     await new Promise(() => {})
   },
 })

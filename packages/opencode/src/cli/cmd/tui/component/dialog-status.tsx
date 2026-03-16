@@ -3,8 +3,10 @@ import { fileURLToPath } from "bun"
 import { useTheme } from "../context/theme"
 import { useDialog } from "@tui/ui/dialog"
 import { useSync } from "@tui/context/sync"
-import { For, Match, Switch, Show, createMemo } from "solid-js"
+import { useSDK } from "@tui/context/sdk"
+import { For, Match, Switch, Show, createMemo, createSignal, createResource, onCleanup } from "solid-js"
 import { Installation } from "@/installation"
+import { Clipboard } from "@tui/util/clipboard"
 
 export type DialogStatusProps = {}
 
@@ -12,6 +14,27 @@ export function DialogStatus() {
   const sync = useSync()
   const { theme } = useTheme()
   const dialog = useDialog()
+  const sdk = useSDK()
+  const [copied, setCopied] = createSignal(false)
+  let timer: Timer | undefined
+  onCleanup(() => timer && clearTimeout(timer))
+
+  const [attach] = createResource(async () => {
+    const res = await sdk.fetch(`${sdk.url}/attach-info`).catch(() => undefined)
+    if (!res || !res.ok) return undefined
+    const ct = res.headers.get("content-type") ?? ""
+    if (!ct.includes("application/json")) return undefined
+    return (res.json() as Promise<{ url: string; token: string | null; command: string }>).catch(() => undefined)
+  })
+
+  const copy = async () => {
+    const info = attach()
+    if (!info) return
+    await Clipboard.copy(info.command)
+    setCopied(true)
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => setCopied(false), 2000)
+  }
 
   const enabledFormatters = createMemo(() => sync.data.formatter.filter((f) => f.enabled))
 
@@ -51,15 +74,36 @@ export function DialogStatus() {
         </text>
       </box>
       <text fg={theme.textMuted}>OpenCode v{Installation.VERSION}</text>
+      <Show when={attach()}>
+        {(info) => (
+          <box>
+            <text fg={theme.text} attributes={TextAttributes.BOLD}>
+              Remote Attach
+            </text>
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted} wrapMode="word">
+                {info().command}
+              </text>
+            </box>
+            <box flexDirection="row" gap={1}>
+              <box onMouseUp={copy} backgroundColor={copied() ? theme.success : theme.backgroundElement} padding={1}>
+                <text fg={copied() ? theme.background : theme.text}>{copied() ? "Copied!" : "Copy command"}</text>
+              </box>
+            </box>
+          </box>
+        )}
+      </Show>
       <box flexDirection="row" gap={1}>
         <text
           flexShrink={0}
           style={{
-            fg: ({
-              active: theme.success,
-              failed: theme.error,
-              off: theme.textMuted,
-            } as Record<string, typeof theme.success>)[sync.data.sandbox.status],
+            fg: (
+              {
+                active: theme.success,
+                failed: theme.error,
+                off: theme.textMuted,
+              } as Record<string, typeof theme.success>
+            )[sync.data.sandbox.status],
           }}
         >
           •
@@ -68,11 +112,13 @@ export function DialogStatus() {
           Sandbox:{" "}
           <span
             style={{
-              fg: ({
-                active: theme.success,
-                failed: theme.error,
-                off: theme.textMuted,
-              } as Record<string, typeof theme.success>)[sync.data.sandbox.status],
+              fg: (
+                {
+                  active: theme.success,
+                  failed: theme.error,
+                  off: theme.textMuted,
+                } as Record<string, typeof theme.success>
+              )[sync.data.sandbox.status],
             }}
           >
             {sync.data.sandbox.status === "active" && "ON"}

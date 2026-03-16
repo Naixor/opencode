@@ -2,26 +2,11 @@ import { cmd } from "@/cli/cmd/cmd"
 import { tui } from "./app"
 import path from "path"
 import { UI } from "@/cli/ui"
-import { Log } from "@/util/log"
-import { withNetworkOptions, resolveNetworkOptions } from "@/cli/network"
-import { Filesystem } from "@/util/filesystem"
+import { withNetworkOptions } from "@/cli/network"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
 import { Lockfile } from "@/server/lockfile"
-import { fileURLToPath } from "url"
-
-declare global {
-  const OPENCODE_WORKER_PATH: string
-}
-
-/** Resolve the worker script path as a string for Bun.spawn(). */
-async function workerPath(): Promise<string> {
-  if (typeof OPENCODE_WORKER_PATH !== "undefined") return OPENCODE_WORKER_PATH
-  const dist = fileURLToPath(new URL("./cli/cmd/tui/worker.js", import.meta.url))
-  if (await Filesystem.exists(dist)) return dist
-  return fileURLToPath(new URL("./worker.ts", import.meta.url))
-}
 
 async function input(value?: string) {
   const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
@@ -30,10 +15,9 @@ async function input(value?: string) {
   return piped + "\n" + value
 }
 
-/** Spawn Worker as a detached background process. */
+/** Spawn Worker as a detached background process using `serve --auto`. */
 async function spawnDetached(cwd: string): Promise<void> {
-  const script = await workerPath()
-  const args = ["bun", "run", script, "--mode", "auto"]
+  const args = [process.execPath, "serve", "--auto"]
   if (process.argv.includes("--print-logs")) args.push("--print-logs")
 
   const child = Bun.spawn(args, {

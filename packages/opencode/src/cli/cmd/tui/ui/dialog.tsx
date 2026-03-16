@@ -16,6 +16,7 @@ export function Dialog(
   const dimensions = useTerminalDimensions()
   const { theme } = useTheme()
   const renderer = useRenderer()
+  const toast = useToast()
 
   let dismiss = false
 
@@ -27,6 +28,7 @@ export function Dialog(
       onMouseUp={() => {
         if (dismiss) {
           dismiss = false
+          if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) Selection.copy(renderer, toast)
           return
         }
         props.onClose?.()
@@ -43,6 +45,7 @@ export function Dialog(
       <box
         onMouseUp={(e) => {
           dismiss = false
+          if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) Selection.copy(renderer, toast)
           e.stopPropagation()
         }}
         width={props.size === "large" ? 80 : 60}

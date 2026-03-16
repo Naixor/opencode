@@ -67,6 +67,20 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         }
       }
 
+      // Update role when ownership changes (e.g. takeover)
+      // Event type exists at runtime via BusEvent registry but not in SDK generated types
+      const raw = event as { type: string; properties: Record<string, unknown> }
+      if (raw.type === "instance.owner.changed") {
+        const prev = connection()
+        if (prev.clientID) {
+          setConnection({
+            ...prev,
+            ownerClientID: raw.properties.ownerClientID as string | null,
+            role: prev.clientID === raw.properties.ownerClientID ? "owner" : "observer",
+          })
+        }
+      }
+
       queue.push(event)
       const elapsed = Date.now() - last
 

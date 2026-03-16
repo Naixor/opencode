@@ -669,6 +669,47 @@ export namespace Server {
           },
         )
         .get(
+          "/attach-info",
+          describeRoute({
+            summary: "Get attach info",
+            description: "Get the command needed to attach to this running server from another terminal",
+            operationId: "attachInfo.get",
+            responses: {
+              200: {
+                description: "Attach info",
+                content: {
+                  "application/json": {
+                    schema: resolver(
+                      z.object({
+                        url: z.string(),
+                        token: z.string().nullable(),
+                        command: z.string(),
+                      }),
+                    ),
+                  },
+                },
+              },
+            },
+          }),
+          async (c) => {
+            c.header("Cache-Control", "no-store")
+            const url = Server.url().toString().replace(/\/$/, "")
+            const token = AuthToken.get()
+            const command = [
+              "opencode",
+              "attach",
+              url,
+              ...(token ? ["--auth-token", token] : []),
+              ...(Flag.OPENCODE_SERVER_PASSWORD ? ["--password", "'$OPENCODE_SERVER_PASSWORD'"] : []),
+            ].join(" ")
+            return c.json({
+              url,
+              token,
+              command,
+            })
+          },
+        )
+        .get(
           "/sandbox",
           describeRoute({
             summary: "Get sandbox status",

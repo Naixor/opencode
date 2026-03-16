@@ -1,4 +1,5 @@
 import { useSync } from "@tui/context/sync"
+import { useSDK } from "@tui/context/sdk"
 import { createMemo, For, Show, Switch, Match } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useTheme } from "../../context/theme"
@@ -14,6 +15,7 @@ import { TodoItem } from "../../component/todo-item"
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const sync = useSync()
+  const sdk = useSDK()
   const { theme } = useTheme()
   const session = createMemo(() => sync.session.get(props.sessionID)!)
   const diff = createMemo(() => sync.data.session_diff[props.sessionID] ?? [])
@@ -96,6 +98,11 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               </text>
               <Show when={session().share?.url}>
                 <text fg={theme.textMuted}>{session().share!.url}</text>
+              </Show>
+              <Show when={sdk.connection().role}>
+                <text fg={sdk.connection().role === "owner" ? theme.success : theme.warning}>
+                  {sdk.connection().role === "owner" ? "● Owner" : "● Observer"}
+                </text>
               </Show>
             </box>
             <box>
