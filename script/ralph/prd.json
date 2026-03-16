@@ -27,7 +27,7 @@
       "title": "Worker detached process launcher",
       "description": "As a developer, I need Worker to run as a detached background process so that TUI can exit without killing the server.",
       "acceptanceCriteria": [
-        "Worker starts as detached process via Bun.spawn() with detached: true and stdio: ignore",
+        "Worker starts as detached process via Bun.spawn() with detached: true and stdio: ignore, then calls process.unref() to ensure parent TUI process can exit cleanly",
         "Worker accepts --mode=auto|serve startup parameter (auto for TUI-launched, serve for opencode serve)",
         "Worker binds HTTP server to localhost:random-port, then atomically creates lock file with pid + port + token + createdAt",
         "If lock file atomic creation fails (another Worker won the race), Worker closes its HTTP server and exits",
@@ -51,12 +51,13 @@
         "sdk.tsx simplified to use only SSE path (remove custom event source branch)",
         "Remove worker.ts redundant SSE reconnect loop (fixed 250ms retry) — SDK-side exponential backoff handles reconnection",
         "Add .catch() protection around sdk.tsx's sdk.event.subscribe() call to prevent loop termination on subscribe errors",
+        "Preserve existing server.instance.disposed → bootstrap() trigger chain during RPC removal refactoring",
         "Local TUI as first client connects via HTTP/SSE and becomes first attach client",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": false,
-      "notes": "This is the core architecture unification. After this, all TUI (local and remote) use the same HTTP/SSE path. sdk.tsx abstraction layer means TUI components should not need changes."
+      "notes": "This is the core architecture unification. After this, all TUI (local and remote) use the same HTTP/SSE path. sdk.tsx abstraction layer means TUI components should not need changes. Must preserve existing server.instance.disposed → bootstrap() chain in sync.tsx."
     },
     {
       "id": "US-004",
@@ -66,14 +67,16 @@
         "--mode=auto: Worker auto-exits when all clients disconnect and grace period (60s) expires with no reconnects",
         "--mode=auto: Idle watchdog — if no active SSE connections AND no active sessions (busy/retry) for 5 minutes, Worker self-exits and cleans lock file",
         "--mode=serve (opencode serve): Worker never auto-exits regardless of client connections; no idle watchdog",
-        "opencode serve runs Worker as foreground process, writes lock file, listens on port (supports --port parameter)",
+        "opencode serve runs Worker as foreground process (not detached), with its own SIGINT/SIGTERM handlers, writes lock file, listens on port",
+        "opencode serve supports --port parameter to specify a fixed port (e.g., opencode serve --port 8080); default is random port",
         "Mutual exclusion: if lock file exists with live process, opencode serve exits with error; TUI connects to existing Worker",
+        "Worker accepts --hostname parameter to bind to specified address (default localhost); opencode serve supports --hostname 0.0.0.0 for network exposure",
         "Define shared TIMEOUT constant (60_000ms) for reuse by later ownership stories",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": false,
-      "notes": "Depends on US-002 (detached process model). Grace period timeout constant should be defined as a shared constant (TIMEOUT = 60_000) for reuse by later ownership stories."
+      "notes": "Depends on US-002 (detached process model). Grace period timeout constant should be defined as a shared constant (TIMEOUT = 60_000) for reuse by later ownership stories. opencode serve is a foreground process (not detached) — distinct from TUI-launched detached Workers."
     },
     {
       "id": "US-005",
@@ -139,7 +142,7 @@
       ],
       "priority": 8,
       "passes": false,
-      "notes": "Depends on US-007 (migration). Non-persisted state (client list, ownership) will use server in-memory per-entity incrementing counters — added in later stories."
+      "notes": "Depends on US-007 (migration). Non-persisted state (client list, ownership) will use server in-memory per-entity incrementing counters — added in later stories. This story touches every write path for session/message/part + all API responses + all SSE events — if too large for one iteration, consider splitting into 'session update_seq' and 'message/part update_seq'."
     },
     {
       "id": "US-009",
@@ -152,11 +155,12 @@
         "server.connected inline event properties extended with: clientID, reconnectToken, role ('owner' or 'observer'), ownerClientID, timeout (unified TIMEOUT constant in ms)",
         "First client to connect automatically becomes instance owner (ownerClientID set in memory)",
         "New broadcast events registered via BusEvent.define: client.connected, client.disconnected",
+        "Non-persisted state (client list entries) maintains in-memory per-entity update_seq counters for SSE event versioning",
         "Typecheck passes"
       ],
       "priority": 9,
       "passes": false,
-      "notes": "Core client infrastructure. server.connected stays as connection-level inline event (not broadcast). client.connected/disconnected are broadcast-level events. Reconnect token and grace period logic is in next story."
+      "notes": "Core client infrastructure. server.connected stays as connection-level inline event (not broadcast). client.connected/disconnected are broadcast-level events. Reconnect token and grace period logic is in next story. Non-persisted state update_seq counters are simple in-memory integers, incremented on each change."
     },
     {
       "id": "US-010",
@@ -174,7 +178,7 @@
       ],
       "priority": 10,
       "passes": false,
-      "notes": "Depends on US-009 (client tracking). This adds reconnect token validation and grace period timer to the client tracking infrastructure."
+      "notes": "Depends on US-009 (client tracking). This adds reconnect token validation and grace period timer to the client tracking infrastructure. Note: TIMEOUT constant (60s) is shared across grace period, activity timeout, idle timeout, and takeover cooldown. Do not exceed 60s — grace period also determines takeover condition C wait time; too long means observers can't operate the instance after owner disconnects."
     },
     {
       "id": "US-011",
@@ -200,7 +204,7 @@
         "SDK wrapper (v2/client.ts) extended to support dynamic header values (function-form headers) for X-OpenCode-Client-ID and X-OpenCode-Reconnect-Token",
         "No modifications to auto-generated code (gen/ directory)",
         "All subsequent requests include X-OpenCode-Client-ID header",
-        "SSE connections (first + reconnect) include X-OpenCode-Reconnect-Token and X-OpenCode-Client-Type headers",
+        "SSE connections (first + reconnect) include X-OpenCode-Client-ID (if available), X-OpenCode-Reconnect-Token, and X-OpenCode-Client-Type headers — X-OpenCode-Client-ID on SSE is used for server restart owner recovery (US-026)",
         "Ready gate: write operations (non-GET) wait for clientID to be available before sending; GET requests not gated",
         "Typecheck passes"
       ],
@@ -233,13 +237,13 @@
         "Owner has write permission to all sessions in the instance including child sessions (ultrawork loop, subagent task)",
         "Child session prompts (server-initiated) bypass ownership checks",
         "Ownership transfers only via takeover or all-clients-disconnect + grace-period-timeout",
-        "New broadcast event: instance.owner.changed (via BusEvent.define), includes ownerClientID",
+        "New broadcast event: instance.owner.changed (via BusEvent.define), includes ownerClientID and in-memory update_seq counter",
         "All clients receive owner change notifications via SSE",
         "Typecheck passes"
       ],
       "priority": 14,
       "passes": false,
-      "notes": "Depends on US-009/010 (client tracking + reconnect). This establishes the ownership model without the enforcement (US-015) or takeover (US-017/018)."
+      "notes": "Depends on US-009/010 (client tracking + reconnect). This establishes the ownership model without the enforcement (US-015) or takeover (US-017/018). Ownership state uses in-memory update_seq counter (non-persisted) for SSE event versioning consistency."
     },
     {
       "id": "US-015",
@@ -288,7 +292,7 @@
       ],
       "priority": 17,
       "passes": false,
-      "notes": "Depends on US-016 (activity heartbeat). retry status treated same as busy for all takeover logic. See PRD pseudocode for handleTakeover flow."
+      "notes": "Depends on US-016 (activity heartbeat). retry status treated same as busy for all takeover logic. See PRD pseudocode for handleTakeover flow. Full /instance/takeover API schema has 4 different 409 response variants: { reason: 'cooldown', retryAfter } (US-018), { reason: 'owner_active', ownerClientID }, { reason: 'active_sessions', ownerClientID, sessions }, { reason: 'owner_changed', ownerClientID } (US-018). Success 200: { ownerClientID }."
     },
     {
       "id": "US-018",
@@ -299,12 +303,13 @@
         "Concurrent takeover race: first succeeds, second gets 409 { reason: 'owner_changed', ownerClientID }",
         "Owner can takeover self (for reconnect token expiry recovery), also subject to cooldown",
         "Server publishes takeover.available broadcast event (via BusEvent.define) when availability changes (false→true or true→false)",
+        "Server schedules a timer after each owner activity report; if no new report arrives within TIMEOUT, re-evaluate takeover conditions and broadcast takeover.available if state changed. Also re-evaluate on discrete events (client disconnect, activity report, session status change)",
         "GET /clients includes takeoverAvailable field computed server-side (update the hardcoded false from US-011)",
         "Typecheck passes"
       ],
       "priority": 18,
       "passes": false,
-      "notes": "Depends on US-017 (takeover core). Adds cooldown, race protection, self-takeover, and broadcast event on top of core takeover logic."
+      "notes": "Depends on US-017 (takeover core). Adds cooldown, race protection, self-takeover, and broadcast event on top of core takeover logic. Conditions A and B are time-based (Date.now() - lastReport > TIMEOUT), so server needs a timer mechanism to detect when these conditions become true due to time passing."
     },
     {
       "id": "US-019",
@@ -329,17 +334,18 @@
       "title": "Reconnecting overlay and disconnection UI",
       "description": "As a TUI user, when my connection drops I need clear visual feedback and interaction freeze until reconnected.",
       "acceptanceCriteria": [
-        "SSE disconnect immediately shows full-screen semi-transparent overlay with 'Reconnecting...' text and countdown timer",
+        "SSE disconnect immediately shows full-screen semi-transparent overlay with 'Reconnecting...' text and countdown timer (timer reflects SDK's current exponential backoff interval)",
         "Overlay freezes all user interaction (prompt input, keyboard shortcuts) to prevent lost operations",
         "Reconnect success automatically dismisses overlay and restores interaction",
-        "After reconnect, bootstrap() runs and restores full state including sessions, messages, permissions, todos, client list, status",
-        "Client list fetched via GET /clients in non-blocking phase",
+        "On reconnect, client resets store (clears all cached data and update_seq values) before triggering bootstrap() — coordinates with US-019 store reset logic",
+        "After reconnect, bootstrap() runs and restores full state including: sessions (with child sessions), messages, parts, permissions, questions, todos, diffs, LSP, MCP, formatter, sandbox, vcs status",
+        "Client list fetched via GET /clients in non-blocking phase (role info already available from server.connected event)",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
       "priority": 20,
       "passes": false,
-      "notes": "Depends on US-019 (reconnect mechanism). sync.tsx currently does NOT listen for server.connected event."
+      "notes": "Depends on US-019 (reconnect mechanism). sync.tsx currently does NOT listen for server.connected event. The complete bootstrap data list must match all data types managed by sync.tsx."
     },
     {
       "id": "US-021",
@@ -351,6 +357,7 @@
         "Observer mode: prompt input box becomes disabled, shows 'Instance in use by another client' message",
         "Owner/Observer status change has visual transition (e.g., color flash)",
         "Observer sees permission/question dialogs but without interactive shortcuts (view only, with 'View Only' label)",
+        "Verify permission.asked, permission.replied, question.asked, and question.replied events are received by observer clients (existing broadcast behavior)",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
@@ -403,7 +410,8 @@
         "Client count tracked locally via client.connected/client.disconnected events, initialized from GET /clients",
         "Observer shows 'Owner is typing...' in message area only when viewing the matching session",
         "Typing indicator auto-hides after 2s with no new typing event",
-        "Typecheck passes"
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 24,
       "passes": false,

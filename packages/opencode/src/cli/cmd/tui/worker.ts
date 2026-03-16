@@ -11,6 +11,7 @@ import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
 import { registerAllHooks } from "@/session/hooks/register"
+import { Lockfile } from "@/server/lockfile"
 
 await Log.init({
   print: process.argv.includes("--print-logs"),
@@ -35,10 +36,23 @@ process.on("uncaughtException", (e) => {
   })
 })
 
-// Subscribe to global events and forward them via RPC
-GlobalBus.on("event", (event) => {
-  Rpc.emit("global.event", event)
-})
+// Parse --mode argument: "auto" (TUI-launched detached) or "serve" (opencode serve)
+const mode = (() => {
+  const idx = process.argv.indexOf("--mode")
+  if (idx === -1 || idx + 1 >= process.argv.length) return undefined
+  const val = process.argv[idx + 1]
+  if (val === "auto" || val === "serve") return val
+  return undefined
+})()
+
+const detached = mode !== undefined
+
+// Subscribe to global events and forward them via RPC (only in thread mode)
+if (!detached) {
+  GlobalBus.on("event", (event) => {
+    Rpc.emit("global.event", event)
+  })
+}
 
 let server: Bun.Server<BunWebSocketData> | undefined
 
@@ -83,7 +97,7 @@ const startEventStream = (directory: string) => {
       }
 
       for await (const event of events.stream) {
-        Rpc.emit("event", event as Event)
+        if (!detached) Rpc.emit("event", event as Event)
       }
 
       if (!signal.aborted) {
@@ -142,10 +156,47 @@ export const rpc = {
     if (eventStream.abort) eventStream.abort.abort()
     await Instance.disposeAll()
     if (server) server.stop(true)
+    if (detached) await Lockfile.remove(process.cwd())
   },
 }
 
-Rpc.listen(rpc)
+// In thread mode, listen for RPC. In detached mode, start HTTP server and write lock file.
+if (detached) {
+  const dir = process.cwd()
+  server = Server.listen({ port: 0, hostname: "127.0.0.1" })
+  const port = server.port!
+
+  const ok = await Lockfile.create(dir, {
+    pid: process.pid,
+    port,
+    token: null,
+    createdAt: Date.now(),
+  })
+
+  if (!ok) {
+    // Another Worker won the race — shut down
+    Log.Default.info("lock file already exists, another worker is running")
+    server.stop(true)
+    process.exit(0)
+  }
+
+  Log.Default.info("worker started (detached)", { mode, pid: process.pid, port })
+
+  // Clean up lock file on exit signals
+  const cleanup = async () => {
+    Log.Default.info("worker received exit signal, cleaning up")
+    if (eventStream.abort) eventStream.abort.abort()
+    await Instance.disposeAll()
+    if (server) server.stop(true)
+    await Lockfile.remove(dir)
+    process.exit(0)
+  }
+
+  process.on("SIGTERM", cleanup)
+  process.on("SIGINT", cleanup)
+} else {
+  Rpc.listen(rpc)
+}
 
 function getAuthorizationHeader(): string | undefined {
   const password = Flag.OPENCODE_SERVER_PASSWORD

@@ -14,6 +14,7 @@ import type { EventSource } from "./context/sdk"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
+import { Lockfile } from "@/server/lockfile"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -52,11 +53,50 @@ async function target() {
   return new URL("./worker.ts", import.meta.url)
 }
 
+/** Resolve the worker script path as a string for Bun.spawn(). */
+async function workerPath(): Promise<string> {
+  if (typeof OPENCODE_WORKER_PATH !== "undefined") return OPENCODE_WORKER_PATH
+  const dist = fileURLToPath(new URL("./cli/cmd/tui/worker.js", import.meta.url))
+  if (await Filesystem.exists(dist)) return dist
+  return fileURLToPath(new URL("./worker.ts", import.meta.url))
+}
+
 async function input(value?: string) {
   const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
   if (!value) return piped
   if (!piped) return value
   return piped + "\n" + value
+}
+
+/** Spawn Worker as a detached background process. Returns the child process. */
+async function spawnDetached(cwd: string): Promise<Bun.Subprocess> {
+  const script = await workerPath()
+  const args = ["bun", "run", script, "--mode", "auto"]
+  if (process.argv.includes("--print-logs")) args.push("--print-logs")
+
+  const child = Bun.spawn(args, {
+    cwd,
+    stdio: ["ignore", "ignore", "ignore"],
+    env: Object.fromEntries(
+      Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    ),
+  })
+  child.unref()
+
+  return child
+}
+
+/** Wait for lock file to appear and return its data. Polls with backoff. */
+async function waitForLockfile(dir: string, timeout = 10_000): Promise<Lockfile.Data> {
+  const start = Date.now()
+  let delay = 50
+  while (Date.now() - start < timeout) {
+    const data = await Lockfile.read(dir)
+    if (data) return data
+    await Bun.sleep(delay)
+    delay = Math.min(delay * 2, 500)
+  }
+  throw new Error("Timed out waiting for Worker to start")
 }
 
 export const TuiThreadCommand = cmd({
@@ -121,51 +161,6 @@ export const TuiThreadCommand = cmd({
         return
       }
 
-      const worker = new Worker(file, {
-        env: Object.fromEntries(
-          Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-        ),
-      })
-      worker.onerror = (e) => {
-        Log.Default.error(e)
-      }
-
-      const client = Rpc.client<typeof rpc>(worker)
-      const error = (e: unknown) => {
-        Log.Default.error(e)
-      }
-      const reload = () => {
-        client.call("reload", undefined).catch((err) => {
-          Log.Default.warn("worker reload failed", {
-            error: err instanceof Error ? err.message : String(err),
-          })
-        })
-      }
-      process.on("uncaughtException", error)
-      process.on("unhandledRejection", error)
-      process.on("SIGUSR2", reload)
-
-      let stopped = false
-      const stop = async () => {
-        if (stopped) return
-        stopped = true
-        process.off("uncaughtException", error)
-        process.off("unhandledRejection", error)
-        process.off("SIGUSR2", reload)
-        await withTimeout(client.call("shutdown", undefined), 5000).catch((error) => {
-          Log.Default.warn("worker shutdown failed", {
-            error: error instanceof Error ? error.message : String(error),
-          })
-        })
-        worker.terminate()
-      }
-
-      const prompt = await input(args.prompt)
-      const config = await Instance.provide({
-        directory: cwd,
-        fn: () => TuiConfig.get(),
-      })
-
       const network = await resolveNetworkOptions(args)
       const external =
         process.argv.includes("--port") ||
@@ -175,20 +170,96 @@ export const TuiThreadCommand = cmd({
         network.port !== 0 ||
         network.hostname !== "127.0.0.1"
 
-      const transport = external
-        ? {
-            url: (await client.call("server", network)).url,
-            fetch: undefined,
-            events: undefined,
-          }
-        : {
-            url: "http://opencode.internal",
-            fetch: createWorkerFetch(client),
-            events: createEventSource(client),
-          }
+      // Check for existing Worker via lock file
+      const existing = await Lockfile.acquire(cwd)
+
+      let transport: {
+        url: string
+        fetch: typeof fetch | undefined
+        events: EventSource | undefined
+      }
+
+      let cleanup: () => Promise<void>
+
+      if (existing) {
+        // Connect to existing Worker via HTTP
+        const url = `http://127.0.0.1:${existing.port}`
+        transport = { url, fetch: undefined, events: undefined }
+        cleanup = async () => {
+          // TUI doesn't own this Worker, just disconnect
+        }
+      } else if (external) {
+        // External mode: spawn Worker thread (existing behavior for network-exposed servers)
+        const worker = new Worker(file, {
+          env: Object.fromEntries(
+            Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+          ),
+        })
+        worker.onerror = (e) => {
+          Log.Default.error(e)
+        }
+
+        const client = Rpc.client<typeof rpc>(worker)
+        const error = (e: unknown) => {
+          Log.Default.error(e)
+        }
+        const reload = () => {
+          client.call("reload", undefined).catch((err: unknown) => {
+            Log.Default.warn("worker reload failed", {
+              error: err instanceof Error ? err.message : String(err),
+            })
+          })
+        }
+        process.on("uncaughtException", error)
+        process.on("unhandledRejection", error)
+        process.on("SIGUSR2", reload)
+
+        transport = {
+          url: (await client.call("server", network)).url,
+          fetch: undefined,
+          events: undefined,
+        }
+
+        let stopped = false
+        cleanup = async () => {
+          if (stopped) return
+          stopped = true
+          process.off("uncaughtException", error)
+          process.off("unhandledRejection", error)
+          process.off("SIGUSR2", reload)
+          await withTimeout(client.call("shutdown", undefined), 5000).catch((err: unknown) => {
+            Log.Default.warn("worker shutdown failed", {
+              error: err instanceof Error ? err.message : String(err),
+            })
+          })
+          worker.terminate()
+        }
+      } else {
+        // Default: spawn detached Worker process
+        await spawnDetached(cwd)
+        const lock = await waitForLockfile(cwd)
+        const url = `http://127.0.0.1:${lock.port}`
+        transport = { url, fetch: undefined, events: undefined }
+        cleanup = async () => {
+          // TUI launched this Worker but doesn't own its lifecycle.
+          // Worker runs independently (detached) and will self-manage.
+        }
+      }
+
+      const prompt = await input(args.prompt)
+      const config = await Instance.provide({
+        directory: cwd,
+        fn: () => TuiConfig.get(),
+      })
 
       setTimeout(() => {
-        client.call("checkUpgrade", { directory: cwd }).catch(() => {})
+        // Upgrade check — fire and forget
+        Instance.provide({
+          directory: cwd,
+          fn: async () => {
+            await (await import("@/cli/upgrade")).upgrade().catch(() => {})
+          },
+        }).catch(() => {})
       }, 1000).unref?.()
 
       try {
@@ -206,10 +277,10 @@ export const TuiThreadCommand = cmd({
             prompt,
             fork: args.fork,
           },
-          onExit: stop,
+          onExit: cleanup,
         })
       } finally {
-        await stop()
+        await cleanup()
       }
     } finally {
       unguard?.()

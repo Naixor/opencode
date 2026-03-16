@@ -36,6 +36,7 @@ import { Database } from "./storage/db"
 import { SecurityCommand } from "./cli/cmd/security"
 import { SandboxCommand } from "./cli/cmd/sandbox"
 import { LogViewerCommand } from "./cli/cmd/log-viewer"
+import { StopCommand } from "./cli/cmd/stop"
 import { registerAllHooks } from "./session/hooks/register"
 
 process.on("unhandledRejection", (e) => {
@@ -152,6 +153,7 @@ let cli = yargs(hideBin(process.argv))
   .command(SecurityCommand)
   .command(SandboxCommand)
   .command(LogViewerCommand)
+  .command(StopCommand)
 
 if (Installation.isLocal()) {
   cli = cli.command(WorkspaceServeCommand)
