@@ -558,7 +558,7 @@ export function Prompt(props: PromptProps) {
     if (sdk.connection().role === "observer") {
       toast.show({
         variant: "warning",
-        message: `Observer mode — ${keybind.print("instance_takeover")} to take ownership`,
+        message: "Observer mode — use commands to take ownership",
         duration: 3000,
       })
       return
@@ -1199,13 +1199,8 @@ export function Prompt(props: PromptProps) {
           </Show>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">
-              <Show when={sdk.connection().role === "observer"}>
-                <Show when={sdk.typing()}>
-                  <text fg={theme.textMuted}>owner is typing…</text>
-                </Show>
-                <text fg={theme.warning}>
-                  {keybind.print("instance_takeover")} <span style={{ fg: theme.textMuted }}>take ownership</span>
-                </text>
+              <Show when={sdk.connection().role === "observer" && sdk.typing()}>
+                <text fg={theme.textMuted}>owner is typing…</text>
               </Show>
               <Switch>
                 <Match when={store.mode === "normal"}>
