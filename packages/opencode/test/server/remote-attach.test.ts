@@ -262,6 +262,22 @@ describe("Ownership model", () => {
       expect(Client.ownerID()).toBeNull()
     })
   })
+
+  test("setOwner resets activity timestamps", async () => {
+    await withCtx(() => {
+      const first = Client.add({ directory: "/tmp", type: "tui", remoteIP: "127.0.0.1" })
+      Client.activity(true) // simulate owner activity
+      expect(Client.lastReportTime()).toBeGreaterThan(0)
+      expect(Client.lastActiveTime()).toBeGreaterThan(0)
+
+      const second = Client.add({ directory: "/tmp", type: "tui", remoteIP: "127.0.0.2" })
+      Client.setOwner(second.clientID)
+
+      // Activity timestamps should be reset after owner change
+      expect(Client.lastReportTime()).toBe(0)
+      expect(Client.lastActiveTime()).toBe(0)
+    })
+  })
 })
 
 // ──────────────────────────────────────────────
@@ -452,7 +468,7 @@ describe("POST /session/:sessionID/typing", () => {
     })
   })
 
-  test("non-owner gets 403", async () => {
+  test("non-owner gets 423 (locked)", async () => {
     await withCtx(async () => {
       Client.add({ directory: "/tmp", type: "tui", remoteIP: "127.0.0.1" })
       const observer = Client.add({ directory: "/tmp", type: "tui", remoteIP: "127.0.0.2" })
@@ -463,7 +479,7 @@ describe("POST /session/:sessionID/typing", () => {
           "X-OpenCode-Client-ID": observer.clientID,
         },
       })
-      expect(res.status).toBe(403)
+      expect(res.status).toBe(423)
     })
   })
 
@@ -577,6 +593,42 @@ describe("ClientID middleware", () => {
   test("GET requests work without clientID", async () => {
     const res = await fetch(`${base()}/clients`)
     expect(res.status).toBe(200)
+  })
+
+  test("observer write to non-exempt route gets 423", async () => {
+    await withCtx(async () => {
+      Client.add({ directory: "/tmp", type: "tui", remoteIP: "127.0.0.1" })
+      const observer = Client.add({ directory: "/tmp", type: "tui", remoteIP: "127.0.0.2" })
+      const res = await fetch(`${base()}/instance/dispose`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-OpenCode-Client-ID": observer.clientID,
+        },
+      })
+      expect(res.status).toBe(423)
+      const body = await res.json()
+      expect(body.ownerClientID).toBeTruthy()
+    })
+  })
+
+  test("observer takeover is exempt from 423", async () => {
+    await withCtx(async () => {
+      const owner = Client.add({ directory: "/tmp", type: "tui", remoteIP: "127.0.0.1" })
+      const observer = Client.add({ directory: "/tmp", type: "tui", remoteIP: "127.0.0.2" })
+      // Takeover should not get 423 — it has its own logic (409 when owner is active)
+      Client.activity(true)
+      const res = await fetch(`${base()}/instance/takeover`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-OpenCode-Client-ID": observer.clientID,
+        },
+        body: JSON.stringify({}),
+      })
+      // Should be 409 (owner_active), not 423
+      expect(res.status).toBe(409)
+    })
   })
 })
 

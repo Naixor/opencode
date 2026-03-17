@@ -901,6 +901,7 @@ export namespace Config {
       session_child_cycle: z.string().optional().default("right").describe("Go to next child session"),
       session_child_cycle_reverse: z.string().optional().default("left").describe("Go to previous child session"),
       session_parent: z.string().optional().default("up").describe("Go to parent session"),
+      instance_takeover: z.string().optional().default("<leader>o").describe("Take over ownership from observer mode"),
       terminal_suspend: z.string().optional().default("ctrl+z").describe("Suspend terminal"),
       terminal_title_toggle: z.string().optional().default("none").describe("Toggle terminal title"),
       tips_toggle: z.string().optional().default("<leader>h").describe("Toggle tips on home screen"),
@@ -1208,14 +1209,8 @@ export namespace Config {
           z.string(),
           z.object({
             description: z.string().describe("Description of when to use this category"),
-            model: z
-              .string()
-              .optional()
-              .describe("Model to use for tasks in this category (provider/model format)"),
-            prompt_append: z
-              .string()
-              .optional()
-              .describe("Additional prompt text appended for tasks in this category"),
+            model: z.string().optional().describe("Model to use for tasks in this category (provider/model format)"),
+            prompt_append: z.string().optional().describe("Additional prompt text appended for tasks in this category"),
           }),
         )
         .optional()
@@ -1227,10 +1222,7 @@ export namespace Config {
       sandbox: z
         .object({
           enabled: z.boolean().optional().default(false).describe("Enable OS-level sandbox for bash and MCP commands"),
-          paths: z
-            .array(z.string())
-            .optional()
-            .describe("Additional paths to allow read-write access in the sandbox"),
+          paths: z.array(z.string()).optional().describe("Additional paths to allow read-write access in the sandbox"),
         })
         .optional()
         .describe("OS-native sandbox configuration for kernel-level file system isolation"),
@@ -1243,7 +1235,11 @@ export namespace Config {
         .describe("Notification settings for task completion events"),
       llmLog: z
         .object({
-          enabled: z.boolean().optional().default(true).describe("Enable or disable LLM communication logging (default: true)"),
+          enabled: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe("Enable or disable LLM communication logging (default: true)"),
           max_records: z
             .number()
             .int()

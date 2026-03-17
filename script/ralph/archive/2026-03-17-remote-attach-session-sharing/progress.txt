@@ -1,0 +1,5 @@
+# Ralph Progress Log
+Feature: Remote Attach Session History Restoration
+Branch: ralph/remote-attach-history-restore
+Started: Sun Mar 16 2026
+---

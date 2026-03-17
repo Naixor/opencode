@@ -91,6 +91,25 @@ export function Prompt(props: PromptProps) {
 
   const textareaKeybindings = useTextareaKeybindings()
 
+  // Throttled typing notification for observers
+  let lastTyping = 0
+  function notifyTyping() {
+    const conn = sdk.connection()
+    if (conn.role !== "owner" || !conn.clientID || !props.sessionID) return
+    const now = Date.now()
+    if (now - lastTyping < 2000) return
+    lastTyping = now
+    const h = new Headers()
+    h.set("Content-Type", "application/json")
+    h.set("X-OpenCode-Client-ID", conn.clientID)
+    sdk
+      .fetch(`${sdk.url}/session/${props.sessionID}/typing`, {
+        method: "POST",
+        headers: h,
+      })
+      .catch(() => {})
+  }
+
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
@@ -534,6 +553,16 @@ export function Prompt(props: PromptProps) {
       exit()
       return
     }
+    sdk.markActive()
+    // Observer mode: block writes at the TUI level
+    if (sdk.connection().role === "observer") {
+      toast.show({
+        variant: "warning",
+        message: `Observer mode — ${keybind.print("instance_takeover")} to take ownership`,
+        duration: 3000,
+      })
+      return
+    }
     const selectedModel = local.model.current()
     if (!selectedModel) {
       promptModelWarning()
@@ -863,6 +892,8 @@ export function Prompt(props: PromptProps) {
                 setStore("prompt", "input", value)
                 autocomplete.onInput(value)
                 syncExtmarksWithPromptParts()
+                sdk.markActive()
+                notifyTyping()
               }}
               keyBindings={textareaKeybindings()}
               onKeyDown={async (e) => {
@@ -1168,6 +1199,14 @@ export function Prompt(props: PromptProps) {
           </Show>
           <Show when={status().type !== "retry"}>
             <box gap={2} flexDirection="row">
+              <Show when={sdk.connection().role === "observer"}>
+                <Show when={sdk.typing()}>
+                  <text fg={theme.textMuted}>owner is typing…</text>
+                </Show>
+                <text fg={theme.warning}>
+                  {keybind.print("instance_takeover")} <span style={{ fg: theme.textMuted }}>take ownership</span>
+                </text>
+              </Show>
               <Switch>
                 <Match when={store.mode === "normal"}>
                   <Show when={local.model.variant.list().length > 0}>

@@ -1,7 +1,7 @@
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import { createSimpleContext } from "./helper"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
-import { batch, createSignal, onCleanup, onMount } from "solid-js"
+import { batch, createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js"
 
 export type ConnectionState = {
   clientID: string | null
@@ -15,17 +15,6 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
   init: (props: { url: string; directory?: string; fetch?: typeof fetch; headers?: RequestInit["headers"] }) => {
     const abort = new AbortController()
-    const sdk = createOpencodeClient({
-      baseUrl: props.url,
-      signal: abort.signal,
-      directory: props.directory,
-      fetch: props.fetch,
-      headers: props.headers,
-    })
-
-    const emitter = createGlobalEmitter<{
-      [key in Event["type"]]: Extract<Event, { type: key }>
-    }>()
 
     const [connection, setConnection] = createSignal<ConnectionState>({
       clientID: null,
@@ -34,6 +23,63 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       ownerClientID: null,
       timeout: 60_000,
     })
+
+    // Inject X-OpenCode-Client-ID into every SDK request
+    const base = props.fetch ?? globalThis.fetch
+    const sdk = createOpencodeClient({
+      baseUrl: props.url,
+      signal: abort.signal,
+      directory: props.directory,
+      fetch: ((req: any) => {
+        req.timeout = false
+        const id = connection().clientID
+        if (id) req.headers.set("X-OpenCode-Client-ID", id)
+        return base(req)
+      }) as any,
+      headers: props.headers,
+    })
+
+    const emitter = createGlobalEmitter<{
+      [key in Event["type"]]: Extract<Event, { type: key }>
+    }>()
+
+    // Track actual user interaction for heartbeat
+    let lastInteraction = Date.now()
+    function markActive() {
+      lastInteraction = Date.now()
+    }
+
+    // Owner activity heartbeat (10s interval)
+    createEffect(() => {
+      const conn = connection()
+      if (conn.role !== "owner" || !conn.clientID) return
+      const id = conn.clientID
+      const tick = () => {
+        const h = new Headers(props.headers as HeadersInit)
+        h.set("Content-Type", "application/json")
+        h.set("X-OpenCode-Client-ID", id)
+        // Report active only if user interacted within the last 30s
+        const active = Date.now() - lastInteraction < 30_000
+        base(`${props.url.replace(/\/$/, "")}/instance/activity`, {
+          method: "POST",
+          headers: h,
+          body: JSON.stringify({ active }),
+          signal: abort.signal,
+        }).catch(() => {})
+      }
+      tick()
+      const interval = setInterval(tick, 10_000)
+      onCleanup(() => clearInterval(interval))
+    })
+
+    // Typing indicator state — auto-expires after 3s
+    const [typing, setTyping] = createSignal(false)
+    let typingTimer: Timer | undefined
+    function handleTyping() {
+      setTyping(true)
+      if (typingTimer) clearTimeout(typingTimer)
+      typingTimer = setTimeout(() => setTyping(false), 3000)
+    }
 
     let queue: Event[] = []
     let timer: Timer | undefined
@@ -67,9 +113,15 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         }
       }
 
+      // Track typing indicator from owner
+      const raw = event as { type: string; properties: Record<string, unknown> }
+      if (raw.type === "session.typing") {
+        const conn = connection()
+        if (conn.role === "observer") handleTyping()
+      }
+
       // Update role when ownership changes (e.g. takeover)
       // Event type exists at runtime via BusEvent registry but not in SDK generated types
-      const raw = event as { type: string; properties: Record<string, unknown> }
       if (raw.type === "instance.owner.changed") {
         const prev = connection()
         if (prev.clientID) {
@@ -125,6 +177,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     onCleanup(() => {
       abort.abort()
       if (timer) clearTimeout(timer)
+      if (typingTimer) clearTimeout(typingTimer)
     })
 
     return {
@@ -133,6 +186,8 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       url: props.url,
       fetch: props.fetch ?? globalThis.fetch,
       connection,
+      typing,
+      markActive,
     }
   },
 })

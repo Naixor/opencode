@@ -1,0 +1,94 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/remote-attach-history-restore",
+  "description": "Remote Attach Session History Restoration - Fix incomplete message history when attaching to remote sessions",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix SSE race condition — always perform full sync on session entry",
+      "description": "As an observer attaching to a remote session, I want the full session history to load when I enter the session view, even if SSE events have already delivered some recent messages.",
+      "acceptanceCriteria": [
+        "sync.session.sync(sessionID) always runs when navigating to a session, regardless of whether store.message[sessionID] already has entries from SSE events",
+        "The sync merges fetched history with any SSE-delivered messages (no duplicates, no gaps) using message ID-based deduplication",
+        "fullSyncedSessions flag is only set after a successful full sync, not after partial SSE population",
+        "Existing local session navigation continues to work correctly (no regression)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "The guard `if (!sync.data.message[sessionId]?.length)` causes the bug — SSE events populate messages before sync runs, so sync gets skipped. The fetched set is authoritative for ordering; SSE-delivered messages newer than the fetched set should be appended."
+    },
+    {
+      "id": "US-002",
+      "title": "Remove hard 100-message cap on initial sync",
+      "description": "As a user viewing any session (local or remote), I want to see all messages in the session history, not just the latest 100.",
+      "acceptanceCriteria": [
+        "sync.session.sync() fetches all messages for the session (remove limit: 100 or use a sufficiently large default)",
+        "Server endpoint GET /session/:sessionID/message supports unlimited fetch when no limit is specified",
+        "Performance remains acceptable for sessions with up to 500 messages",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Currently sdk.client.session.messages({ sessionID, limit: 100 }) hard-caps at 100. Check both the SDK call site and the server endpoint for the limit."
+    },
+    {
+      "id": "US-003",
+      "title": "Remove rolling window eviction for active sessions",
+      "description": "As an observer watching an active session, I want new messages to accumulate without evicting old ones, so I can review the full conversation.",
+      "acceptanceCriteria": [
+        "The message.updated handler no longer evicts the oldest message when count exceeds 100",
+        "Raise the in-memory message threshold to 500 as a safety bound",
+        "Memory usage remains reasonable for sessions up to 500 messages",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The message.updated event handler currently evicts the oldest message when the in-memory array exceeds 100. Raise to 500 as a safe upper bound until pagination is implemented."
+    },
+    {
+      "id": "US-004",
+      "title": "Add cursor-based pagination to session messages API",
+      "description": "As a developer, I need cursor-based pagination on the messages API so clients can lazily load older messages.",
+      "acceptanceCriteria": [
+        "Server endpoint GET /session/:sessionID/message supports 'before' query parameter (message ID) for cursor-based pagination",
+        "When 'before' is provided, return messages with ID < before, ordered descending, limited to batch size",
+        "MessageV2.stream() or equivalent query adds WHERE id < :before clause when cursor provided",
+        "Endpoint continues to return all messages when neither limit nor before is specified",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Server-side only. MessageV2.stream() already loads from SQLite ordered by ID. Adding WHERE id < :before is straightforward. TUI scroll-to-top trigger is in the next story."
+    },
+    {
+      "id": "US-005",
+      "title": "TUI scroll-to-top lazy loading for older messages",
+      "description": "As a user viewing a session with hundreds of messages, I want to load older messages on demand when I scroll to the top of the message list.",
+      "acceptanceCriteria": [
+        "TUI detects when the user scrolls to the top of the message list",
+        "Triggers sdk.client.session.messages({ sessionID, limit: 50, before: oldestMessageID }) to fetch older messages",
+        "A loading indicator appears while older messages are being fetched",
+        "Fetched older messages are prepended to the existing list without disrupting scroll position",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Depends on US-004 (server pagination). The TUI uses ink-based rendering. Scroll-to-top detection may require tracking viewport offset in the message list component."
+    },
+    {
+      "id": "US-006",
+      "title": "Fork preserves full history for remote-attached sessions",
+      "description": "As a user who attaches remotely and then forks the session, I want the forked session to contain the complete message history.",
+      "acceptanceCriteria": [
+        "Session.fork() on the server always copies all messages regardless of client-side visibility",
+        "Verify fork works correctly when initiated by an observer-turned-owner",
+        "Fork does not depend on client-side message count — operates entirely on server-side data",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Session.fork() should already operate on server-side data. This story verifies the behavior and fixes if needed. May be a quick verification + minor fix."
+    }
+  ]
+}

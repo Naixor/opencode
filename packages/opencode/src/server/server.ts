@@ -107,11 +107,27 @@ export namespace Server {
           return basicAuth({ username, password })(c, next)
         })
         .use(async (c, next) => {
-          // ClientID validation for write operations
+          // ClientID validation and owner enforcement for write operations.
+          // Routes that handle their own owner logic are exempt.
           if (c.req.method !== "GET" && c.req.method !== "OPTIONS") {
             const clientID = c.req.header("X-OpenCode-Client-ID")
             if (clientID && !Client.has(clientID)) {
               return c.json({ error: "Forbidden: unknown client" }, { status: 403 })
+            }
+            // Enforce owner-only writes when an owner exists.
+            // Exempt: /instance/takeover (for observers), /instance/activity (has own check),
+            // /log (diagnostics), /event (SSE), /global/* (cross-workspace).
+            const exempt =
+              c.req.path === "/instance/takeover" ||
+              c.req.path === "/instance/activity" ||
+              c.req.path === "/log" ||
+              c.req.path === "/event" ||
+              c.req.path.startsWith("/global/")
+            if (!exempt) {
+              const owner = Client.ownerID()
+              if (owner && clientID && clientID !== owner) {
+                return c.json({ error: "Locked", ownerClientID: owner }, { status: 423 })
+              }
             }
           }
           return next()
@@ -320,20 +336,23 @@ export namespace Server {
 
             const now = Date.now()
             const currentOwner = Client.ownerID()
+            const force = c.req.valid("json").force === true
 
-            // Check cooldown
+            // Check cooldown (even force respects cooldown to prevent ping-pong)
             if (Client.inCooldown()) {
               return c.json({ reason: "cooldown", retryAfter: Client.cooldownRemaining() }, { status: 409 })
             }
 
-            // Check takeover conditions
-            const reportTimeout = Client.lastReportTime() > 0 && now - Client.lastReportTime() > TIMEOUT
-            const activeTimeout = Client.lastActiveTime() > 0 && now - Client.lastActiveTime() > TIMEOUT
-            const ownerGone = currentOwner !== null && !Client.has(currentOwner)
-            const available = reportTimeout || activeTimeout || ownerGone || currentOwner === null
+            // Force takeover bypasses activity checks
+            if (!force) {
+              const reportTimeout = Client.lastReportTime() > 0 && now - Client.lastReportTime() > TIMEOUT
+              const activeTimeout = Client.lastActiveTime() > 0 && now - Client.lastActiveTime() > TIMEOUT
+              const ownerGone = currentOwner !== null && !Client.has(currentOwner)
+              const available = reportTimeout || activeTimeout || ownerGone || currentOwner === null
 
-            if (!available) {
-              return c.json({ reason: "owner_active", ownerClientID: currentOwner }, { status: 409 })
+              if (!available) {
+                return c.json({ reason: "owner_active", ownerClientID: currentOwner }, { status: 409 })
+              }
             }
 
             // Takeover

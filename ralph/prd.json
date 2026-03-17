@@ -1,0 +1,93 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/remote-attach-history-restore",
+  "description": "Fix remote attach session history restoration — ensure attached sessions display complete message history identical to local sessions",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix SSE race condition — always run full sync on session entry",
+      "description": "As an observer attaching to a remote session, I want the full session history to load when I enter the session view, even if SSE events have already delivered some recent messages.",
+      "acceptanceCriteria": [
+        "In src/cli/cmd/tui/routes/session/index.tsx, remove the guard `if (!sync.data.message[sessionId]?.length)` so that `sync.session.sync(sessionID)` always runs on mount",
+        "In src/cli/cmd/tui/context/sync.tsx `sync()` method, the fetched messages from API become the authoritative base — merge with any SSE-delivered messages that have newer IDs than the fetched set",
+        "The `fullSyncedSessions` flag is only set after a successful API fetch completes, not by SSE event population",
+        "Existing local session navigation still works correctly (navigating between sessions loads history)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Key files: src/cli/cmd/tui/routes/session/index.tsx (line ~1951), src/cli/cmd/tui/context/sync.tsx (lines 472-493). The guard at line 1951 checks `!sync.data.message[sessionId]?.length` — SSE events populate this before sync runs, causing the skip."
+    },
+    {
+      "id": "US-002",
+      "title": "Remove hard 100-message limit on initial sync",
+      "description": "As a user viewing any session, I want to see all messages in the session history, not just the latest 100.",
+      "acceptanceCriteria": [
+        "In src/cli/cmd/tui/context/sync.tsx line 476, remove the `limit: 100` parameter from `sdk.client.session.messages()` call so all messages are fetched",
+        "Server endpoint GET /session/:sessionID/message already returns all messages when limit is omitted — verify this behavior in src/server/routes/session.ts",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Simple change: remove `limit: 100` from sync.tsx line 476. The server already supports unlimited fetch when no limit is specified."
+    },
+    {
+      "id": "US-003",
+      "title": "Remove rolling window eviction in message.updated handler",
+      "description": "As an observer watching an active session, I want new messages to accumulate without evicting old ones, so I can review the full conversation.",
+      "acceptanceCriteria": [
+        "In src/cli/cmd/tui/context/sync.tsx, remove or raise the eviction logic in the `message.updated` handler (lines ~254-271) that shifts the oldest message when count exceeds 100",
+        "Raise the threshold to 500 as a safety bound to prevent unbounded memory growth",
+        "New messages from SSE accumulate in the store without removing previously loaded history",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "The eviction code is in the message.updated case handler around lines 254-271 of sync.tsx. It checks `if (updated.length > 100)` and shifts the oldest message + deletes its parts."
+    },
+    {
+      "id": "US-004",
+      "title": "Add cursor-based pagination to server messages endpoint",
+      "description": "As a developer, I need the server to support cursor-based pagination so the TUI can lazily load older messages.",
+      "acceptanceCriteria": [
+        "Add optional `before` query parameter (message ID) to GET /session/:sessionID/message in src/server/routes/session.ts",
+        "When `before` is provided, return messages with ID < before, ordered descending, limited by `limit` parameter",
+        "When `before` is omitted, existing behavior is unchanged (return all or limited messages from newest)",
+        "Update Session.messages() in src/session/index.ts to accept and pass through the `before` parameter to the database query",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "MessageV2.stream() loads from SQLite ordered by ID. Adding a WHERE id < :before clause is straightforward. Also need to update the Zod validator for the query params."
+    },
+    {
+      "id": "US-005",
+      "title": "Add scroll-to-top lazy loading in TUI session view",
+      "description": "As a user viewing a large session, I want to scroll to the top and have older messages load automatically.",
+      "acceptanceCriteria": [
+        "TUI session view detects when the user scrolls to the top of the message list",
+        "When scrolled to top, trigger sdk.client.session.messages({ sessionID, limit: 50, before: oldestMessageID }) to fetch older messages",
+        "A loading indicator appears while older messages are being fetched",
+        "Fetched older messages are prepended to the existing message list in the store",
+        "If no more messages exist (empty response), do not re-fetch on subsequent scroll-to-top",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Depends on US-004 for the `before` parameter. The TUI uses solid-js rendering. Need to track viewport offset in the message list component."
+    },
+    {
+      "id": "US-006",
+      "title": "Verify fork preserves full history from server",
+      "description": "As a user who attaches remotely and forks the session, I want the forked session to contain the complete message history.",
+      "acceptanceCriteria": [
+        "Verify that Session.fork() in src/session/index.ts copies ALL messages from the server database, not from client-side state",
+        "Add a test or verify existing test in test/server/remote-attach.test.ts that forks a session with >100 messages and confirms all messages are present in the fork",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Session.fork() already operates on server-side data via Session.messages(). This story is primarily verification — confirm the server path is correct and add test coverage if missing."
+    }
+  ]
+}

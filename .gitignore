@@ -38,6 +38,7 @@ test-security-project
 
 # Test-fix workflow
 tasks/test-fix-ledger.json
+**/.test-timing.json
 
 # Logs
 .claude/logs/

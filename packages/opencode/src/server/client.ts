@@ -1,13 +1,10 @@
 import crypto from "crypto"
 import z from "zod"
-import fsp from "fs/promises"
-import path from "path"
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Log } from "@/util/log"
-import { Global } from "@/global"
 import { TIMEOUT } from "./lifecycle"
-import { setOwnerState } from "./owner"
+import { getOwner, setOwnerState } from "./owner"
 
 const log = Log.create({ service: "client" })
 
@@ -24,7 +21,6 @@ export namespace Client {
   }
 
   const clients = new Map<string, Entry>()
-  let owner: string | null = null
 
   export const Event = {
     Connected: BusEvent.define(
@@ -72,9 +68,8 @@ export namespace Client {
   } {
     const clientID = crypto.randomUUID()
     const reconnectToken = crypto.randomUUID()
-    const role: Role = owner === null ? "owner" : "observer"
+    const role: Role = getOwner() === null ? "owner" : "observer"
     if (role === "owner") {
-      owner = clientID
       setOwnerState(clientID)
     }
 
@@ -96,7 +91,7 @@ export namespace Client {
       remoteIP: opts.remoteIP,
     })
 
-    return { clientID, reconnectToken, role, ownerClientID: owner }
+    return { clientID, reconnectToken, role, ownerClientID: getOwner() }
   }
 
   const graceTimers = new Map<string, Timer>()
@@ -137,7 +132,7 @@ export namespace Client {
     Bus.publish(Event.Disconnected, { clientID })
 
     // If owner left, promote the earliest connected observer
-    if (owner === clientID) {
+    if (getOwner() === clientID) {
       let next: string | null = null
       let earliest = Infinity
       for (const [id, e] of clients) {
@@ -162,35 +157,15 @@ export namespace Client {
 
   /** Get the current owner client ID. */
   export function ownerID(): string | null {
-    return owner
+    return getOwner()
   }
 
-  const ownerFile = path.join(Global.Path.data, "owner.json")
-
-  /** Persist owner clientID to disk for server restart recovery. */
-  async function persistOwner(clientID: string | null) {
-    if (clientID) {
-      await fsp.writeFile(ownerFile, JSON.stringify({ clientID })).catch(() => {})
-    } else {
-      await fsp.unlink(ownerFile).catch(() => {})
-    }
-  }
-
-  /** Read persisted owner clientID. */
-  export async function loadPersistedOwner(): Promise<string | null> {
-    try {
-      const raw = await fsp.readFile(ownerFile, "utf-8")
-      const data = JSON.parse(raw)
-      return data.clientID ?? null
-    } catch {
-      return null
-    }
-  }
-
-  /** Set owner (for takeover). */
+  /** Set owner (for takeover or auto-promotion). Resets activity timestamps. */
   export function setOwner(clientID: string | null) {
-    owner = clientID
     setOwnerState(clientID)
+    // Reset activity tracking so stale timestamps from previous owner don't trigger false takeover
+    lastReport = 0
+    lastActive = 0
     if (clientID) {
       const entry = clients.get(clientID)
       if (entry) entry.role = "owner"
@@ -199,7 +174,6 @@ export namespace Client {
     for (const [id, entry] of clients) {
       if (id !== clientID) entry.role = "observer"
     }
-    persistOwner(clientID)
     Bus.publish(Event.OwnerChanged, { ownerClientID: clientID })
   }
 

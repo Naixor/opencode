@@ -1,0 +1,94 @@
+# Ralph Progress Log
+Started: Sat Mar 14 2026
+---
+
+## Codebase Patterns
+- Typecheck for the main opencode package: `cd packages/opencode && bun run typecheck` (or `bun run typecheck` from repo root)
+- Git paths must be relative to repo root (`/Users/bytedance/GithubWorkspace/@Naixor/opencode`), not packages/opencode
+- Working directory may be `packages/opencode` due to turbo — always use absolute or repo-root-relative paths for git
+- `Identifier` prefixes must be registered in `src/id/id.ts` before using `Identifier.ascending(prefix)`
+- Drizzle migration generation: `cd packages/opencode && bun drizzle-kit generate --name <name>` — must manually add IF NOT EXISTS after
+- New `*.sql.ts` files auto-discovered by drizzle config; new table exports must be added to `src/storage/schema.ts`
+- Background periodic tasks use `Scheduler.register({ id, interval, run, scope })` from `src/scheduler/index.ts`
+- `BusEvent.define()` + `Bus.publish()` for broadcast events; `stream.writeSSE()` for connection-level inline events
+- SDK wrapper layer is `packages/sdk/js/v2/client.ts` — custom logic goes here, not in auto-generated gen/ directory
+- `sdk.tsx` handles SSE event processing; `sync.tsx` manages data sync and bootstrap
+- `worker.ts` has SSE reconnect loop (250ms fixed) that should be removed in favor of SDK exponential backoff
+- `createWorkerFetch()` and `createEventSource()` are the RPC code paths to remove
+- `SessionPrompt.state()` is Record<string, { abort, callbacks }> — assertNotBusy checks if sessionID exists in state
+- Session parent-child: child session prompts are server-initiated, not via client HTTP API
+- `Global.Path.data` gives XDG data home path for opencode — use for lock files and persistent data
+- Atomic file creation: use `fs.openSync()` with `O_WRONLY | O_CREAT | O_EXCL` flags, catch EEXIST
+- `Bun.file().text()` for reads, `node:fs` sync for atomic O_EXCL writes
+- `Filesystem.write()` helper exists for normal writes with mode support, but doesn't do atomic O_EXCL
+- Auth token: `AuthToken.set()` then middleware validates `Authorization: Bearer <token>` header
+- Client tracking: `Client.add()` on SSE connect, `Client.disconnect()` (grace period) on SSE abort
+- Lifecycle: `Lifecycle.enable(shutdown)` for auto-exit mode, `Lifecycle.connect()/disconnect()` for SSE tracking
+- Session.LockedError → 423 Locked response in server.ts onError handler
+- `sql\`update_seq + 1\`` in Drizzle `.set()` calls for atomic counter increment
+
+## Mon Mar 16 2026 - US-001
+- Implemented Worker lock file module at `packages/opencode/src/server/lockfile.ts`
+- Files changed: `packages/opencode/src/server/lockfile.ts` (new)
+- Features:
+  - `Lockfile.Schema` — Zod schema with pid, port, token, createdAt
+  - `Lockfile.filepath(dir)` — path convention: `$XDG_DATA_HOME/opencode/<encoded-dir>/worker.lock`
+  - `Lockfile.create(dir, data)` — atomic creation with O_EXCL, permissions 0o600, returns false if exists
+  - `Lockfile.read(dir)` — reads and validates with Zod, returns undefined on failure
+  - `Lockfile.acquire(dir)` — reads + stale detection via kill -0, cleans up stale locks
+  - `Lockfile.remove(dir)` — deletes lock file, ignores if missing
+- **Learnings for future iterations:**
+  - `encode()` replaces `/` with `_` and truncates + SHA-256 suffix if over 200 bytes
+  - Lock file path uses `Global.Path.data` (xdg data home) not project directory
+  - `process.kill(pid, 0)` is the Node/Bun way to check if a process is alive (signal 0)
+---
+
+## Mon Mar 16 2026 - US-002
+- Implemented Worker detached process launcher
+- Files changed:
+  - `packages/opencode/src/cli/cmd/tui/worker.ts` — added `--mode=auto|serve` parameter, detached process mode with lock file creation and signal handlers
+  - `packages/opencode/src/cli/cmd/tui/thread.ts` — check lock file for existing Worker, spawn detached Worker or connect to existing, added `spawnDetached()` and `waitForLockfile()` helpers
+  - `packages/opencode/src/cli/cmd/stop.ts` — new `opencode stop` command that reads lock file PID and sends SIGTERM
+  - `packages/opencode/src/index.ts` — registered StopCommand
+- **Learnings for future iterations:**
+  - Worker detached mode uses `Bun.spawn()` with `stdio: ["ignore", "ignore", "ignore"]` and `child.unref()` to fully detach
+  - Lock file polling uses exponential backoff (50ms → 500ms) with 10s timeout
+  - In detached mode, Worker handles its own SIGTERM/SIGINT for lock file cleanup
+  - External mode (--port/--hostname/--mdns) still uses Worker thread (not detached) for backward compat
+  - `server.port!` needs non-null assertion since Bun types mark it optional
+---
+
+## Mon Mar 16 2026 - US-003
+- Removed in-process RPC and unified to HTTP/SSE
+- Files changed: worker.ts (removed RPC, GlobalBus, event stream), thread.ts (removed createWorkerFetch, createEventSource), sdk.tsx (removed EventSource type, custom event source branch), app.tsx (removed events prop)
+---
+
+## Mon Mar 16 2026 - US-004
+- Worker lifecycle modes and idle watchdog
+- Files: lifecycle.ts (new), worker.ts (--mode, --hostname, --port), serve.ts (lock file, mutual exclusion, auth)
+---
+
+## Mon Mar 16 2026 - US-005 + US-006
+- Auth token middleware and local TUI auto-auth
+- Files: auth-token.ts (new), server.ts (Bearer middleware), worker.ts (auth token generation), thread.ts (lock file token), attach.ts (--auth-token), SDK v2/client.ts (authToken param)
+---
+
+## Mon Mar 16 2026 - US-007 + US-008
+- update_seq DB migration and increment integration
+- Files: session.sql.ts (update_seq columns), migration (ALTER TABLE), session/index.ts (sql`update_seq + 1` on updates), message-v2.ts (updateSeq in schemas/fromRow)
+---
+
+## Mon Mar 16 2026 - US-009..US-018
+- Client tracking, reconnect tokens, grace period, owner/observer model, takeover, activity heartbeat
+- Files: client.ts (new - full client state machine), server.ts (SSE client tracking, /clients, /instance/activity, /instance/takeover, clientID validation middleware), lifecycle.ts (TIMEOUT constant), prompt.ts (assertCanWrite, LockedError)
+---
+
+## Mon Mar 16 2026 - US-019..US-026
+- SSE reconnect bootstrap, typing broadcast, owner recovery persistence
+- Files: sync.tsx (server.connected → bootstrap), sdk.tsx (ConnectionState signal), client.ts (typing event, persistOwner, loadPersistedOwner), server.ts (typing endpoint)
+- **Learnings:**
+  - `BusEvent.define()` auto-registers events for SSE broadcast
+  - Client module is singleton state — no Instance scoping needed
+  - LockedError (423) handled in server.ts onError handler
+  - Owner persistence uses simple JSON file in Global.Path.data
+---
