@@ -383,33 +383,6 @@ export function Session() {
     }
   }
 
-  async function attemptTakeover(dialog: DialogContext, force: boolean) {
-    const h = new Headers()
-    h.set("Content-Type", "application/json")
-    const id = sdk.connection().clientID
-    if (id) h.set("X-OpenCode-Client-ID", id)
-    const res = await sdk
-      .fetch(`${sdk.url}/instance/takeover`, {
-        method: "POST",
-        headers: h,
-        body: JSON.stringify({ force }),
-      })
-      .catch(() => undefined)
-    if (res?.ok) {
-      toast.show({ message: "You are now the owner", variant: "success" })
-    } else {
-      const body = await res?.json().catch(() => undefined)
-      const reason =
-        body?.reason === "cooldown"
-          ? "Takeover on cooldown, try again later"
-          : body?.reason === "owner_active"
-            ? `Owner is still active — use "Force take ownership" to override`
-            : "Takeover failed"
-      toast.show({ message: reason, variant: "error", duration: 5000 })
-    }
-    dialog.clear()
-  }
-
   const command = useCommandDialog()
   command.register(() => [
     {
@@ -543,25 +516,6 @@ export function Session() {
           .then(() => toast.show({ message: "Session unshared successfully", variant: "success" }))
           .catch(() => toast.show({ message: "Failed to unshare session", variant: "error" }))
         dialog.clear()
-      },
-    },
-    {
-      title: "Take ownership",
-      value: "instance.takeover",
-      keybind: "instance_takeover",
-      category: "Session",
-      enabled: sdk.connection().role === "observer",
-      onSelect: async (dialog) => {
-        await attemptTakeover(dialog, false)
-      },
-    },
-    {
-      title: "Force take ownership",
-      value: "instance.takeover.force",
-      category: "Session",
-      enabled: sdk.connection().role === "observer",
-      onSelect: async (dialog) => {
-        await attemptTakeover(dialog, true)
       },
     },
     {
