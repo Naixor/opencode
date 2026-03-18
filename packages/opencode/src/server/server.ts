@@ -49,9 +49,21 @@ import { Lifecycle } from "./lifecycle"
 import { AuthToken } from "./auth-token"
 import { Client } from "./client"
 import { TIMEOUT } from "./lifecycle"
+import os from "os"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
+
+function getPublicIP(): string | undefined {
+  const interfaces = os.networkInterfaces()
+  for (const addrs of Object.values(interfaces)) {
+    if (!addrs) continue
+    for (const addr of addrs) {
+      if (addr.family === "IPv4" && !addr.internal) return addr.address
+    }
+  }
+  return undefined
+}
 
 export namespace Server {
   const log = Log.create({ service: "server" })
@@ -712,10 +724,16 @@ export namespace Server {
           }),
           async (c) => {
             c.header("Cache-Control", "no-store")
-            const url = Server.url().toString().replace(/\/$/, "")
+            const raw = Server.url()
+            const publicURL = new URL(raw.toString().replace(/\/$/, ""))
+            if (publicURL.hostname === "127.0.0.1" || publicURL.hostname === "localhost" || publicURL.hostname === "::1") {
+              const ip = getPublicIP()
+              if (ip) publicURL.hostname = ip
+            }
+            const url = publicURL.toString()
             const token = AuthToken.get()
             const command = [
-              "opencode",
+              "lark-opencode",
               "attach",
               url,
               ...(token ? ["--auth-token", token] : []),

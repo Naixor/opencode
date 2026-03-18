@@ -4,9 +4,8 @@ import { useTheme } from "../context/theme"
 import { useDialog } from "@tui/ui/dialog"
 import { useSync } from "@tui/context/sync"
 import { useSDK } from "@tui/context/sdk"
-import { For, Match, Switch, Show, createMemo, createSignal, createResource, onCleanup } from "solid-js"
+import { For, Match, Switch, Show, createMemo, createResource } from "solid-js"
 import { Installation } from "@/installation"
-import { Clipboard } from "@tui/util/clipboard"
 
 export type DialogStatusProps = {}
 
@@ -15,10 +14,6 @@ export function DialogStatus() {
   const { theme } = useTheme()
   const dialog = useDialog()
   const sdk = useSDK()
-  const [copied, setCopied] = createSignal(false)
-  let timer: Timer | undefined
-  onCleanup(() => timer && clearTimeout(timer))
-
   const [attach] = createResource(async () => {
     const res = await sdk.fetch(`${sdk.url}/attach-info`).catch(() => undefined)
     if (!res || !res.ok) return undefined
@@ -26,15 +21,6 @@ export function DialogStatus() {
     if (!ct.includes("application/json")) return undefined
     return (res.json() as Promise<{ url: string; token: string | null; command: string }>).catch(() => undefined)
   })
-
-  const copy = async () => {
-    const info = attach()
-    if (!info) return
-    await Clipboard.copy(info.command)
-    setCopied(true)
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => setCopied(false), 2000)
-  }
 
   const enabledFormatters = createMemo(() => sync.data.formatter.filter((f) => f.enabled))
 
@@ -73,7 +59,7 @@ export function DialogStatus() {
           esc
         </text>
       </box>
-      <text fg={theme.textMuted}>OpenCode v{Installation.VERSION}</text>
+      <text fg={theme.textMuted}>Lark-OpenCode v{Installation.VERSION}</text>
       <Show when={attach()}>
         {(info) => (
           <box>
@@ -84,11 +70,6 @@ export function DialogStatus() {
               <text fg={theme.textMuted} wrapMode="word">
                 {info().command}
               </text>
-            </box>
-            <box flexDirection="row" gap={1}>
-              <box onMouseUp={copy} backgroundColor={copied() ? theme.success : theme.backgroundElement} padding={1}>
-                <text fg={copied() ? theme.background : theme.text}>{copied() ? "Copied!" : "Copy command"}</text>
-              </box>
             </box>
           </box>
         )}
