@@ -11,6 +11,18 @@ async function realpath(p: string): Promise<string> {
   return path.join(resolvedParent, path.basename(p))
 }
 
+async function findGitRoot(from: string): Promise<string | null> {
+  let dir = from
+  while (true) {
+    const gitDir = path.join(dir, ".git")
+    const stat = await fs.stat(gitDir).catch(() => null)
+    if (stat) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+}
+
 function subpath(p: string): string {
   return `(subpath "${p}")`
 }
@@ -37,7 +49,9 @@ export async function generateBuiltins(projectRoot: string): Promise<string> {
   // --- Writable: project node_modules and .git ---
   lines.push(";; --- Project node_modules and .git (rw) ---")
   lines.push(`(allow file-write* ${subpath(path.join(resolvedRoot, "node_modules"))})`)
-  lines.push(`(allow file-write* ${subpath(path.join(resolvedRoot, ".git"))})`)
+  const gitRoot = await findGitRoot(resolvedRoot)
+  const gitDir = path.join(gitRoot ?? resolvedRoot, ".git")
+  lines.push(`(allow file-write* ${subpath(await realpath(gitDir))})`)
   lines.push("")
 
   // --- Writable: temp directories ---

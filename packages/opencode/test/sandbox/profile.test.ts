@@ -1,7 +1,8 @@
 import { test, expect, beforeAll } from "bun:test"
-import { generateProfile, type ProfileInput } from "../../src/sandbox/profile"
+import { generateProfile, generateFullProfile, type ProfileInput } from "../../src/sandbox/profile"
 import fs from "fs/promises"
 import path from "path"
+import os from "os"
 
 // Use a resolved path to avoid macOS /tmp → /private/tmp issues in assertions
 const RAW_PROJECT_ROOT = "/tmp/test-project"
@@ -112,4 +113,42 @@ test("extra paths added as write allow rules", async () => {
   )
   expect(profile).toContain("(allow file-write*")
   expect(profile).toContain(`(subpath "/custom/path")`)
+})
+
+test("full profile .git rule resolves to git repo root when projectRoot is a subdirectory", async () => {
+  // Create a temp dir structure: repoRoot/.git + repoRoot/subdir/
+  const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), "sandbox-git-root-"))
+  const repoRoot = path.join(tmpBase, "repo")
+  const subDir = path.join(repoRoot, "subdir")
+  await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true })
+  await fs.mkdir(subDir, { recursive: true })
+
+  try {
+    const resolvedRepo = await fs.realpath(repoRoot)
+
+    // projectRoot is the subdirectory, but .git is at the parent
+    const profile = await generateFullProfile(makeInput({ projectRoot: subDir }))
+    expect(profile).toContain(`(subpath "${path.join(resolvedRepo, ".git")}")`)
+    // Should NOT contain subdir/.git
+    const resolvedSub = await fs.realpath(subDir)
+    expect(profile).not.toContain(`(subpath "${path.join(resolvedSub, ".git")}")`)
+  } finally {
+    await fs.rm(tmpBase, { recursive: true, force: true })
+  }
+})
+
+test("full profile .git rule falls back to projectRoot when no .git found", async () => {
+  // Create a temp dir with no .git anywhere
+  const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), "sandbox-no-git-"))
+  const noGitDir = path.join(tmpBase, "norepo")
+  await fs.mkdir(noGitDir, { recursive: true })
+
+  try {
+    const resolved = await fs.realpath(noGitDir)
+    const profile = await generateFullProfile(makeInput({ projectRoot: noGitDir }))
+    // Falls back to projectRoot/.git
+    expect(profile).toContain(`(subpath "${path.join(resolved, ".git")}")`)
+  } finally {
+    await fs.rm(tmpBase, { recursive: true, force: true })
+  }
 })

@@ -138,6 +138,71 @@ describe.if(IS_MACOS)("sandbox-exec integration", () => {
   })
 })
 
+describe.if(IS_MACOS)("sandbox git subdirectory support", () => {
+  let repoDir: string
+  let subDir: string
+  let gitSandbox: SeatbeltSandbox
+
+  beforeAll(async () => {
+    // Create a git repo with a subdirectory
+    repoDir = await fs.mkdtemp(path.join(os.tmpdir(), "sandbox-git-sub-"))
+    subDir = path.join(repoDir, "packages", "app")
+    await fs.mkdir(subDir, { recursive: true })
+
+    // Initialize a real git repo
+    const initProc = Bun.spawn(["git", "init", repoDir], { stdout: "pipe", stderr: "pipe" })
+    await initProc.exited
+
+    // Create a sandbox with projectRoot set to the subdirectory
+    gitSandbox = new SeatbeltSandbox()
+    await gitSandbox.generatePolicy({
+      projectRoot: subDir,
+      allowlist: ["**"],
+      deny: [],
+      extraPaths: [],
+    })
+  })
+
+  afterAll(async () => {
+    await fs.rm(repoDir, { recursive: true, force: true }).catch(() => {})
+  })
+
+  test("sandboxed git can write to .git in parent repo root", async () => {
+    // Stage a file from the subdirectory — this writes to repoDir/.git
+    const testFile = path.join(subDir, "test.txt")
+    await fs.writeFile(testFile, "hello")
+
+    const cmd = gitSandbox.wrap(["git", "-C", repoDir, "add", testFile])
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
+    const stderr = await new Response(proc.stderr).text()
+    const code = await proc.exited
+    expect(stderr).not.toContain("Operation not permitted")
+    expect(code).toBe(0)
+  })
+
+  test("sandboxed git can create index.lock in parent repo .git", async () => {
+    // Commit triggers index.lock creation in repoDir/.git
+    const cmd = gitSandbox.wrap([
+      "git",
+      "-C",
+      repoDir,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@test.com",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "test commit",
+    ])
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
+    const stderr = await new Response(proc.stderr).text()
+    const code = await proc.exited
+    expect(stderr).not.toContain("Operation not permitted")
+    expect(code).toBe(0)
+  })
+})
+
 describe.if(IS_MACOS)("SBPL profile generation", () => {
   test("full profile includes version header and allow default", async () => {
     const profile = await generateFullProfile({
