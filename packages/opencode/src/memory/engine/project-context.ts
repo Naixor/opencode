@@ -1,7 +1,5 @@
 import z from "zod"
 import path from "path"
-import { existsSync } from "fs"
-import { readFile } from "fs/promises"
 import { Instance } from "@/project/instance"
 import { Log } from "@/util/log"
 
@@ -56,12 +54,12 @@ export namespace ProjectContext {
   export async function detectLanguages(root: string): Promise<string[]> {
     const found = new Set<string>()
     for (const marker of LANGUAGE_MARKERS) {
-      if (existsSync(path.join(root, marker.file))) {
+      if (await Bun.file(path.join(root, marker.file)).exists()) {
         found.add(marker.language)
       }
     }
     // package.json without tsconfig → javascript
-    if (existsSync(path.join(root, "package.json")) && !found.has("typescript")) {
+    if ((await Bun.file(path.join(root, "package.json")).exists()) && !found.has("typescript")) {
       found.add("javascript")
     }
     return [...found]
@@ -111,11 +109,10 @@ export namespace ProjectContext {
     const found = new Set<string>()
 
     // Node.js: check package.json dependencies
-    const pkgPath = path.join(root, "package.json")
-    if (existsSync(pkgPath)) {
+    const pkgFile = Bun.file(path.join(root, "package.json"))
+    if (await pkgFile.exists()) {
       try {
-        const raw = await readFile(pkgPath, "utf-8")
-        const pkg = JSON.parse(raw)
+        const pkg = await pkgFile.json()
         const allDeps = {
           ...pkg.dependencies,
           ...pkg.devDependencies,
@@ -131,10 +128,10 @@ export namespace ProjectContext {
     }
 
     // Python: check pyproject.toml dependencies
-    const pyprojectPath = path.join(root, "pyproject.toml")
-    if (existsSync(pyprojectPath)) {
+    const pyFile = Bun.file(path.join(root, "pyproject.toml"))
+    if (await pyFile.exists()) {
       try {
-        const raw = await readFile(pyprojectPath, "utf-8")
+        const raw = await pyFile.text()
         for (const [pkg, stack] of Object.entries(PYTHON_STACK_KEYWORDS)) {
           if (raw.includes(pkg)) {
             found.add(stack)
@@ -146,10 +143,10 @@ export namespace ProjectContext {
     }
 
     // Go: check go.mod for popular modules
-    const goModPath = path.join(root, "go.mod")
-    if (existsSync(goModPath)) {
+    const goFile = Bun.file(path.join(root, "go.mod"))
+    if (await goFile.exists()) {
       try {
-        const raw = await readFile(goModPath, "utf-8")
+        const raw = await goFile.text()
         if (raw.includes("github.com/gin-gonic/gin")) found.add("gin")
         if (raw.includes("github.com/labstack/echo")) found.add("echo")
         if (raw.includes("github.com/gofiber/fiber")) found.add("fiber")
@@ -160,10 +157,10 @@ export namespace ProjectContext {
     }
 
     // Rust: check Cargo.toml for popular crates
-    const cargoPath = path.join(root, "Cargo.toml")
-    if (existsSync(cargoPath)) {
+    const cargoFile = Bun.file(path.join(root, "Cargo.toml"))
+    if (await cargoFile.exists()) {
       try {
-        const raw = await readFile(cargoPath, "utf-8")
+        const raw = await cargoFile.text()
         if (raw.includes("actix-web")) found.add("actix")
         if (raw.includes("axum")) found.add("axum")
         if (raw.includes("tokio")) found.add("tokio")

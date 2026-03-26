@@ -313,6 +313,7 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
+    let stopped: string | undefined
     const session = await Session.get(sessionID)
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
@@ -326,7 +327,10 @@ export namespace SessionPrompt {
       let tasks: (MessageV2.CompactionPart | MessageV2.SubtaskPart)[] = []
       for (let i = msgs.length - 1; i >= 0; i--) {
         const msg = msgs[i]
-        if (!lastUser && msg.info.role === "user") lastUser = msg.info as MessageV2.User
+        if (!lastUser && msg.info.role === "user") {
+          lastUser = msg.info as MessageV2.User
+          stopped = lastUser.agent
+        }
         if (!lastAssistant && msg.info.role === "assistant") lastAssistant = msg.info as MessageV2.Assistant
         if (!lastFinished && msg.info.role === "assistant" && msg.info.finish)
           lastFinished = msg.info as MessageV2.Assistant
@@ -774,6 +778,11 @@ export namespace SessionPrompt {
       continue
     }
     SessionCompaction.prune({ sessionID })
+    HookChain.execute("session-lifecycle", {
+      sessionID,
+      event: "agent.stopped",
+      agent: stopped,
+    }).catch(() => {})
     for await (const item of MessageV2.stream({ sessionID })) {
       if (item.info.role === "user") continue
       const queued = state()[sessionID]?.callbacks ?? []

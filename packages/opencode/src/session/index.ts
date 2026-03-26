@@ -23,6 +23,7 @@ import { fn } from "@/util/fn"
 import { Command } from "../command"
 import { Snapshot } from "@/snapshot"
 import { WorkspaceContext } from "../control-plane/workspace-context"
+import { HookChain } from "./hooks"
 
 import type { Provider } from "@/provider/provider"
 import { PermissionNext } from "@/permission/next"
@@ -329,6 +330,10 @@ export namespace Session {
     Bus.publish(Event.Updated, {
       info: result,
     })
+    HookChain.execute("session-lifecycle", {
+      sessionID: result.id,
+      event: "session.created",
+    }).catch(() => {})
     return result
   }
 
@@ -678,6 +683,17 @@ export namespace Session {
         await remove(child.id)
       }
       await unshare(sessionID).catch(() => {})
+      // Dispatch session.deleted to HookChain so cleanup hooks can run
+      // (memory caches, step counters, dirty sets, etc.)
+      await HookChain.execute("session-lifecycle", {
+        sessionID,
+        event: "session.deleted",
+      }).catch((err) => {
+        log.warn("session.deleted hook chain error", {
+          sessionID,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      })
       // CASCADE delete handles messages and parts automatically
       Database.use((db) => {
         db.delete(SessionTable).where(eq(SessionTable.id, sessionID)).run()

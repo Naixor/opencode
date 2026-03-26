@@ -18,8 +18,30 @@ export namespace LlmLogCapture {
     return getCurrentLogId_impl(sessionID)
   }
 
+  /**
+   * Update the request row with headers after they are assembled.
+   * Headers are built after the pre-llm hook, so we capture them separately.
+   */
+  export function captureHeaders(sessionID: string, headers: Record<string, string | undefined>): void {
+    const logId = getCurrentLogId(sessionID)
+    if (!logId) return
+    try {
+      const filtered = Object.fromEntries(Object.entries(headers).filter((e): e is [string, string] => e[1] != null))
+      Database.use((db) => {
+        db.update(LlmLogRequestTable).set({ headers: filtered }).where(eq(LlmLogRequestTable.llm_log_id, logId)).run()
+      })
+    } catch (err) {
+      log.error("failed to capture request headers", {
+        error: err instanceof Error ? err.message : String(err),
+        sessionID,
+      })
+    }
+  }
+
   export function register(): void {
     HookChain.register("llm-log-capture", "pre-llm", 999, async (ctx) => {
+      if (ctx.metadata?.background) return
+
       const config = await Config.get()
       if (config.llmLog?.enabled === false) return
 
@@ -139,9 +161,7 @@ export namespace LlmLogCapture {
             .where(
               and(
                 eq(LlmLogToolCallTable.llm_log_id, llmLogId),
-                callId
-                  ? eq(LlmLogToolCallTable.call_id, callId)
-                  : eq(LlmLogToolCallTable.tool_name, ctx.toolName),
+                callId ? eq(LlmLogToolCallTable.call_id, callId) : eq(LlmLogToolCallTable.tool_name, ctx.toolName),
                 eq(LlmLogToolCallTable.status, "running"),
               ),
             )
@@ -182,6 +202,7 @@ export namespace LlmLogCapture {
         finishReason: string
         model: { id: string; cost?: Record<string, any> }
         assistantMessage: { id: string; parts?: any[] }
+        response?: { id?: string; timestamp?: Date; modelId?: string; headers?: Record<string, string> }
       }
 
       const now = Date.now()
@@ -209,7 +230,10 @@ export namespace LlmLogCapture {
 
         const rawResponseData = {
           finishReason: data.finishReason,
-          modelId: data.model.id,
+          modelId: data.response?.modelId ?? data.model.id,
+          id: data.response?.id,
+          timestamp: data.response?.timestamp,
+          headers: data.response?.headers,
         }
         const rawResponse = Bun.gzipSync(Buffer.from(JSON.stringify(rawResponseData)))
 
@@ -251,6 +275,71 @@ export namespace LlmLogCapture {
         log.info("captured response log", { llmLogId, sessionID: ctx.sessionID, status })
       } catch (err) {
         log.error("failed to capture response log", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionID: ctx.sessionID,
+          llmLogId,
+        })
+      }
+    })
+
+    // Finalize pending logs on error/abort so they don't stay "pending" forever
+    HookChain.register("llm-log-error-capture", "session-lifecycle", 998, async (ctx) => {
+      if (ctx.event !== "session.error" && ctx.event !== "agent.error") return
+
+      const config = await Config.get()
+      if (config.llmLog?.enabled === false) return
+
+      const logState = currentLlmLogState().get(ctx.sessionID)
+      if (!logState) return
+      const { logId: llmLogId, timeStart } = logState
+
+      const now = Date.now()
+      const status = ctx.event === "agent.error" ? "aborted" : "error"
+
+      try {
+        const error = (ctx.data as { error?: unknown })?.error ?? null
+        const serialized = error
+          ? typeof error === "object" && "name" in (error as any)
+            ? { name: (error as any).name, message: (error as any).message, ...(error as any).data }
+            : { message: String(error) }
+          : null
+
+        // Only update if still pending (step.finished may have already finalized it)
+        Database.use((db) => {
+          const row = db
+            .select({ status: LlmLogTable.status })
+            .from(LlmLogTable)
+            .where(eq(LlmLogTable.id, llmLogId))
+            .get()
+          if (!row || row.status !== "pending") return
+
+          db.update(LlmLogTable)
+            .set({
+              time_end: now,
+              duration_ms: now - timeStart,
+              status,
+            })
+            .where(eq(LlmLogTable.id, llmLogId))
+            .run()
+
+          // Write error details into response table so log-viewer can display them
+          if (serialized) {
+            db.insert(LlmLogResponseTable)
+              .values({
+                id: Identifier.ascending("log"),
+                llm_log_id: llmLogId,
+                completion_text: null,
+                tool_calls: null,
+                raw_response: null,
+                error: serialized,
+              })
+              .run()
+          }
+        })
+
+        log.info("finalized pending log on error", { llmLogId, sessionID: ctx.sessionID, status })
+      } catch (err) {
+        log.error("failed to finalize pending log on error", {
           error: err instanceof Error ? err.message : String(err),
           sessionID: ctx.sessionID,
           llmLogId,

@@ -1268,19 +1268,23 @@ export namespace Config {
         .object({
           enabled: z.boolean().optional().describe("Enable memory system"),
           autoExtract: z.boolean().optional().describe("Enable automatic memory extraction on compaction"),
-          autoOptimize: z.boolean().optional().describe("Enable automatic memory optimization (decay + candidate detection)"),
+          extractInterval: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Number of LLM steps between periodic memory extractions (default: 10)"),
+          autoOptimize: z
+            .boolean()
+            .optional()
+            .describe("Enable automatic memory optimization (decay + candidate detection)"),
           injectLimit: z
             .number()
             .int()
             .positive()
             .optional()
             .describe("Maximum tokens for memory injection into system prompt (default: 2000)"),
-          decayHalfLife: z
-            .number()
-            .int()
-            .positive()
-            .optional()
-            .describe("Decay half-life in days (default: 30)"),
+          decayHalfLife: z.number().int().positive().optional().describe("Decay half-life in days (default: 30)"),
           injectPoolLimit: z
             .number()
             .int()
@@ -1294,14 +1298,12 @@ export namespace Config {
             .optional()
             .describe("Maximum team memories cached locally (default: 100)"),
           recallModel: z.string().optional().describe("Model for memory-recall agent (null = auto select small model)"),
-          recallProvider: z.string().optional().describe("Provider for memory-recall agent (null = follow main provider)"),
-          optimizerModel: z.string().optional().describe("Model for LLM optimization (null = auto select)"),
-          managerPort: z
-            .number()
-            .int()
-            .positive()
+          recallProvider: z
+            .string()
             .optional()
-            .describe("Memory Manager Web UI port (default: 19836)"),
+            .describe("Provider for memory-recall agent (null = follow main provider)"),
+          optimizerModel: z.string().optional().describe("Model for LLM optimization (null = auto select)"),
+          managerPort: z.number().int().positive().optional().describe("Memory Manager Web UI port (default: 19836)"),
           teamServerUrl: z.string().url().optional().describe("Feishu team server URL for team memory sync"),
           projectId: z.string().optional().describe("Override auto-detected project ID"),
           languages: z.array(z.string()).optional().describe("Override auto-detected languages"),

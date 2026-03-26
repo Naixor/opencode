@@ -14,6 +14,7 @@ function makeMemory(overrides?: Partial<Memory.Info>): Memory.Info {
     source: { sessionId: "sess_1", method: "explicit" },
     inject: false,
     score: 10.0,
+    baseScore: 10.0,
     useCount: 0,
     hitCount: 0,
     createdAt: now,

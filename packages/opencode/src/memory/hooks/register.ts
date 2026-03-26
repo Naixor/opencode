@@ -15,8 +15,12 @@ import { registerOptimizerHook } from "./optimizer-hook"
  *
  *   session-lifecycle:
  *     200 - memory-extract-compaction (compaction-time extraction)
- *     210 - memory-extract-recovery (startup recovery)
+ *     201 - memory-extract-periodic (every N steps)
+ *     205 - memory-extract-cleanup (step counter cleanup)
  *     220 - memory-optimizer (periodic maintenance)
+ *
+ * NOTE: Startup recovery (recoveryExtract) is NOT a hook —
+ * it runs from InstanceBootstrap on app startup, independently of session events.
  */
 export function registerMemoryHooks(): void {
   registerMemoryInjector()

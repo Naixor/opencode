@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test"
 import * as fs from "fs/promises"
 import path from "path"
 import { tmpdir } from "../fixture/fixture"
-import { load, sections, inject_sections } from "../../src/memory/prompt/loader"
+import { load, sections, injectSections } from "../../src/memory/prompt/loader"
 import { render } from "../../src/memory/prompt/template"
 
 describe("prompt integration", () => {
@@ -77,7 +77,7 @@ describe("prompt integration", () => {
       })
 
       const tpl = await load("inject", [tmp.path])
-      const parts = inject_sections(tpl)
+      const parts = injectSections(tpl)
 
       const items = "- [tool] Use Hono (framework)\n- [style] No semicolons"
       const rendered = render(parts.injection, { MEMORY_ITEMS: items })

@@ -16,6 +16,8 @@ import PROMPT_ORACLE from "./prompt/oracle.txt"
 import PROMPT_SISYPHUS from "./prompt/sisyphus.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import PROMPT_MEMORY_EXTRACTOR from "./prompt/memory-extractor.txt"
+import PROMPT_MEMORY_RECALL from "./prompt/memory-recall.txt"
 import { PermissionNext } from "@/permission/next"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
@@ -80,7 +82,8 @@ export namespace Agent {
     const result: Record<string, Info> = {
       sisyphus: {
         name: "sisyphus",
-        description: "Primary orchestration agent. Coordinates tasks through systematic delegation and direct execution.",
+        description:
+          "Primary orchestration agent. Coordinates tasks through systematic delegation and direct execution.",
         options: {},
         prompt: PROMPT_SISYPHUS,
         temperature: 0.1,
@@ -278,6 +281,38 @@ export namespace Agent {
           user,
         ),
         prompt: PROMPT_SUMMARY,
+      },
+      "memory-extractor": {
+        name: "memory-extractor",
+        mode: "subagent",
+        prompt: PROMPT_MEMORY_EXTRACTOR,
+        options: {},
+        native: true,
+        hidden: true,
+        temperature: 0,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+          }),
+          user,
+        ),
+      },
+      "memory-recall": {
+        name: "memory-recall",
+        mode: "subagent",
+        prompt: PROMPT_MEMORY_RECALL,
+        options: {},
+        native: true,
+        hidden: true,
+        temperature: 0,
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+          }),
+          user,
+        ),
       },
     }
 

@@ -72,6 +72,7 @@ describe("LLM Log Capture", () => {
     expect(preTool.some((h) => h.name === "llm-log-tool-start")).toBe(true)
     expect(postTool.some((h) => h.name === "llm-log-tool-finish")).toBe(true)
     expect(lifecycle.some((h) => h.name === "llm-log-response-capture")).toBe(true)
+    expect(lifecycle.some((h) => h.name === "llm-log-error-capture")).toBe(true)
 
     HookChain.reset()
   })

@@ -38,6 +38,7 @@ export const LlmLogRequestTable = sqliteTable("llm_log_request", {
   messages: blob().notNull(),
   tools: text({ mode: "json" }),
   options: text({ mode: "json" }),
+  headers: text({ mode: "json" }),
   ...Timestamps,
 })
 

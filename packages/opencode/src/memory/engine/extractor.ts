@@ -1,5 +1,4 @@
 import z from "zod"
-import { generateObject, type ModelMessage } from "ai"
 import { Log } from "@/util/log"
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
@@ -10,13 +9,20 @@ import { load, sections } from "../prompt/loader"
 import { render } from "../prompt/template"
 import { ConfigPaths } from "@/config/paths"
 import { Instance } from "@/project/instance"
+import { Session } from "@/session"
+import { SessionPrompt } from "@/session/prompt"
 
 export namespace MemoryExtractor {
   const log = Log.create({ service: "memory.extractor" })
 
+  // Concurrency guard: prevent multiple extractions on the same session
+  const inflight = new Set<string>()
+
   // --- LLM extraction result schema ---
 
   export const ExtractedItem = z.object({
+    action: z.enum(["create", "update"]).default("create"),
+    targetID: z.string().optional(),
     content: z.string(),
     category: Memory.Category,
     tags: z.array(z.string()).default([]),
@@ -24,15 +30,10 @@ export namespace MemoryExtractor {
   })
   export type ExtractedItem = z.infer<typeof ExtractedItem>
 
+  const Schema = z.object({ items: z.array(ExtractedItem) })
+
   /**
    * /remember command handler: extract memory with full conversation context.
-   *
-   * Takes the user's input and recent messages, builds a context snapshot,
-   * and stores the memory with full traceability.
-   *
-   * NOTE: LLM-based disambiguation is not yet implemented.
-   * For now, stores the user's input directly with context snapshot.
-   * When LLM integration is ready, replace with llmExtract() call.
    */
   export async function rememberWithContext(
     sessionID: string,
@@ -44,12 +45,9 @@ export namespace MemoryExtractor {
       tags?: string[]
     },
   ): Promise<Memory.Info> {
-    // Build context snapshot from recent messages
     const contextWindow = recentMessages.slice(-10)
     const contextSnapshot = contextWindow.map((m) => `[${m.role}]: ${m.content}`).join("\n---\n")
 
-    // NOTE: In the full implementation, use LLM to disambiguate userInput
-    // using the context. For now, store userInput directly.
     const content = userInput
     const category = options?.category ?? "context"
     const tags = options?.tags ?? []
@@ -82,83 +80,118 @@ export namespace MemoryExtractor {
   }
 
   /**
+   * Resolve the model ref for memory agents from config or default.
+   */
+  async function model() {
+    const cfg = await Config.get()
+    return cfg.memory?.recallProvider && cfg.memory?.recallModel
+      ? { providerID: cfg.memory.recallProvider, modelID: cfg.memory.recallModel }
+      : await Provider.defaultModel()
+  }
+
+  /**
+   * Parse JSON from LLM text response, handling markdown code fences.
+   */
+  function parse(text: string): z.infer<typeof Schema> | undefined {
+    // Strip markdown code fences
+    const clean = text.replace(/```(?:json)?\s*\n?([\s\S]*?)\n?```/g, "$1").trim()
+    // Try to find JSON object
+    const start = clean.indexOf("{")
+    if (start === -1) return undefined
+    const end = clean.lastIndexOf("}")
+    if (end === -1) return undefined
+    const result = Schema.safeParse(JSON.parse(clean.slice(start, end + 1)))
+    return result.success ? result.data : undefined
+  }
+
+  /**
    * Extract memories from a session's conversation history.
    *
-   * Called during compaction or startup recovery.
-   * Analyzes the full conversation to find persistent preferences,
-   * patterns, and knowledge worth remembering.
-   *
-   * Uses LLM (generateObject) to identify extractable knowledge.
-   * Idempotent via `extracted:{sessionID}` meta key.
+   * Uses the standard subagent pipeline (SessionPrompt.prompt) for full
+   * security, hook chain, log capture, and provider transform support.
    */
   export async function extractFromSession(
     sessionID: string,
-    messages?: Array<{ role: string; content: string }>,
+    messages: Array<{ role: string; content: string }>,
   ): Promise<Memory.Info[]> {
-    // Check idempotency
-    const metaKey = `extracted:${sessionID}`
-    const alreadyExtracted = await Memory.getMeta(metaKey)
-    if (alreadyExtracted) {
-      log.info("session already extracted, skip", { sessionID })
-      return []
-    }
-
-    if (!messages || messages.length === 0) {
+    if (messages.length === 0) {
       log.info("no messages to extract from", { sessionID })
-      await Memory.setMeta(metaKey, Date.now())
       return []
     }
 
-    // Build context snapshot
+    if (inflight.has(sessionID)) {
+      log.info("extraction already in flight, skipping", { sessionID })
+      return []
+    }
+    inflight.add(sessionID)
+
     const contextWindow = messages.slice(-20)
     const contextSnapshot = contextWindow.map((m) => `[${m.role}]: ${m.content}`).join("\n---\n")
 
     try {
-      const cfg = await Config.get()
-      const modelRef =
-        cfg.memory?.recallProvider && cfg.memory?.recallModel
-          ? { providerID: cfg.memory.recallProvider, modelID: cfg.memory.recallModel }
-          : await Provider.defaultModel()
-
-      const model = await Provider.getModel(modelRef.providerID, modelRef.modelID)
-      const language = await Provider.getLanguage(model)
-
       const tpl = await load("extract", await ConfigPaths.directories(Instance.directory, Instance.worktree))
       const parts = sections(tpl)
+      const existing = await Memory.list()
+      const prompt = buildAutoExtractPrompt(contextWindow, existing, parts.analysis)
 
-      const prompt = buildAutoExtractPrompt(contextWindow, parts.analysis)
+      log.info("extractFromSession: invoking subagent", { sessionID })
 
-      const result = await generateObject({
-        temperature: 0,
-        messages: [
-          {
-            role: "system",
-            content: parts.system,
-          } satisfies ModelMessage,
-          {
-            role: "user",
-            content: prompt,
-          } satisfies ModelMessage,
-        ],
-        model: language,
-        schema: z.object({
-          items: z.array(ExtractedItem),
-        }),
+      const session = await Session.create({
+        parentID: sessionID,
+        title: "memory-extractor",
       })
 
-      const extracted = result.object.items
+      const result = await SessionPrompt.prompt({
+        sessionID: session.id,
+        model: await model(),
+        agent: "memory-extractor",
+        system: parts.system,
+        parts: [{ type: "text", text: prompt }],
+      })
+
+      // Parse JSON from the text response
+      const text = result.parts
+        .filter((p) => p.type === "text")
+        .map((p) => (p as any).text ?? "")
+        .join("")
+      const parsed = parse(text)
+      const extracted = parsed?.items ?? []
+
       if (extracted.length === 0) {
         log.info("no memories worth extracting", { sessionID })
-        await Memory.setMeta(metaKey, Date.now())
         return []
       }
 
-      // Deduplicate against existing memories
-      const existing = await Memory.list()
+      // Apply each action
       const existingContents = new Set(existing.map((m) => m.content.toLowerCase()))
+      const existingIDs = new Map(existing.map((m) => [m.id, m]))
 
-      const created: Memory.Info[] = []
+      const changed: Memory.Info[] = []
       for (const item of extracted) {
+        if (item.action === "update" && item.targetID) {
+          const target = existingIDs.get(item.targetID)
+          if (target) {
+            const updated = await Memory.update(target.id, {
+              content: item.content,
+              category: item.category,
+              tags: [...new Set([...target.tags, ...item.tags])],
+              citations: [...new Set([...(target.citations ?? []), ...item.citations])],
+              source: {
+                ...target.source,
+                sessionID,
+                method: "auto",
+                contextSnapshot,
+              },
+            })
+            if (updated) {
+              changed.push(updated)
+              await Bus.publish(MemoryEvent.Updated, { info: updated })
+            }
+            continue
+          }
+          log.info("update target not found, creating instead", { targetID: item.targetID })
+        }
+
         if (existingContents.has(item.content.toLowerCase())) continue
 
         const memory = await Memory.create({
@@ -174,32 +207,34 @@ export namespace MemoryExtractor {
             contextSnapshot,
           },
         })
-        created.push(memory)
+        changed.push(memory)
         await Bus.publish(MemoryEvent.Created, { info: memory })
       }
 
       log.info("extracted memories from session", {
         sessionID,
         extracted: extracted.length,
-        created: created.length,
-        deduplicated: extracted.length - created.length,
+        created: changed.filter((m) => m.source.method === "auto" && !existingIDs.has(m.id)).length,
+        updated: changed.filter((m) => existingIDs.has(m.id)).length,
+        skipped: extracted.length - changed.length,
       })
 
-      // Mark as extracted (idempotency guard)
-      await Memory.setMeta(metaKey, Date.now())
-      return created
+      return changed
     } catch (err) {
-      log.error("LLM extraction failed, marking as extracted to prevent retry storm", { sessionID, error: err })
-      // Mark as extracted even on failure to prevent infinite retry
-      await Memory.setMeta(metaKey, Date.now())
+      log.error("LLM extraction failed", {
+        sessionID,
+        error: err,
+        errorName: err instanceof Error ? err.name : "unknown",
+        errorMessage: err instanceof Error ? err.message : String(err),
+        errorStack: err instanceof Error ? err.stack : undefined,
+        errorCause: err instanceof Error ? (err as any).cause : undefined,
+      })
       return []
+    } finally {
+      inflight.delete(sessionID)
     }
   }
 
-  /**
-   * Build the LLM extraction prompt for /remember disambiguation.
-   * Exported for testing and future LLM integration.
-   */
   export function buildRememberPrompt(userInput: string, contextSnapshot: string): string {
     return [
       `The user said: "${userInput}"`,
@@ -217,18 +252,25 @@ export namespace MemoryExtractor {
     ].join("\n")
   }
 
-  /**
-   * Build the LLM extraction prompt for auto-extract.
-   * Exported for testing and future LLM integration.
-   */
-  export function buildAutoExtractPrompt(messages: Array<{ role: string; content: string }>, tpl?: string): string {
-    const formattedMessages = messages
+  function formatExisting(memories: Memory.Info[]): string {
+    if (memories.length === 0) return "No existing memories."
+    return memories.map((m) => `- [${m.id}] (${m.category}) ${m.content}`).join("\n")
+  }
+
+  export function buildAutoExtractPrompt(
+    messages: Array<{ role: string; content: string }>,
+    existing: Memory.Info[],
+    tpl?: string,
+  ): string {
+    const conversation = messages
       .slice(-20)
       .map((m) => `[${m.role}]: ${m.content}`)
       .join("\n---\n")
 
+    const memorySummary = formatExisting(existing)
+
     if (tpl) {
-      return render(tpl, { CONVERSATION: formattedMessages })
+      return render(tpl, { CONVERSATION: conversation, EXISTING_MEMORIES: memorySummary })
     }
 
     return [
@@ -241,12 +283,25 @@ export namespace MemoryExtractor {
       '- Project conventions ("API response format: { code, data, message }") → EXTRACT',
       '- Temporary context ("help me look at this bug") → DO NOT extract',
       "",
-      "Conversation:",
-      formattedMessages,
+      "## Existing memories",
       "",
-      "If nothing is worth extracting, return an empty array.",
-      "For each extracted item, output JSON:",
-      '[{ "content": "...", "category": "...", "tags": [...], "citations": [...] }]',
+      memorySummary,
+      "",
+      "## Rules for action",
+      "",
+      "For each piece of knowledge worth remembering:",
+      '- If it refines, extends, or supersedes an existing memory, use action "update" with the target memory\'s ID.',
+      "  Merge the old and new information into a single coherent content string.",
+      '- If it is genuinely new, use action "create".',
+      "- Do NOT create a memory that duplicates or overlaps with an existing one; update it instead.",
+      "",
+      "## Conversation",
+      "",
+      conversation,
+      "",
+      'If nothing is worth extracting, return an empty items array: { "items": [] }',
+      "",
+      "Respond ONLY with the JSON object. No explanation before or after.",
     ].join("\n")
   }
 }

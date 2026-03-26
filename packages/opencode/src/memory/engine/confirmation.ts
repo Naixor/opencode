@@ -22,7 +22,7 @@ export namespace MemoryConfirmation {
     for (const memory of pendings) {
       const ageInDays = (now - memory.createdAt) / (1000 * 60 * 60 * 24)
       if (ageInDays >= CONFIRM_MIN_DAYS && memory.hitCount >= CONFIRM_MIN_HITS) {
-        const updated = await Memory.update(memory.id, { status: "confirmed" })
+        const updated = await Memory.update(memory.id, { status: "confirmed", confirmedAt: now })
         if (updated) {
           log.info("auto-confirmed memory", { id: memory.id, ageInDays, hitCount: memory.hitCount })
           await Bus.publish(MemoryEvent.Confirmed, { info: updated })

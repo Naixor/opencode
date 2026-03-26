@@ -144,13 +144,20 @@ export namespace HookChain {
     const configEntry = s.config[name]
     const enabled = configEntry?.enabled ?? true
 
-    hooks.push({
+    // Dedup: replace existing hook with same name+chainType
+    const idx = hooks.findIndex((h) => h.name === name)
+    const def: HookDefinition = {
       name,
       chainType,
       priority,
       enabled,
       handler: handler as Handler<ChainType>,
-    })
+    }
+    if (idx >= 0) {
+      hooks[idx] = def
+    } else {
+      hooks.push(def)
+    }
 
     s.registered.set(chainType, hooks)
     s.compiled = undefined
@@ -178,9 +185,7 @@ export namespace HookChain {
 
     s.compiled = compiled
     log.info("compiled chains", {
-      counts: Object.fromEntries(
-        ChainType.options.map((t) => [t, compiled.get(t)?.hooks.length ?? 0]),
-      ),
+      counts: Object.fromEntries(ChainType.options.map((t) => [t, compiled.get(t)?.hooks.length ?? 0])),
     })
   }
 
@@ -194,10 +199,7 @@ export namespace HookChain {
 
   // --- Execution ---
 
-  export async function execute<T extends ChainType>(
-    chainType: T,
-    ctx: ContextMap[T],
-  ): Promise<void> {
+  export async function execute<T extends ChainType>(chainType: T, ctx: ContextMap[T]): Promise<void> {
     const chain = getCompiledChain(chainType)
 
     // Check if instrumentation is needed
@@ -373,5 +375,4 @@ export namespace HookChain {
       config: {},
     }
   }
-
 }

@@ -56,6 +56,7 @@ interface LogDetail {
     messages: any[]
     tools: any
     options: any
+    headers: Record<string, string> | null
   } | null
   response: {
     completion_text: string | null
@@ -341,6 +342,13 @@ function RequestTab({ data }: { data: LogDetail }) {
         </CollapsibleSection>
       )}
 
+      {/* Request Headers */}
+      {data.request.headers && Object.keys(data.request.headers).length > 0 && (
+        <CollapsibleSection title={`Request Headers (${Object.keys(data.request.headers).length})`}>
+          <KeyValueTable entries={Object.entries(data.request.headers).sort(([a], [b]) => a.localeCompare(b))} />
+        </CollapsibleSection>
+      )}
+
       {/* Provider Options */}
       {data.request.options && (
         <CollapsibleSection title="Provider Options">
@@ -361,6 +369,17 @@ function ResponseTab({ data }: { data: LogDetail }) {
     return <p className="text-zinc-500 text-sm">No response data available.</p>
   }
 
+  const raw = data.response.raw_response
+  const headers = raw?.headers as Record<string, string> | undefined
+  const meta = raw
+    ? [
+        ...(raw.id ? [["Response ID", raw.id]] : []),
+        ...(raw.modelId ? [["Model ID", raw.modelId]] : []),
+        ...(raw.timestamp ? [["Timestamp", String(raw.timestamp)]] : []),
+        ...(raw.finishReason ? [["Finish Reason", raw.finishReason]] : []),
+      ]
+    : []
+
   return (
     <div className="space-y-4">
       {/* Error */}
@@ -373,6 +392,21 @@ function ResponseTab({ data }: { data: LogDetail }) {
               : JSON.stringify(data.response.error, null, 2)}
           </pre>
         </div>
+      )}
+
+      {/* Response Metadata */}
+      {meta.length > 0 && (
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+          <h3 className="text-sm font-medium text-zinc-400 mb-3">Response Metadata</h3>
+          <KeyValueTable entries={meta as [string, string][]} />
+        </div>
+      )}
+
+      {/* Response Headers */}
+      {headers && Object.keys(headers).length > 0 && (
+        <CollapsibleSection title={`Response Headers (${Object.keys(headers).length})`}>
+          <KeyValueTable entries={Object.entries(headers).sort(([a], [b]) => a.localeCompare(b))} />
+        </CollapsibleSection>
       )}
 
       {/* Completion Text */}

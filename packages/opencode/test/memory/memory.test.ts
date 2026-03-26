@@ -346,8 +346,10 @@ describe("Memory", () => {
           source: { sessionID: "", method: "pulled" },
           citations: [],
           score: 10.0,
+          baseScore: 10.0,
           useCount: 0,
           hitCount: 0,
+          inject: false,
           createdAt: now,
           updatedAt: now,
         }

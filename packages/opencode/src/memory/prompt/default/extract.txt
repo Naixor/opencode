@@ -1,11 +1,12 @@
 <!-- This file defines the auto-extraction prompt for the memory system. -->
 <!-- To customize, create .opencode/memory/extract.md in your project. -->
 <!-- Available variables: -->
-<!--   INJECT:CONVERSATION - Recent conversation messages (last 20) -->
+<!--   INJECT:CONVERSATION       - Recent conversation messages (last 20) -->
+<!--   INJECT:EXISTING_MEMORIES  - Current memory list with IDs -->
 
 # System
 
-You are a memory extraction assistant. Extract persistent preferences and conventions from development conversations.
+You are a memory extraction assistant. Extract persistent preferences and conventions from development conversations. You can create new memories or update existing ones when the conversation refines prior knowledge.
 
 # Analysis
 
@@ -18,9 +19,19 @@ Distinguish between:
 - Project conventions ("API response format: { code, data, message }") → EXTRACT
 - Temporary context ("help me look at this bug") → DO NOT extract
 
-Conversation:
+## Existing memories
+
+<!-- INJECT:EXISTING_MEMORIES -->
+
+## Rules for action
+
+For each piece of knowledge worth remembering:
+- If it refines, extends, or supersedes an existing memory, use action "update" with the target memory's ID as targetID. Merge the old and new information into a single coherent content string.
+- If it is genuinely new, use action "create".
+- Do NOT create a memory that duplicates or overlaps with an existing one; update it instead.
+
+## Conversation
+
 <!-- INJECT:CONVERSATION -->
 
-If nothing is worth extracting, return an empty array.
-For each extracted item, output JSON:
-[{ "content": "...", "category": "...", "tags": [...], "citations": [...] }]
+If nothing is worth extracting, return an empty items array.

@@ -3,6 +3,7 @@ import { Provider } from "@/provider/provider"
 import { Log } from "@/util/log"
 import {
   streamText,
+  generateObject,
   wrapLanguageModel,
   type ModelMessage,
   type StreamTextResult,
@@ -11,6 +12,7 @@ import {
   tool,
   jsonSchema,
 } from "ai"
+import type { ZodType } from "zod"
 import { mergeDeep, pipe } from "remeda"
 import { ProviderTransform } from "@/provider/transform"
 import { Config } from "@/config/config"
@@ -27,6 +29,7 @@ import { SecurityConfig } from "@/security/config"
 import { LLMScanner } from "@/security/llm-scanner"
 import { SecurityRedact } from "@/security/redact"
 import { SecurityAudit } from "@/security/audit"
+import { LlmLogCapture } from "@/log/capture"
 
 export namespace LLM {
   const log = Log.create({ service: "llm" })
@@ -191,6 +194,32 @@ export namespace LLM {
       })
     }
 
+    const final = {
+      ...(input.model.providerID.startsWith("opencode")
+        ? {
+            "x-opencode-project": Instance.project.id,
+            "x-opencode-session": input.sessionID,
+            "x-opencode-request": input.user.id,
+            "x-opencode-client": Flag.OPENCODE_CLIENT,
+          }
+        : input.model.providerID !== "anthropic"
+          ? {
+              "User-Agent": `opencode/${Installation.VERSION}`,
+            }
+          : undefined),
+      ...input.model.headers,
+      ...headers,
+    }
+
+    // Merge SDK-level provider headers for log-viewer capture
+    // Provider options.headers are set during SDK init (e.g. anthropic-beta)
+    // and aren't included in the per-request `final` object
+    const captured = {
+      ...(provider.options?.["headers"] as Record<string, string> | undefined),
+      ...final,
+    }
+    LlmLogCapture.captureHeaders(input.sessionID, captured)
+
     return streamText({
       onError(error) {
         l.error("stream error", {
@@ -227,22 +256,7 @@ export namespace LLM {
       toolChoice: input.toolChoice,
       maxOutputTokens,
       abortSignal: input.abort,
-      headers: {
-        ...(input.model.providerID.startsWith("opencode")
-          ? {
-              "x-opencode-project": Instance.project.id,
-              "x-opencode-session": input.sessionID,
-              "x-opencode-request": input.user.id,
-              "x-opencode-client": Flag.OPENCODE_CLIENT,
-            }
-          : input.model.providerID !== "anthropic"
-            ? {
-                "User-Agent": `opencode/${Installation.VERSION}`,
-              }
-            : undefined),
-        ...input.model.headers,
-        ...headers,
-      },
+      headers: final,
       maxRetries: input.retries ?? 0,
       messages: [
         ...system.map(
@@ -268,6 +282,150 @@ export namespace LLM {
           },
         ],
       }),
+      experimental_telemetry: {
+        isEnabled: cfg.experimental?.openTelemetry,
+        metadata: {
+          userId: cfg.username ?? "unknown",
+          sessionId: input.sessionID,
+        },
+      },
+    })
+  }
+
+  // --- Structured generation with full pipeline ---
+
+  export type GenerateInput<T> = {
+    sessionID: string
+    model: Provider.Model
+    agent: Agent.Info
+    system: string[]
+    messages: ModelMessage[]
+    schema: ZodType<T>
+  }
+
+  /**
+   * Structured object generation that goes through the same pipeline as stream():
+   * system prompt construction, pre-llm hooks, security middleware, provider transforms,
+   * headers, and plugin hooks — then calls generateObject instead of streamText.
+   */
+  export async function generate<T>(input: GenerateInput<T>) {
+    const l = log
+      .clone()
+      .tag("providerID", input.model.providerID)
+      .tag("modelID", input.model.id)
+      .tag("sessionID", input.sessionID)
+      .tag("agent", input.agent.name)
+    l.info("generate", {
+      modelID: input.model.id,
+      providerID: input.model.providerID,
+    })
+
+    const [language, cfg, provider] = await Promise.all([
+      Provider.getLanguage(input.model),
+      Config.get(),
+      Provider.getProvider(input.model.providerID),
+    ])
+
+    // Build system prompt: agent prompt → provider prompt → caller system
+    const system: string[] = []
+    system.push(
+      [...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)), ...input.system]
+        .filter((x) => x)
+        .join("\n"),
+    )
+
+    // Provider options
+    const base = ProviderTransform.options({
+      model: input.model,
+      sessionID: input.sessionID,
+      providerOptions: provider.options,
+    })
+    let options: Record<string, any> = pipe(base, mergeDeep(input.model.options), mergeDeep(input.agent.options))
+
+    // Execute pre-llm hook chain (includes log capture, memory-injector, think-mode, etc.)
+    const header = system[0]
+    const ctx: HookChain.PreLLMContext = {
+      sessionID: input.sessionID,
+      system,
+      agent: input.agent.name,
+      model: input.model.id,
+      messages: input.messages,
+      providerOptions: options,
+      metadata: {},
+    }
+    await HookChain.executePreLLM(
+      "experimental.chat.system.transform",
+      { sessionID: input.sessionID, model: input.model },
+      { system },
+      ctx,
+    )
+    if (ctx.providerOptions) {
+      options = ctx.providerOptions as Record<string, any>
+    }
+    if (system.length > 2 && system[0] === header) {
+      const rest = system.slice(1)
+      system.length = 0
+      system.push(header, rest.join("\n"))
+    }
+
+    // Plugin params & headers
+    const params = await Plugin.trigger(
+      "chat.params",
+      { sessionID: input.sessionID, agent: input.agent, model: input.model, provider },
+      {
+        temperature: input.agent.temperature ?? ProviderTransform.temperature(input.model),
+        topP: input.agent.topP ?? ProviderTransform.topP(input.model),
+        topK: ProviderTransform.topK(input.model),
+        options,
+      },
+    )
+    const { headers } = await Plugin.trigger(
+      "chat.headers",
+      { sessionID: input.sessionID, agent: input.agent, model: input.model, provider },
+      { headers: {} },
+    )
+
+    const msgs: ModelMessage[] = [
+      ...system.map((x): ModelMessage => ({ role: "system", content: x })),
+      ...input.messages,
+    ]
+
+    const po = ProviderTransform.providerOptions(input.model, params.options)
+    l.info("generate: before generateObject", {
+      providerID: input.model.providerID,
+      modelID: input.model.id,
+      systemCount: system.length,
+      msgCount: msgs.length,
+      providerOptions: JSON.stringify(po),
+      temperature: params.temperature,
+      topP: params.topP,
+      topK: params.topK,
+    })
+
+    return generateObject({
+      temperature: params.temperature,
+      topP: params.topP,
+      topK: params.topK,
+      providerOptions: po,
+      headers: {
+        ...(input.model.providerID.startsWith("opencode")
+          ? {
+              "x-opencode-project": Instance.project.id,
+              "x-opencode-session": input.sessionID,
+              "x-opencode-client": Flag.OPENCODE_CLIENT,
+            }
+          : input.model.providerID !== "anthropic"
+            ? { "User-Agent": `opencode/${Installation.VERSION}` }
+            : undefined),
+        ...input.model.headers,
+        ...headers,
+      },
+      messages: msgs,
+      model: wrapLanguageModel({
+        model: language,
+        middleware: [securityScanMiddleware()],
+      }),
+      schema: input.schema as any,
       experimental_telemetry: {
         isEnabled: cfg.experimental?.openTelemetry,
         metadata: {
@@ -401,12 +559,23 @@ export namespace LLM {
     return {
       // @ts-expect-error - prompt is typed as LanguageModelV2Prompt but we need to inspect it generically
       async transformParams(args) {
+        log.info("securityScanMiddleware.transformParams", {
+          type: args.type,
+          paramsKeys: Object.keys(args.params),
+          hasTools: !!args.params.tools,
+          toolNames: args.params.tools ? Object.keys(args.params.tools) : [],
+          hasMode: !!args.params.mode,
+          mode: args.params.mode,
+          promptLength: Array.isArray(args.params.prompt) ? args.params.prompt.length : "not-array",
+        })
+
         const config = SecurityConfig.getSecurityConfig()
         const hasRules =
           (config.rules ?? []).some((r) => r.deniedOperations.includes("llm")) ||
           (config.segments?.markers ?? []).some((m) => m.deniedOperations.includes("llm"))
 
         if (!hasRules) {
+          log.info("securityScanMiddleware: no rules, passthrough", { type: args.type })
           return args.params
         }
 
@@ -488,6 +657,12 @@ export namespace LLM {
           })
         }
 
+        log.info("securityScanMiddleware: returning params", {
+          type: args.type,
+          paramsKeys: Object.keys(args.params),
+          hasTools: !!args.params.tools,
+          toolNames: args.params.tools ? Object.keys(args.params.tools) : [],
+        })
         return args.params
       },
     }

@@ -17,6 +17,7 @@ import { SecurityConfig } from "../security/config"
 import { SecurityAccess } from "../security/access"
 import { initSandbox, refreshSandboxPolicy } from "../sandbox/init"
 import { TuiEvent } from "@/cli/cmd/tui/event"
+import { recoveryExtract } from "@/memory/hooks/auto-extract"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
@@ -78,5 +79,14 @@ export async function InstanceBootstrap() {
     if (payload.properties.name === Command.Default.INIT) {
       await Project.setInitialized(Instance.project.id)
     }
+  })
+
+  // Async memory recovery: extract memories from historical sessions
+  // that were never auto-extracted (e.g. user closed terminal before compaction).
+  // Fire-and-forget — does not block startup.
+  recoveryExtract().catch((err) => {
+    Log.Default.warn("memory recovery extraction failed", {
+      error: err instanceof Error ? err.message : String(err),
+    })
   })
 }

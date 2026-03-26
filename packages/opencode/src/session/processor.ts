@@ -294,6 +294,7 @@ export namespace SessionProcessor {
                       finishReason: value.finishReason,
                       model: input.model,
                       assistantMessage: input.assistantMessage,
+                      response: value.response,
                     },
                   }).catch(() => {})
                   break

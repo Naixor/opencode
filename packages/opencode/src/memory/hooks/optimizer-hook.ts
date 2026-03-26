@@ -33,40 +33,47 @@ export function registerOptimizerHook(): void {
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
     if (lastMaintain && lastMaintain > oneDayAgo) return
 
+    // Mark BEFORE running to prevent concurrent maintenance (optimistic lock).
+    // If maintenance fails, it will retry next day.
+    await Memory.setMeta("lastMaintainAt", Date.now())
+
     log.info("running periodic maintenance", { sessionID: ctx.sessionID })
 
     // 1. Decay + capacity check
-    const result = await MemoryDecay.maintain()
+    try {
+      const result = await MemoryDecay.maintain()
 
-    // 2. Publish capacity events
-    if (result.usage >= 1.0) {
-      await Bus.publish(MemoryEvent.CapacityWarning, {
+      // 2. Publish capacity events (>= 80% or >= 100%)
+      if (result.usage >= 0.8) {
+        await Bus.publish(MemoryEvent.CapacityWarning, {
+          poolSize: result.poolSize,
+          poolLimit: result.poolLimit,
+          usage: result.usage,
+        })
+      }
+
+      log.info("maintenance complete", {
+        totalMemories: result.totalMemories,
         poolSize: result.poolSize,
-        poolLimit: result.poolLimit,
-        usage: result.usage,
+        usage: Math.round(result.usage * 100) + "%",
       })
-    } else if (result.usage >= 0.8) {
-      await Bus.publish(MemoryEvent.CapacityWarning, {
-        poolSize: result.poolSize,
-        poolLimit: result.poolLimit,
-        usage: result.usage,
-      })
+    } catch (err) {
+      log.error("decay maintenance failed", { error: err })
     }
 
-    // 3. Check pending confirmations
-    await MemoryConfirmation.checkPendingMemories()
+    // 3. Check pending confirmations (independent of decay)
+    try {
+      await MemoryConfirmation.checkPendingMemories()
+    } catch (err) {
+      log.error("confirmation check failed", { error: err })
+    }
 
-    // 4. Detect team candidates
-    await detectTeamCandidates(config)
-
-    // 5. Mark last maintain time
-    await Memory.setMeta("lastMaintainAt", Date.now())
-
-    log.info("maintenance complete", {
-      totalMemories: result.totalMemories,
-      poolSize: result.poolSize,
-      usage: Math.round(result.usage * 100) + "%",
-    })
+    // 4. Detect team candidates (independent)
+    try {
+      await detectTeamCandidates(config)
+    } catch (err) {
+      log.error("team candidate detection failed", { error: err })
+    }
   })
 }
 
@@ -86,6 +93,7 @@ async function detectTeamCandidates(config: Config.Info): Promise<void> {
   for (const memory of personal) {
     if (memory.teamCandidateAt) continue // Already detected
     if (memory.teamSubmittedAt) continue // Already submitted
+    if (memory.category === "correction") continue // Corrections don't promote
 
     const ageInDays = (now - memory.createdAt) / (1000 * 60 * 60 * 24)
     if (memory.score >= minScore && memory.useCount >= minUseCount && ageInDays >= minAgeInDays) {

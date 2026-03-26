@@ -6,6 +6,10 @@ const TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
 const TOOL_PREFIX = "mcp_"
 const VERSION = "2.1.81"
 
+// Tools created internally by Vercel AI SDK (e.g. generateObject uses "json").
+// These must NOT be prefixed with mcp_ — they are not MCP tools.
+const SDK_TOOLS = new Set(["json"])
+
 // Betas sent with every OAuth request (base set)
 const BASE_BETAS = [
   "claude-code-20250219",
@@ -93,7 +97,6 @@ export async function AnthropicAuthPlugin({ client }: PluginInput): Promise<Hook
       const prefix = "You are Claude Code, Anthropic's official CLI for Claude."
       if (_input.model?.providerID === "anthropic") {
         output.system.unshift(prefix)
-        if (output.system[1]) output.system[1] = prefix + "\n\n" + output.system[1]
       }
     },
     auth: {
@@ -178,20 +181,20 @@ export async function AnthropicAuthPlugin({ client }: PluginInput): Promise<Hook
                   })
                 }
 
-                // Add prefix to tools definitions
+                // Add prefix to tools definitions (skip SDK-internal tools like "json")
                 if (parsed.tools && Array.isArray(parsed.tools)) {
                   parsed.tools = parsed.tools.map((tool: any) => ({
                     ...tool,
-                    name: tool.name ? `${TOOL_PREFIX}${tool.name}` : tool.name,
+                    name: tool.name && !SDK_TOOLS.has(tool.name) ? `${TOOL_PREFIX}${tool.name}` : tool.name,
                   }))
                 }
 
-                // Add prefix to tool_use blocks in messages
+                // Add prefix to tool_use blocks in messages (skip SDK-internal tools)
                 if (parsed.messages && Array.isArray(parsed.messages)) {
                   parsed.messages = parsed.messages.map((msg: any) => {
                     if (msg.content && Array.isArray(msg.content)) {
                       msg.content = msg.content.map((block: any) => {
-                        if (block.type === "tool_use" && block.name) {
+                        if (block.type === "tool_use" && block.name && !SDK_TOOLS.has(block.name)) {
                           return { ...block, name: `${TOOL_PREFIX}${block.name}` }
                         }
                         return block

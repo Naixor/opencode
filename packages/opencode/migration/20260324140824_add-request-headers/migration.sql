@@ -1,0 +1,1 @@
+ALTER TABLE `llm_log_request` ADD `headers` text;

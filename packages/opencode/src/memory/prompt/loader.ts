@@ -70,7 +70,7 @@ export function sections(content: string): { system: string; analysis: string } 
   const sys = parts.system.join("\n").trim()
   const analysis = parts.analysis.join("\n").trim()
 
-  const defaults_extract = sections_default()
+  const defaults_extract = fallback()
 
   return {
     system: sys || defaults_extract.system,
@@ -78,11 +78,11 @@ export function sections(content: string): { system: string; analysis: string } 
   }
 }
 
-function sections_default() {
-  return sections_raw(defaults.extract)
+function fallback() {
+  return raw(defaults.extract)
 }
 
-function sections_raw(content: string): { system: string; analysis: string } {
+function raw(content: string): { system: string; analysis: string } {
   const heading = /^#\s+(system|analysis)\s*$/im
   const lines = content.split("\n")
   let current: "system" | "analysis" | undefined
@@ -106,7 +106,7 @@ function sections_raw(content: string): { system: string; analysis: string } {
 /**
  * Parse inject.md into memory injection and conflict warning sections.
  */
-export function inject_sections(content: string): { injection: string; conflict: string } {
+export function injectSections(content: string): { injection: string; conflict: string } {
   const heading = /^#\s+(memory injection|conflict warning)\s*$/im
   const lines = content.split("\n")
   let current: "injection" | "conflict" | undefined

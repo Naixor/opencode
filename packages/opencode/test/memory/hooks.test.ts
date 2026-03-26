@@ -28,6 +28,7 @@ describe("Memory Hooks (unit-level)", () => {
           tags: ["framework"],
           status: "confirmed" as const,
           score: 5.0,
+          baseScore: 5.0,
           useCount: 3,
           hitCount: 1,
           source: { sessionID: "s1", method: "manual" as const },
@@ -60,6 +61,7 @@ describe("Memory Hooks (unit-level)", () => {
           tags: [],
           status: "confirmed" as const,
           score: 3.0,
+          baseScore: 3.0,
           useCount: 0,
           hitCount: 0,
           source: { sessionID: "s1", method: "pulled" as const },
@@ -75,9 +77,7 @@ describe("Memory Hooks (unit-level)", () => {
     })
 
     test("formatConflictWarning generates warning block", () => {
-      const conflicts = [
-        { memoryA: "mem_1", memoryB: "mem_2", reason: "Different framework choices" },
-      ]
+      const conflicts = [{ memoryA: "mem_1", memoryB: "mem_2", reason: "Different framework choices" }]
       const result = MemoryInject.formatConflictWarning(conflicts)
       expect(result).toContain("<memory-conflicts>")
       expect(result).toContain("Different framework choices")
@@ -103,7 +103,7 @@ describe("Memory Hooks (unit-level)", () => {
       const cached = MemoryInject.getCachedRecall(sessionID)
       expect(cached).toBeTruthy()
       expect(cached!.relevant).toEqual(["mem_1", "mem_2"])
-      expect(cached!.userMessageCount).toBe(5)
+      expect(cached!.count).toBe(5)
 
       // Cleanup
       MemoryInject.clearCache(sessionID)
@@ -117,22 +117,14 @@ describe("Memory Hooks (unit-level)", () => {
 
     test("shouldReRecall returns false when recently cached", () => {
       const sessionID = "ses_rerecall2_" + Date.now()
-      MemoryInject.cacheRecallResult(
-        sessionID,
-        { relevant: [], conflicts: [] },
-        5,
-      )
+      MemoryInject.cacheRecallResult(sessionID, { relevant: [], conflicts: [] }, 5)
       expect(MemoryInject.shouldReRecall(sessionID, 6)).toBe(false)
       MemoryInject.clearCache(sessionID)
     })
 
     test("shouldReRecall returns true after RE_RECALL_INTERVAL", () => {
       const sessionID = "ses_rerecall3_" + Date.now()
-      MemoryInject.cacheRecallResult(
-        sessionID,
-        { relevant: [], conflicts: [] },
-        3,
-      )
+      MemoryInject.cacheRecallResult(sessionID, { relevant: [], conflicts: [] }, 3)
       // RECALL_THRESHOLD is 3, RE_RECALL_INTERVAL is 5
       expect(MemoryInject.shouldReRecall(sessionID, 8)).toBe(true)
       MemoryInject.clearCache(sessionID)
@@ -141,11 +133,7 @@ describe("Memory Hooks (unit-level)", () => {
     test("shouldReRecall returns true when dirty", async () => {
       await withInstance(async () => {
         const sessionID = "ses_rerecall_dirty"
-        MemoryInject.cacheRecallResult(
-          sessionID,
-          { relevant: [], conflicts: [] },
-          3,
-        )
+        MemoryInject.cacheRecallResult(sessionID, { relevant: [], conflicts: [] }, 3)
         // Mark dirty simulates user running /remember
         Memory.markDirty(sessionID)
         expect(MemoryInject.shouldReRecall(sessionID, 4)).toBe(true)
@@ -225,6 +213,7 @@ function makeMemory(overrides: Partial<Memory.Info> & { id: string }): Memory.In
     tags: [],
     citations: [],
     score: 1.0,
+    baseScore: 1.0,
     useCount: 0,
     hitCount: 0,
     source: { sessionID: "s1", method: "manual" },

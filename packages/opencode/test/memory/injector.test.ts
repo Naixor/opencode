@@ -15,6 +15,7 @@ function makeMemory(overrides?: Partial<Memory.Info>): Memory.Info {
     citations: [],
     inject: false,
     score: 5.0,
+    baseScore: 5.0,
     useCount: 0,
     hitCount: 0,
     createdAt: now,
@@ -153,7 +154,7 @@ describe("MemoryInject", () => {
       const cached = MemoryInject.getCachedRecall("sess_x")
       expect(cached).toBeDefined()
       expect(cached!.relevant).toEqual(["m1", "m2"])
-      expect(cached!.userMessageCount).toBe(3)
+      expect(cached!.count).toBe(3)
     })
 
     test("clearCache removes entry", () => {

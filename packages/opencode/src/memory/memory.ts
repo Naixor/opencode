@@ -8,27 +8,13 @@ export namespace Memory {
 
   // --- Enums ---
 
-  export const Category = z.enum([
-    "style",
-    "pattern",
-    "tool",
-    "domain",
-    "workflow",
-    "correction",
-    "context",
-  ])
+  export const Category = z.enum(["style", "pattern", "tool", "domain", "workflow", "correction", "context"])
   export type Category = z.infer<typeof Category>
 
-  export const Scope = z.enum([
-    "personal",
-    "team",
-  ])
+  export const Scope = z.enum(["personal", "team"])
   export type Scope = z.infer<typeof Scope>
 
-  export const Status = z.enum([
-    "pending",
-    "confirmed",
-  ])
+  export const Status = z.enum(["pending", "confirmed"])
   export type Status = z.infer<typeof Status>
 
   // --- Team Memory multi-dimension isolation ---
@@ -67,6 +53,7 @@ export namespace Memory {
 
     // lifecycle
     score: z.number().default(1.0),
+    baseScore: z.number().default(1.0),
     useCount: z.number().default(0),
     hitCount: z.number().default(0),
     lastUsedAt: z.number().optional(),
@@ -97,11 +84,13 @@ export namespace Memory {
     updatedAt: true,
   }).partial({
     score: true,
+    baseScore: true,
     useCount: true,
     hitCount: true,
     status: true,
     tags: true,
     citations: true,
+    inject: true,
   })
   export type CreateInput = z.infer<typeof CreateInput>
 
@@ -109,15 +98,18 @@ export namespace Memory {
 
   export async function create(input: CreateInput): Promise<Info> {
     const now = Date.now()
+    const base = input.score ?? 1.0
     const memory: Info = {
       ...input,
       id: Identifier.ascending("memory"),
       tags: input.tags ?? [],
       citations: input.citations ?? [],
       score: input.score ?? 1.0,
+      baseScore: input.baseScore ?? base,
       useCount: input.useCount ?? 0,
       hitCount: input.hitCount ?? 0,
       status: input.status ?? "confirmed",
+      inject: input.inject ?? false,
       createdAt: now,
       updatedAt: now,
     }
@@ -128,29 +120,41 @@ export namespace Memory {
   }
 
   export async function get(id: string): Promise<Info | undefined> {
-    return MemoryStorage.get(id)
+    const raw = await MemoryStorage.get(id)
+    if (!raw) return undefined
+    // Migrate legacy records missing baseScore
+    if (raw.baseScore === undefined) raw.baseScore = raw.score
+    return Info.parse(raw)
   }
 
   export async function update(id: string, patch: Partial<Omit<Info, "id" | "createdAt">>): Promise<Info | undefined> {
-    const existing = await MemoryStorage.get(id)
-    if (!existing) return undefined
-    const updated: Info = {
-      ...existing,
-      ...patch,
-      id: existing.id,
-      createdAt: existing.createdAt,
-      updatedAt: Date.now(),
-    }
-    const validated = Info.parse(updated)
-    await MemoryStorage.save(validated)
+    const result = await MemoryStorage.atomicUpdate(id, (existing) => {
+      // Migrate legacy records missing baseScore
+      if (existing.baseScore === undefined) existing.baseScore = existing.score
+      const merged: Info = {
+        ...Info.parse(existing),
+        ...patch,
+        id: existing.id,
+        createdAt: existing.createdAt,
+        updatedAt: Date.now(),
+      }
+      return Info.parse(merged) as unknown as import("./storage").MemoryRecord
+    })
+    if (!result) return undefined
     log.info("updated", { id })
-    return validated
+    return Info.parse(result)
   }
 
   export async function remove(id: string): Promise<boolean> {
     const result = await MemoryStorage.remove(id)
     if (result) log.info("removed", { id })
     return result
+  }
+
+  export async function batchRemove(ids: string[]): Promise<number> {
+    const count = await MemoryStorage.batchRemove(ids)
+    if (count > 0) log.info("batch removed", { count, total: ids.length })
+    return count
   }
 
   export async function list(filter?: {
@@ -160,13 +164,19 @@ export namespace Memory {
     method?: Source["method"]
   }): Promise<Info[]> {
     const all = await MemoryStorage.loadAll()
-    return all.filter((m) => {
-      if (filter?.scope && m.scope !== filter.scope) return false
-      if (filter?.status && m.status !== filter.status) return false
-      if (filter?.category && m.category !== filter.category) return false
-      if (filter?.method && m.source.method !== filter.method) return false
-      return true
-    })
+    return all
+      .map((m) => {
+        // Migrate legacy records missing baseScore
+        if (m.baseScore === undefined) m.baseScore = m.score
+        return Info.parse(m)
+      })
+      .filter((m) => {
+        if (filter?.scope && m.scope !== filter.scope) return false
+        if (filter?.status && m.status !== filter.status) return false
+        if (filter?.category && m.category !== filter.category) return false
+        if (filter?.method && m.source.method !== filter.method) return false
+        return true
+      })
   }
 
   export async function upsert(memory: Info): Promise<Info> {
@@ -176,10 +186,37 @@ export namespace Memory {
     return validated
   }
 
+  /**
+   * Find a memory with similar content (keyword jaccard similarity >= 0.6).
+   * Falls back to exact match if content is short.
+   */
   export async function findSimilar(content: string): Promise<Info | undefined> {
     const all = await MemoryStorage.loadAll()
     const normalized = content.toLowerCase().trim()
-    return all.find((m) => m.content.toLowerCase().trim() === normalized)
+    const words = tokenize(normalized)
+
+    // For very short content, use exact match
+    if (words.length <= 2) {
+      const raw = all.find((m) => m.content.toLowerCase().trim() === normalized)
+      if (!raw) return undefined
+      if (raw.baseScore === undefined) raw.baseScore = raw.score
+      return Info.parse(raw)
+    }
+
+    // Jaccard similarity on keyword sets
+    let best: { record: (typeof all)[number]; score: number } | undefined
+    for (const m of all) {
+      const other = tokenize(m.content.toLowerCase().trim())
+      const intersection = words.filter((w) => other.includes(w)).length
+      const union = new Set([...words, ...other]).size
+      const sim = union > 0 ? intersection / union : 0
+      if (sim >= 0.6 && (!best || sim > best.score)) {
+        best = { record: m, score: sim }
+      }
+    }
+    if (!best) return undefined
+    if (best.record.baseScore === undefined) best.record.baseScore = best.record.score
+    return Info.parse(best.record)
   }
 
   // --- Meta key-value store (for tracking extraction state, etc.) ---
@@ -192,36 +229,109 @@ export namespace Memory {
     return MemoryStorage.setMeta(key, value)
   }
 
-  // --- Counter helpers ---
+  // --- Counter helpers (atomic, no TOCTOU race) ---
 
   export async function incrementUseCount(id: string): Promise<void> {
-    const memory = await get(id)
-    if (!memory) return
-    await update(id, {
-      useCount: memory.useCount + 1,
-      lastUsedAt: Date.now(),
-    })
+    await MemoryStorage.increment(id, "useCount", { lastUsedAt: Date.now() })
   }
 
   export async function incrementHitCount(id: string): Promise<void> {
-    const memory = await get(id)
-    if (!memory) return
-    await update(id, { hitCount: memory.hitCount + 1 })
+    await MemoryStorage.increment(id, "hitCount")
+  }
+
+  /** Batch increment useCount for multiple memories in one lock+persist cycle. */
+  export async function batchIncrementUseCount(ids: string[]): Promise<number> {
+    return MemoryStorage.batchIncrement(ids, "useCount", { lastUsedAt: Date.now() })
+  }
+
+  /** Batch increment hitCount for multiple memories in one lock+persist cycle. */
+  export async function batchIncrementHitCount(ids: string[]): Promise<number> {
+    return MemoryStorage.batchIncrement(ids, "hitCount")
   }
 
   // --- Dirty tracking (for recall cache invalidation) ---
 
-  const dirtySessionSet = new Set<string>()
+  const dirtySet = new Set<string>()
 
   export function markDirty(sessionID: string): void {
-    dirtySessionSet.add(sessionID)
+    dirtySet.add(sessionID)
   }
 
   export function isDirty(sessionID: string): boolean {
-    return dirtySessionSet.has(sessionID)
+    return dirtySet.has(sessionID)
   }
 
   export function clearDirty(sessionID: string): void {
-    dirtySessionSet.delete(sessionID)
+    dirtySet.delete(sessionID)
+  }
+
+  // --- Session cleanup (prevents memory leaks in long-running processes) ---
+
+  export function cleanupSession(sessionID: string): void {
+    dirtySet.delete(sessionID)
+  }
+
+  // --- Internal helpers ---
+
+  const STOP = new Set([
+    "the",
+    "a",
+    "an",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "can",
+    "shall",
+    "to",
+    "of",
+    "in",
+    "for",
+    "on",
+    "with",
+    "at",
+    "by",
+    "from",
+    "as",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "and",
+    "but",
+    "or",
+    "nor",
+    "not",
+    "so",
+    "yet",
+    "this",
+    "that",
+    "these",
+    "those",
+    "it",
+    "its",
+    "use",
+    "using",
+    "used",
+  ])
+
+  function tokenize(text: string): string[] {
+    return text.split(/[\s,.:;!?()[\]{}"'`]+/).filter((w) => w.length >= 3 && !STOP.has(w))
   }
 }

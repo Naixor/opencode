@@ -19,40 +19,43 @@ const log = Log.create({ service: "memory.hooks.inject" })
  */
 export function registerMemoryInjector(): void {
   HookChain.register("memory-injector", "pre-llm", 130, async (ctx) => {
+    // Prevent recursion: memory-extractor/recall agents should not inject memories
+    if (ctx.agent === "memory-extractor" || ctx.agent === "memory-recall") return
+
     const config = await Config.get()
     if (config.memory?.enabled === false) return
 
     const allMemories = await Memory.list()
     if (allMemories.length === 0) return
 
-    const pool = MemoryInject.buildCandidatePool(allMemories)
+    const limit = config.memory?.injectPoolLimit
+    const pool = MemoryInject.buildCandidatePool(allMemories, limit)
     if (pool.length === 0) return
 
-    const userMessageCount = MemoryInject.countUserMessages(ctx.messages)
-    const phase = MemoryInject.getPhase(userMessageCount)
+    const count = MemoryInject.countUserMessages(ctx.messages)
+    const phase = MemoryInject.getPhase(count)
 
     if (phase === "full") {
-      // Phase 1: inject entire candidate pool
-      const formatted = MemoryInject.formatMemoriesForPrompt(pool)
-      log.info("[TRACE-REPLACE] memory inject formatted", { content: formatted.substring(0, 500) })
-      ctx.system.push(formatted)
+      // Phase 1: inject entire candidate pool + batch track usage
+      ctx.system.push(MemoryInject.formatMemoriesForPrompt(pool))
+      await Memory.batchIncrementUseCount(pool.map((m) => m.id))
       log.info("phase 1 injection", { sessionID: ctx.sessionID, poolSize: pool.length })
       return
     }
 
     // Phase 2: use recall agent for filtering
-    if (MemoryInject.shouldReRecall(ctx.sessionID, userMessageCount)) {
+    if (MemoryInject.shouldReRecall(ctx.sessionID, count)) {
       try {
-        const recentMessages = (ctx.messages ?? []).slice(-6).map((m: any) => ({
+        const recent = (ctx.messages ?? []).slice(-6).map((m: any) => ({
           role: m.role as string,
           content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
         }))
-        const recallResult = await MemoryRecall.invoke({ memories: pool, recentMessages })
-        MemoryInject.cacheRecallResult(ctx.sessionID, recallResult, userMessageCount)
+        const result = await MemoryRecall.invoke({ sessionID: ctx.sessionID, memories: pool, recentMessages: recent })
+        MemoryInject.cacheRecallResult(ctx.sessionID, result, count)
         log.info("recall agent completed", {
           sessionID: ctx.sessionID,
-          relevant: recallResult.relevant.length,
-          conflicts: recallResult.conflicts.length,
+          relevant: result.relevant.length,
+          conflicts: result.conflicts.length,
         })
       } catch (err) {
         log.error("recall agent failed, falling back to full injection", { error: err })
@@ -72,9 +75,7 @@ export function registerMemoryInjector(): void {
     const relevant = allMemories.filter((m) => cached.relevant.includes(m.id))
     if (relevant.length > 0) {
       ctx.system.push(MemoryInject.formatMemoriesForPrompt(relevant))
-      for (const m of relevant) {
-        await Memory.incrementUseCount(m.id)
-      }
+      await Memory.batchIncrementUseCount(relevant.map((m) => m.id))
     }
 
     // Handle conflicts
@@ -91,5 +92,12 @@ export function registerMemoryInjector(): void {
       injectedCount: relevant.length,
       recalledCount: cached.relevant.length,
     })
+  })
+
+  // Clean up session-scoped caches when session ends
+  HookChain.register("memory-inject-cleanup", "session-lifecycle", 250, async (ctx) => {
+    if (ctx.event !== "session.deleted") return
+    MemoryInject.clearCache(ctx.sessionID)
+    Memory.cleanupSession(ctx.sessionID)
   })
 }

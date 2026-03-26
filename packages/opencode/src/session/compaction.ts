@@ -14,6 +14,7 @@ import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { ProviderTransform } from "@/provider/transform"
+import { HookChain } from "./hooks"
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
@@ -164,6 +165,15 @@ export namespace SessionCompaction {
       model,
       abort: input.abort,
     })
+    // Trigger memory extraction before compaction discards context
+    HookChain.execute("session-lifecycle", {
+      sessionID: input.sessionID,
+      event: "session.compacting",
+      data: { messages: input.messages },
+    }).catch((err) => {
+      log.error("session.compacting hook failed", { error: err })
+    })
+
     // Allow plugins to inject context or replace compaction prompt
     const compacting = await Plugin.trigger(
       "experimental.session.compacting",

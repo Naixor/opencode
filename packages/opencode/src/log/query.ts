@@ -117,6 +117,7 @@ export namespace LlmLog {
       messages: any[]
       tools: any
       options: any
+      headers: Record<string, string> | null
     } | null
     response: {
       completion_text: string | null
@@ -166,18 +167,16 @@ export namespace LlmLog {
       const row = db.select().from(LlmLogTable).where(eq(LlmLogTable.id, id)).get()
       if (!row) throw new NotFoundError({ message: `LLM log not found: ${id}` })
 
-      const requestRow = db
-        .select()
-        .from(LlmLogRequestTable)
-        .where(eq(LlmLogRequestTable.llm_log_id, id))
-        .get()
+      const requestRow = db.select().from(LlmLogRequestTable).where(eq(LlmLogRequestTable.llm_log_id, id)).get()
 
       let request: Detail["request"] = null
       if (requestRow) {
         let systemPrompt = ""
         let messages: any[] = []
         try {
-          systemPrompt = Buffer.from(Bun.gunzipSync(Buffer.from(requestRow.system_prompt as ArrayBuffer))).toString("utf-8")
+          systemPrompt = Buffer.from(Bun.gunzipSync(Buffer.from(requestRow.system_prompt as ArrayBuffer))).toString(
+            "utf-8",
+          )
         } catch {
           systemPrompt = "(decompression failed)"
         }
@@ -193,14 +192,11 @@ export namespace LlmLog {
           messages,
           tools: requestRow.tools,
           options: requestRow.options,
+          headers: (requestRow.headers as Record<string, string>) ?? null,
         }
       }
 
-      const responseRow = db
-        .select()
-        .from(LlmLogResponseTable)
-        .where(eq(LlmLogResponseTable.llm_log_id, id))
-        .get()
+      const responseRow = db.select().from(LlmLogResponseTable).where(eq(LlmLogResponseTable.llm_log_id, id)).get()
 
       let response: Detail["response"] = null
       if (responseRow) {
@@ -222,11 +218,7 @@ export namespace LlmLog {
         }
       }
 
-      const tokensRow = db
-        .select()
-        .from(LlmLogTokensTable)
-        .where(eq(LlmLogTokensTable.llm_log_id, id))
-        .get()
+      const tokensRow = db.select().from(LlmLogTokensTable).where(eq(LlmLogTokensTable.llm_log_id, id)).get()
 
       const tokens: Detail["tokens"] = tokensRow
         ? {
@@ -711,7 +703,11 @@ export namespace LlmLog {
 
     return Database.use((db) => {
       const countWhere = (where: SQL | undefined): number => {
-        const result = db.select({ count: sql<number>`count(*)` }).from(LlmLogTable).where(where).get()
+        const result = db
+          .select({ count: sql<number>`count(*)` })
+          .from(LlmLogTable)
+          .where(where)
+          .get()
         return result?.count ?? 0
       }
 
@@ -724,33 +720,54 @@ export namespace LlmLog {
           deletedByAge = countWhere(lte(LlmLogTable.time_start, cutoff))
           db.delete(LlmLogTable).where(lte(LlmLogTable.time_start, cutoff)).run()
         } else {
-          const annotatedIds = [...new Set(
-            db.select({ llm_log_id: LlmLogAnnotationTable.llm_log_id }).from(LlmLogAnnotationTable).all().map((r) => r.llm_log_id),
-          )]
+          const annotatedIds = [
+            ...new Set(
+              db
+                .select({ llm_log_id: LlmLogAnnotationTable.llm_log_id })
+                .from(LlmLogAnnotationTable)
+                .all()
+                .map((r) => r.llm_log_id),
+            ),
+          ]
 
           if (annotatedIds.length > 0) {
             // Delete annotated records older than 2x max_age
-            const veryOldAnnotatedWhere = and(lte(LlmLogTable.time_start, forceAgeCutoff), inArray(LlmLogTable.id, annotatedIds))
+            const veryOldAnnotatedWhere = and(
+              lte(LlmLogTable.time_start, forceAgeCutoff),
+              inArray(LlmLogTable.id, annotatedIds),
+            )
             deletedByAge += countWhere(veryOldAnnotatedWhere)
             db.delete(LlmLogTable).where(veryOldAnnotatedWhere).run()
 
             // Re-fetch remaining annotated IDs
-            const remainingAnnotatedIds = [...new Set(
-              db.select({ llm_log_id: LlmLogAnnotationTable.llm_log_id }).from(LlmLogAnnotationTable).all().map((r) => r.llm_log_id),
-            )]
+            const remainingAnnotatedIds = [
+              ...new Set(
+                db
+                  .select({ llm_log_id: LlmLogAnnotationTable.llm_log_id })
+                  .from(LlmLogAnnotationTable)
+                  .all()
+                  .map((r) => r.llm_log_id),
+              ),
+            ]
 
             // Count protected (annotated + old but within 2x)
             if (remainingAnnotatedIds.length > 0) {
-              protectedCount += countWhere(and(lte(LlmLogTable.time_start, cutoff), inArray(LlmLogTable.id, remainingAnnotatedIds)))
+              protectedCount += countWhere(
+                and(lte(LlmLogTable.time_start, cutoff), inArray(LlmLogTable.id, remainingAnnotatedIds)),
+              )
             }
 
             // Delete non-annotated old records
-            const nonAnnotatedOldWhere = remainingAnnotatedIds.length > 0
-              ? and(
-                  lte(LlmLogTable.time_start, cutoff),
-                  sql`${LlmLogTable.id} NOT IN (${sql.join(remainingAnnotatedIds.map((id) => sql`${id}`), sql`,`)})`,
-                )
-              : lte(LlmLogTable.time_start, cutoff)
+            const nonAnnotatedOldWhere =
+              remainingAnnotatedIds.length > 0
+                ? and(
+                    lte(LlmLogTable.time_start, cutoff),
+                    sql`${LlmLogTable.id} NOT IN (${sql.join(
+                      remainingAnnotatedIds.map((id) => sql`${id}`),
+                      sql`,`,
+                    )})`,
+                  )
+                : lte(LlmLogTable.time_start, cutoff)
             deletedByAge += countWhere(nonAnnotatedOldWhere)
             db.delete(LlmLogTable).where(nonAnnotatedOldWhere).run()
           } else {
@@ -805,7 +822,10 @@ export namespace LlmLog {
 
   export function reset(): { deleted: number } {
     return Database.use((db) => {
-      const result = db.select({ count: sql<number>`count(*)` }).from(LlmLogTable).get()
+      const result = db
+        .select({ count: sql<number>`count(*)` })
+        .from(LlmLogTable)
+        .get()
       const count = result?.count ?? 0
       db.delete(LlmLogTable).run()
       return { deleted: count }
