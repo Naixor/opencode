@@ -12,7 +12,7 @@ Your task:
 3. Use the Memory system to save it
 
 Call the memory_remember tool with:
-- content: A clear, specific description of the preference/convention (no pronouns like "this" or "that")
+- content: A clear, specific, concise description of the preference/convention (no pronouns like "this" or "that"); prefer one durable point and structured wording like "Topic: detail"
 - category: One of "style", "pattern", "tool", "domain", "workflow", "correction", "context"
 - tags: Relevant keywords for future recall
 

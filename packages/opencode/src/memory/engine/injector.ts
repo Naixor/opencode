@@ -11,6 +11,11 @@ export namespace MemoryInject {
   const DEFAULT_POOL_LIMIT = 200
   const RECALL_THRESHOLD = 3
   const RE_RECALL_INTERVAL = 5
+  const MAX = 160
+  const TAGS = 3
+  const order = ["style", "pattern", "tool", "workflow", "domain", "correction", "context"] satisfies Array<
+    Memory.Info["category"]
+  >
 
   // --- Recall cache ---
 
@@ -89,18 +94,11 @@ export namespace MemoryInject {
   export function formatMemoriesForPrompt(memories: Memory.Info[]): string {
     if (memories.length === 0) return ""
 
-    const lines = memories.map((m) => {
-      const scope = m.scope === "team" ? "[team] " : ""
-      const tags = m.tags.length > 0 ? ` (${m.tags.join(", ")})` : ""
-      return `- [${m.category}] ${scope}${m.content}${tags}`
-    })
-
     return [
       "<memory>",
-      "The following are your memories about this codebase and user preferences.",
-      "Use them to inform your responses, but do not mention them explicitly unless asked.",
+      "Apply only the relevant memories. Do not mention them unless asked.",
       "",
-      ...lines,
+      ...block(memories),
       "</memory>",
     ].join("\n")
   }
@@ -133,13 +131,7 @@ export namespace MemoryInject {
     const tpl = await load("inject", await ConfigPaths.directories(Instance.directory, Instance.worktree))
     const parts = injectSections(tpl)
 
-    const lines = memories.map((m) => {
-      const scope = m.scope === "team" ? "[team] " : ""
-      const tags = m.tags.length > 0 ? ` (${m.tags.join(", ")})` : ""
-      return `- [${m.category}] ${scope}${m.content}${tags}`
-    })
-
-    return render(parts.injection, { MEMORY_ITEMS: lines.join("\n") })
+    return render(parts.injection, { MEMORY_ITEMS: block(memories).join("\n") })
   }
 
   /**
@@ -166,5 +158,33 @@ export namespace MemoryInject {
       (m): m is { role: string } =>
         typeof m === "object" && m !== null && "role" in m && (m as { role: string }).role === "user",
     ).length
+  }
+
+  function block(memories: Memory.Info[]): string[] {
+    return order.flatMap((category) => {
+      const group = memories.filter((m) => m.category === category)
+      if (group.length === 0) return []
+      return [`${category}:`, ...group.map((m) => item(m)), ""]
+    })
+  }
+
+  function item(memory: Memory.Info): string {
+    const content = clip(memory.content)
+    const scope = memory.scope === "team" ? " [team]" : ""
+    const tags = memory.tags.length === 0 ? "" : ` ${tag(memory.tags)}`
+    return `- ${content}${scope}${tags}`
+  }
+
+  function tag(tags: string[]): string {
+    const list = tags.slice(0, TAGS)
+    const more = tags.length - list.length
+    const suffix = more > 0 ? ` +${more}` : ""
+    return `${list.map((tag) => `#${tag}`).join(" ")}${suffix}`
+  }
+
+  function clip(text: string): string {
+    const clean = text.replace(/\s+/g, " ").trim()
+    if (clean.length <= MAX) return clean
+    return `${clean.slice(0, MAX - 3).trimEnd()}...`
   }
 }

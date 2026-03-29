@@ -104,9 +104,9 @@ describe("MemoryInject", () => {
       const m = makeMemory({ content: "Always use semicolons", category: "style", tags: ["formatting"] })
       const result = MemoryInject.formatMemoriesForPrompt([m])
       expect(result).toContain("<memory>")
-      expect(result).toContain("[style]")
+      expect(result).toContain("style:")
       expect(result).toContain("Always use semicolons")
-      expect(result).toContain("(formatting)")
+      expect(result).toContain("#formatting")
       expect(result).toContain("</memory>")
     })
 
@@ -114,6 +114,16 @@ describe("MemoryInject", () => {
       const m = makeMemory({ scope: "team", content: "Team convention" })
       const result = MemoryInject.formatMemoriesForPrompt([m])
       expect(result).toContain("[team]")
+    })
+
+    test("clips long memories and limits tags", () => {
+      const m = makeMemory({
+        content: "a".repeat(220),
+        tags: ["one", "two", "three", "four"],
+      })
+      const result = MemoryInject.formatMemoriesForPrompt([m])
+      expect(result).toContain("...")
+      expect(result).toContain("#one #two #three +1")
     })
   })
 

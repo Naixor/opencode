@@ -7,8 +7,7 @@
 # Memory Injection
 
 <memory>
-The following are your memories about this codebase and user preferences.
-Use them to inform your responses, but do not mention them explicitly unless asked.
+Apply only the relevant memories. Do not mention them unless asked.
 
 <!-- INJECT:MEMORY_ITEMS -->
 </memory>

@@ -42,9 +42,9 @@ describe("Memory Hooks (unit-level)", () => {
       const result = MemoryInject.formatMemoriesForPrompt(memories)
       expect(result).toContain("<memory>")
       expect(result).toContain("</memory>")
-      expect(result).toContain("[tool]")
+      expect(result).toContain("tool:")
       expect(result).toContain("Use Hono for HTTP")
-      expect(result).toContain("(framework)")
+      expect(result).toContain("#framework")
     })
 
     test("formatMemoriesForPrompt returns empty for no memories", () => {
@@ -74,6 +74,16 @@ describe("Memory Hooks (unit-level)", () => {
 
       const result = MemoryInject.formatMemoriesForPrompt(memories)
       expect(result).toContain("[team]")
+    })
+
+    test("formatMemoriesForPrompt groups memories by category", () => {
+      const memories = [
+        makeMemory({ id: "mem_tool", category: "tool", content: "Use Bun" }),
+        makeMemory({ id: "mem_style", category: "style", content: "No semicolons" }),
+      ]
+
+      const result = MemoryInject.formatMemoriesForPrompt(memories)
+      expect(result.indexOf("style:")).toBeLessThan(result.indexOf("tool:"))
     })
 
     test("formatConflictWarning generates warning block", () => {

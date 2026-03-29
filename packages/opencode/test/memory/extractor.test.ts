@@ -110,6 +110,8 @@ describe("MemoryExtractor", () => {
       expect(prompt).toContain("Use Hono")
       expect(prompt).toContain("[user]: Write handler")
       expect(prompt).toContain("self-contained")
+      expect(prompt).toContain("Topic: detail")
+      expect(prompt).toContain("under 120 characters")
     })
   })
 })

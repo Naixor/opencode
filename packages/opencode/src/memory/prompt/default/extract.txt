@@ -24,6 +24,10 @@ For each piece of knowledge worth remembering:
 - If it refines, extends, or supersedes an existing memory, use action "update" with the target memory's ID as targetID. Merge the old and new information into a single coherent content string.
 - If it is genuinely new, use action "create".
 - Do NOT create a memory that duplicates or overlaps with an existing one; update it instead.
+- Keep each memory concise and scoped to one durable point.
+- Prefer structured wording like "Topic: detail" when helpful.
+- Keep content under 120 characters unless extra detail is necessary.
+- Put extra lookup terms in tags instead of padding the content.
 
 If nothing is worth extracting, return an empty items array: { "items": [] }
 
