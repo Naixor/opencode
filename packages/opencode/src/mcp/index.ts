@@ -457,7 +457,7 @@ export namespace MCP {
       // Sandbox wrapping: enforced-policy MCP servers run in sandbox, trusted ones skip
       const sandbox = getActiveSandbox()
       const mcpPolicy = SecurityConfig.getMcpPolicy(key)
-      const shouldSandbox = sandbox && mcpPolicy !== "trusted"
+      const shouldSandbox = sandbox && mcpPolicy !== "trusted" && !SecurityConfig.isTrustedCommand(cmd, cwd)
       const sandboxedCommand = shouldSandbox ? sandbox.wrap([cmd, ...args]) : [cmd, ...args]
 
       const transport = new StdioClientTransport({

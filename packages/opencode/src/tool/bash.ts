@@ -95,10 +95,78 @@ export const BashTool = Tool.define("bash", async () => {
         throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
       }
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
+      const tree = await parser().then((p) => p.parse(params.command))
+      if (!tree) {
+        throw new Error("Failed to parse command")
+      }
+
+      const directories = new Set<string>()
+      if (!Instance.containsPath(cwd)) directories.add(cwd)
+      const patterns = new Set<string>()
+      const always = new Set<string>()
+      const names: string[] = []
+
+      for (const node of tree.rootNode.descendantsOfType("command")) {
+        if (!node) continue
+
+        // Get full command text including redirects if present
+        let commandText = node.parent?.type === "redirected_statement" ? node.parent.text : node.text
+
+        const command = []
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)
+          if (!child) continue
+          if (
+            child.type !== "command_name" &&
+            child.type !== "word" &&
+            child.type !== "string" &&
+            child.type !== "raw_string" &&
+            child.type !== "concatenation"
+          ) {
+            continue
+          }
+          command.push(child.text)
+        }
+
+        if (command[0]) {
+          names.push(command[0])
+        }
+
+        // not an exhaustive list, but covers most common cases
+        if (["cd", "rm", "cp", "mv", "mkdir", "touch", "chmod", "chown", "cat"].includes(command[0])) {
+          for (const arg of command.slice(1)) {
+            if (arg.startsWith("-") || (command[0] === "chmod" && arg.startsWith("+"))) continue
+            const resolved = await $`realpath ${arg}`
+              .cwd(cwd)
+              .quiet()
+              .nothrow()
+              .text()
+              .then((x) => x.trim())
+            log.info("resolved path", { arg, resolved })
+            if (resolved) {
+              const normalized =
+                process.platform === "win32" ? Filesystem.windowsPath(resolved).replace(/\//g, "\\") : resolved
+              if (!Instance.containsPath(normalized)) {
+                const dir = (await Filesystem.isDir(normalized)) ? normalized : path.dirname(normalized)
+                directories.add(dir)
+              }
+            }
+          }
+        }
+
+        // cd covered by above check
+        if (command.length && command[0] !== "cd") {
+          patterns.add(commandText)
+          always.add(BashArity.prefix(command).join(" ") + " *")
+        }
+      }
+
+      const trusted = names.length === 1 && SecurityConfig.isTrustedCommand(names[0], cwd)
+
       // Security access control: scan command for protected file accesses
       // Skip bash scanner when sandbox is active — OS-level isolation is stronger
       const sandbox = getActiveSandbox()
-      if (!sandbox) {
+      if (!sandbox && !trusted) {
         const securityConfig = SecurityConfig.getSecurityConfig()
         const currentRole = getDefaultRole(securityConfig)
         const scannedPaths = BashScanner.scanBashCommand(params.command, cwd)
@@ -150,66 +218,6 @@ export const BashTool = Tool.define("bash", async () => {
         }
       }
 
-      const tree = await parser().then((p) => p.parse(params.command))
-      if (!tree) {
-        throw new Error("Failed to parse command")
-      }
-      const directories = new Set<string>()
-      if (!Instance.containsPath(cwd)) directories.add(cwd)
-      const patterns = new Set<string>()
-      const always = new Set<string>()
-
-      for (const node of tree.rootNode.descendantsOfType("command")) {
-        if (!node) continue
-
-        // Get full command text including redirects if present
-        let commandText = node.parent?.type === "redirected_statement" ? node.parent.text : node.text
-
-        const command = []
-        for (let i = 0; i < node.childCount; i++) {
-          const child = node.child(i)
-          if (!child) continue
-          if (
-            child.type !== "command_name" &&
-            child.type !== "word" &&
-            child.type !== "string" &&
-            child.type !== "raw_string" &&
-            child.type !== "concatenation"
-          ) {
-            continue
-          }
-          command.push(child.text)
-        }
-
-        // not an exhaustive list, but covers most common cases
-        if (["cd", "rm", "cp", "mv", "mkdir", "touch", "chmod", "chown", "cat"].includes(command[0])) {
-          for (const arg of command.slice(1)) {
-            if (arg.startsWith("-") || (command[0] === "chmod" && arg.startsWith("+"))) continue
-            const resolved = await $`realpath ${arg}`
-              .cwd(cwd)
-              .quiet()
-              .nothrow()
-              .text()
-              .then((x) => x.trim())
-            log.info("resolved path", { arg, resolved })
-            if (resolved) {
-              const normalized =
-                process.platform === "win32" ? Filesystem.windowsPath(resolved).replace(/\//g, "\\") : resolved
-              if (!Instance.containsPath(normalized)) {
-                const dir = (await Filesystem.isDir(normalized)) ? normalized : path.dirname(normalized)
-                directories.add(dir)
-              }
-            }
-          }
-        }
-
-        // cd covered by above check
-        if (command.length && command[0] !== "cd") {
-          patterns.add(commandText)
-          always.add(BashArity.prefix(command).join(" ") + " *")
-        }
-      }
-
       if (directories.size > 0) {
         const globs = Array.from(directories).map((dir) => {
           // Preserve POSIX-looking paths with /s, even on Windows
@@ -246,23 +254,24 @@ export const BashTool = Tool.define("bash", async () => {
       }
 
       // When sandbox is active, wrap the shell command with sandbox-exec
-      const proc = sandbox
-        ? (() => {
-            const wrapped = sandbox.wrap([shell, "-c", params.command])
-            return spawn(wrapped[0], wrapped.slice(1), {
+      const proc =
+        sandbox && !trusted
+          ? (() => {
+              const wrapped = sandbox.wrap([shell, "-c", params.command])
+              return spawn(wrapped[0], wrapped.slice(1), {
+                cwd,
+                env: spawnEnv,
+                stdio: ["ignore", "pipe", "pipe"],
+                detached: process.platform !== "win32",
+              })
+            })()
+          : spawn(params.command, {
+              shell,
               cwd,
               env: spawnEnv,
               stdio: ["ignore", "pipe", "pipe"],
               detached: process.platform !== "win32",
             })
-          })()
-        : spawn(params.command, {
-            shell,
-            cwd,
-            env: spawnEnv,
-            stdio: ["ignore", "pipe", "pipe"],
-            detached: process.platform !== "win32",
-          })
 
       let output = ""
 

@@ -18,6 +18,7 @@ export namespace SecurityConfig {
     version: "1.0",
     roles: [],
     rules: [],
+    trusted_commands: [],
     resolvedAllowlist: [],
   }
 
@@ -263,10 +264,7 @@ export namespace SecurityConfig {
    * Walk the directory tree collecting config file paths and mtimes.
    * Does NOT read file contents — only stat for mtime.
    */
-  function walkForConfigPaths(
-    dir: string,
-    out: { configPath: string; scopeDir: string; mtimeMs: number }[],
-  ) {
+  function walkForConfigPaths(dir: string, out: { configPath: string; scopeDir: string; mtimeMs: number }[]) {
     let entries: fs.Dirent[]
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -349,9 +347,7 @@ export namespace SecurityConfig {
     // Resolve relative paths against projectRootDir (not CWD) so that
     // checkAccess("secrets/key.pem", ...) works correctly when config is
     // loaded from a different directory than CWD.
-    const resolved = path.isAbsolute(filePath)
-      ? filePath
-      : path.resolve(projectRootDir || process.cwd(), filePath)
+    const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(projectRootDir || process.cwd(), filePath)
 
     // Check in-memory resolve cache
     const cached = resolveCache.get(resolved)
@@ -390,6 +386,14 @@ export namespace SecurityConfig {
     for (const sc of applicable) {
       if (sc.config.rules !== undefined) {
         mergedRules = filterScopedRules(sc.config.rules, sc.scopeDir)
+      }
+    }
+
+    // --- Trusted commands: child overrides parent (last defined wins) ---
+    let trusted_commands: string[] | undefined
+    for (const sc of applicable) {
+      if (sc.config.trusted_commands !== undefined) {
+        trusted_commands = sc.config.trusted_commands
       }
     }
 
@@ -460,6 +464,7 @@ export namespace SecurityConfig {
       logging: mergedLogging,
       authentication: mergedAuthentication,
       mcp: mergedMcp,
+      trusted_commands,
       resolvedAllowlist,
     }
 
@@ -610,6 +615,12 @@ export namespace SecurityConfig {
     }
     const mergedRoles: SecuritySchema.Role[] = [...roleMap.entries()].map(([name, level]) => ({ name, level }))
     const mergedRules: SecuritySchema.Rule[] = configs.flatMap((c) => c.config.rules ?? [])
+    let trusted_commands: string[] | undefined
+    for (const { config } of configs) {
+      if (config.trusted_commands !== undefined) {
+        trusted_commands = config.trusted_commands
+      }
+    }
     const resolvedAllowlist: SecuritySchema.AllowlistLayer[] = configs
       .filter((c) => c.config.allowlist !== undefined)
       .map((c) => ({ source: c.path, entries: c.config.allowlist! }))
@@ -618,8 +629,32 @@ export namespace SecurityConfig {
       version: configs[0].config.version,
       roles: mergedRoles.length > 0 ? mergedRoles : undefined,
       rules: mergedRules.length > 0 ? mergedRules : undefined,
+      trusted_commands,
       resolvedAllowlist,
     }
+  }
+
+  function clean(cmd: string) {
+    const val = cmd
+      .trim()
+      .replace(/^['"]|['"]$/g, "")
+      .replaceAll("\\", "/")
+    return process.platform === "win32" ? val.toLowerCase() : val
+  }
+
+  function keys(cmd: string) {
+    const val = clean(cmd)
+    return new Set([val, path.posix.basename(val)])
+  }
+
+  export function isTrustedCommand(cmd: string, scope?: string) {
+    const list = (scope ? resolveForPath(scope) : getSecurityConfig()).trusted_commands
+    if (!list?.length) return false
+    const vals = keys(cmd)
+    return list.some((item) => {
+      const next = keys(item)
+      return Array.from(next).some((key) => vals.has(key))
+    })
   }
 
   /**

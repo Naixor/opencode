@@ -36,6 +36,7 @@ User Input → Agent Selection → SessionPrompt.build() → LLM.stream()
 
 ```json
 {
+  "trusted_commands": ["bitsky", "/usr/local/bin/bitsky"],
   "roles": [
     { "name": "viewer", "level": 1 },
     { "name": "developer", "level": 5 },
@@ -63,6 +64,15 @@ User Input → Agent Selection → SessionPrompt.build() → LLM.stream()
 }
 ```
 
+#### `trusted_commands`
+
+`trusted_commands` 只能定义在 `.opencode-security.json` 中，用于声明 **豁免 OS 沙箱包装** 的受信任可执行文件。
+
+- 取值为可执行文件名或绝对路径，例如 `bitsky`、`/usr/local/bin/bitsky`
+- 这是 **sandbox 豁免**，不是 allowlist，也不来自 `opencode.json`
+- 对 bash 仅在“解析后恰好只有一个直接命令”时生效；如 `bitsky && other`、`bitsky | cat` 不会豁免
+- 对本地 MCP 生效时，检查的是 `command[0]` 是否命中
+
 #### 多级作用域
 
 支持在子目录放置独立的 `.opencode-security.json`，子目录配置覆盖父目录：
@@ -79,13 +89,14 @@ project/
 
 **合并语义：**
 
-| 配置项 | 合并策略 |
-|--------|---------|
-| Roles | 取并集（同名 role 的 level 必须一致，否则报错） |
-| Rules | 子级覆盖父级（最具体的路径优先） |
-| Allowlist | 子级覆盖父级 |
-| Segments / Logging / Auth | 最深层生效 |
-| MCP Policy | 取最严格策略 |
+| 配置项                    | 合并策略                                        |
+| ------------------------- | ----------------------------------------------- |
+| Roles                     | 取并集（同名 role 的 level 必须一致，否则报错） |
+| Rules                     | 子级覆盖父级（最具体的路径优先）                |
+| Trusted Commands          | 子级覆盖父级                                    |
+| Allowlist                 | 子级覆盖父级                                    |
+| Segments / Logging / Auth | 最深层生效                                      |
+| MCP Policy                | 取最严格策略                                    |
 
 #### 性能优化
 
@@ -129,11 +140,11 @@ checkAccess(filePath, operation, role)
 
 #### Operation 类型
 
-| Operation | 含义 | 适用工具 |
-|-----------|------|---------|
-| `read` | 读取文件内容 | read, glob, grep, bash |
-| `write` | 写入/修改文件 | write, edit, bash |
-| `llm` | 内容发送给 LLM | prompt 构建、MCP 输出 |
+| Operation | 含义           | 适用工具               |
+| --------- | -------------- | ---------------------- |
+| `read`    | 读取文件内容   | read, glob, grep, bash |
+| `write`   | 写入/修改文件  | write, edit, bash      |
+| `llm`     | 内容发送给 LLM | prompt 构建、MCP 输出  |
 
 #### 符号链接防绕过
 
@@ -185,6 +196,7 @@ Signature: RS256(header.payload, privateKey)
 ```
 
 **验证流程：**
+
 1. 解析 3 段式 JWT（header.payload.signature）
 2. 使用配置中的公钥验证 RS256 签名
 3. 检查过期（`exp` < 当前时间）
@@ -205,7 +217,7 @@ Signature: RS256(header.payload, privateKey)
 // 正常代码，AI 可以看到
 
 // @security-start
-const API_KEY = "sk-xxxx"  // 这段会被脱敏
+const API_KEY = "sk-xxxx" // 这段会被脱敏
 const DB_PASSWORD = "xxx"
 // @security-end
 
@@ -214,13 +226,13 @@ const DB_PASSWORD = "xxx"
 
 **支持的注释格式：**
 
-| 语言 | 格式 |
-|------|------|
-| JS/TS/C/Java | `// marker` |
-| Python/Shell | `# marker` |
-| HTML/XML | `<!-- marker -->` |
-| JS/C | `/* marker */` |
-| Python | `""" marker """` / `''' marker '''` |
+| 语言         | 格式                                |
+| ------------ | ----------------------------------- |
+| JS/TS/C/Java | `// marker`                         |
+| Python/Shell | `# marker`                          |
+| HTML/XML     | `<!-- marker -->`                   |
+| JS/C         | `/* marker */`                      |
+| Python       | `""" marker """` / `''' marker '''` |
 
 #### AST 模式（仅 TS/JS）
 
@@ -278,7 +290,7 @@ cat "path with spaces/file.txt"    → ["path with spaces/file.txt"]
 
 **支持的命令**：`cat, less, head, tail, vim, nano, grep, find, sed, awk`
 
-**注意**：当 sandbox 启用时，跳过 bash scanner（OS 层隔离更强）。
+**注意**：当 sandbox 启用时，默认跳过 bash scanner（OS 层隔离更强）；但命中 `trusted_commands` 的单一直接命令不会再包裹 sandbox，因此仍按普通 bash 流程执行。
 
 ---
 
@@ -317,10 +329,10 @@ cat "path with spaces/file.txt"    → ["path with spaces/file.txt"]
 
 #### 日志级别
 
-| 级别 | 行为 |
-|------|------|
+| 级别      | 行为                        |
+| --------- | --------------------------- |
 | `verbose` | 记录所有事件（允许 + 拒绝） |
-| `normal` | 仅记录拒绝事件 |
+| `normal`  | 仅记录拒绝事件              |
 
 ---
 
@@ -329,20 +341,22 @@ cat "path with spaces/file.txt"    → ["path with spaces/file.txt"]
 ### 3.1 设计决策
 
 **不用 Docker**，原因：
+
 - 无法支持 macOS 原生工具链（Xcode、iOS Simulator）
 - 开发环境依赖系统级工具和路径
 
 **采用 OS 原生沙箱**：
+
 - **macOS**：Seatbelt（`sandbox-exec` + `.sb` profile）— 已实现
 - **Linux**：Landlock + seccomp — 架构预留
 - **Windows**：架构预留，暂不实现
 
 ### 3.2 执行准则
 
-| 工具类型 | 安全执行方式 |
-|---------|------------|
-| Bash / MCP | 通过 sandbox 包裹（per-command `sandbox-exec`） |
-| 文件工具 (read/write/edit) | 应用层 allowlist 检查（不经过 shell） |
+| 工具类型                   | 安全执行方式                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| Bash / MCP                 | 默认通过 sandbox 包裹（per-command `sandbox-exec`），`trusted_commands` 命中时豁免 |
+| 文件工具 (read/write/edit) | 应用层 allowlist 检查（不经过 shell）                                              |
 
 ---
 
@@ -350,7 +364,7 @@ cat "path with spaces/file.txt"    → ["path with spaces/file.txt"]
 
 #### 工作原理
 
-每条 bash 命令执行时，通过 `sandbox-exec` 包裹：
+默认情况下，每条 bash 命令执行时，通过 `sandbox-exec` 包裹：
 
 ```bash
 # 原始命令
@@ -361,6 +375,8 @@ sandbox-exec -f /tmp/opencode-sandbox/sandbox-12345.sb /bin/zsh -c "rm -rf /impo
 ```
 
 操作系统内核级别强制执行策略，进程无法绕过。
+
+如果命令命中 `.opencode-security.json` 的 `trusted_commands`，则该条命令不再经过 `sandbox.wrap()`；这个豁免只适用于单一直接命令，不适用于命令链、管道或 shell 复合表达式。
 
 #### 策略生成流程
 
@@ -430,12 +446,12 @@ config.json     → (literal "/abs/path/config.json")
 
 **转换规则：**
 
-| Glob | Regex |
-|------|-------|
-| `*` | `[^/]*`（单层匹配） |
-| `**` | `(/.+)?/`（零或多层） |
-| `?` | `[^/]`（单字符） |
-| 尾部 `**` | `/.*`（所有子路径） |
+| Glob      | Regex                 |
+| --------- | --------------------- |
+| `*`       | `[^/]*`（单层匹配）   |
+| `**`      | `(/.+)?/`（零或多层） |
+| `?`       | `[^/]`（单字符）      |
+| 尾部 `**` | `/.*`（所有子路径）   |
 
 #### 策略验证
 
@@ -526,9 +542,10 @@ execute(args) {
 // src/tool/bash.ts（简化示意）
 execute(args) {
   const sandbox = getActiveSandbox()
+  const trusted = isTrustedCommand(firstCommand)
 
-  if (!sandbox) {
-    // 无沙箱 → 应用层扫描
+  if (!sandbox || trusted) {
+    // 无沙箱 / trusted_commands 豁免 → 应用层扫描
     const paths = BashScanner.scanBashCommand(args.command, cwd)
     for (const p of paths) {
       const result = SecurityAccess.checkAccess(p, "read", role)
@@ -544,6 +561,8 @@ execute(args) {
 }
 ```
 
+`trusted_commands` 只影响 OS 沙箱包装，不会自动放宽 `.opencode-security.json` 中的 deny / allowlist 语义。
+
 ### 4.3 MCP 工具
 
 ```typescript
@@ -557,15 +576,17 @@ if (mcpPolicy === "enforced") {
 }
 ```
 
+本地 MCP 进程默认也会走 sandbox；如果其 `command[0]` 命中 `trusted_commands`，则跳过 `sandbox.wrap()`。该豁免同样只来源于 `.opencode-security.json`。
+
 ### 4.4 集成矩阵
 
-| 工具类型 | 应用层 checkAccess | BashScanner | OS Sandbox | LLMScanner | 代码段脱敏 |
-|---------|:-:|:-:|:-:|:-:|:-:|
-| read | ✅ | - | - | - | ✅ |
-| write / edit | ✅ | - | - | - | - |
-| glob / grep | ✅ | - | - | - | - |
-| bash | ✅（无沙箱时） | ✅（无沙箱时） | ✅（有沙箱时） | - | - |
-| MCP | - | - | - | ✅ | ✅ |
+| 工具类型     | 应用层 checkAccess |  BashScanner   |   OS Sandbox   | LLMScanner | 代码段脱敏 |
+| ------------ | :----------------: | :------------: | :------------: | :--------: | :--------: |
+| read         |         ✅         |       -        |       -        |     -      |     ✅     |
+| write / edit |         ✅         |       -        |       -        |     -      |     -      |
+| glob / grep  |         ✅         |       -        |       -        |     -      |     -      |
+| bash         |   ✅（无沙箱时）   | ✅（无沙箱时） | ✅（有沙箱时） |     -      |     -      |
+| MCP          |         -          |       -        |       -        |     ✅     |     ✅     |
 
 ---
 
@@ -575,29 +596,29 @@ if (mcpPolicy === "enforced") {
 
 验证安全配置的完整性和正确性：
 
-| 检查项 | 说明 |
-|--------|------|
-| 配置文件语法 | JSON 解析 + Zod schema 校验 |
-| 角色冲突 | 多个配置中同名 role 的 level 不一致 |
-| 规则引用 | deny 规则中引用了未定义的 role |
-| Deny 规则完整性 | deniedOperations 不能为空 |
+| 检查项              | 说明                                  |
+| ------------------- | ------------------------------------- |
+| 配置文件语法        | JSON 解析 + Zod schema 校验           |
+| 角色冲突            | 多个配置中同名 role 的 level 不一致   |
+| 规则引用            | deny 规则中引用了未定义的 role        |
+| Deny 规则完整性     | deniedOperations 不能为空             |
 | Allowlist/Deny 重叠 | 同时出现在 allowlist 和 deny 中的路径 |
-| Glob 语法 | 无效的 glob 模式 |
-| 作用域越界 | 子目录配置中 `../` 模式逃逸了作用域 |
-| Sandbox 兼容性 | write-only deny 仅在应用层生效 |
-| 冗余规则 | 被更宽泛的规则覆盖的具体规则 |
+| Glob 语法           | 无效的 glob 模式                      |
+| 作用域越界          | 子目录配置中 `../` 模式逃逸了作用域   |
+| Sandbox 兼容性      | write-only deny 仅在应用层生效        |
+| 冗余规则            | 被更宽泛的规则覆盖的具体规则          |
 
 ### 5.2 Sandbox Doctor（`sandbox/doctor.ts`）
 
 验证沙箱运行环境：
 
-| 检查项 | 说明 |
-|--------|------|
-| 平台检测 | macOS (✅), Linux (⏭), 其他 (❌) |
-| sandbox-exec | 命令是否在 PATH 中 |
-| macOS 版本 | 需要 macOS 11+（Darwin 20+） |
-| SIP 状态 | System Integrity Protection 应启用 |
-| 基础验证 | 用最小策略测试 `/usr/bin/true` |
+| 检查项       | 说明                               |
+| ------------ | ---------------------------------- |
+| 平台检测     | macOS (✅), Linux (⏭), 其他 (❌)  |
+| sandbox-exec | 命令是否在 PATH 中                 |
+| macOS 版本   | 需要 macOS 11+（Darwin 20+）       |
+| SIP 状态     | System Integrity Protection 应启用 |
+| 基础验证     | 用最小策略测试 `/usr/bin/true`     |
 
 ---
 
@@ -605,28 +626,28 @@ if (mcpPolicy === "enforced") {
 
 ### Security（`src/security/`）
 
-| 文件 | 职责 |
-|------|------|
-| `schema.ts` | Zod schema 定义（Role, Rule, AllowlistEntry, SecurityConfig 等） |
-| `config.ts` | 配置加载、缓存、合并、热重载 |
-| `access.ts` | 核心访问控制判定（deny 优先 + allowlist） |
-| `role.ts` | 角色检测（JWT token 查找） |
-| `token.ts` | JWT RS256 解析与验证 |
-| `segments.ts` | 代码段保护识别（Marker + AST） |
-| `redact.ts` | 内容脱敏（替换为 `[REDACTED]`） |
-| `bash-scanner.ts` | Bash 命令文件路径提取 |
-| `llm-scanner.ts` | LLM/MCP 内容敏感信息扫描 |
-| `audit.ts` | 安全事件审计日志 |
-| `doctor.ts` | 配置诊断与校验 |
+| 文件              | 职责                                                             |
+| ----------------- | ---------------------------------------------------------------- |
+| `schema.ts`       | Zod schema 定义（Role, Rule, AllowlistEntry, SecurityConfig 等） |
+| `config.ts`       | 配置加载、缓存、合并、热重载                                     |
+| `access.ts`       | 核心访问控制判定（deny 优先 + allowlist）                        |
+| `role.ts`         | 角色检测（JWT token 查找）                                       |
+| `token.ts`        | JWT RS256 解析与验证                                             |
+| `segments.ts`     | 代码段保护识别（Marker + AST）                                   |
+| `redact.ts`       | 内容脱敏（替换为 `[REDACTED]`）                                  |
+| `bash-scanner.ts` | Bash 命令文件路径提取                                            |
+| `llm-scanner.ts`  | LLM/MCP 内容敏感信息扫描                                         |
+| `audit.ts`        | 安全事件审计日志                                                 |
+| `doctor.ts`       | 配置诊断与校验                                                   |
 
 ### Sandbox（`src/sandbox/`）
 
-| 文件 | 职责 |
-|------|------|
-| `index.ts` | Sandbox 接口定义、状态管理 |
-| `init.ts` | 初始化与策略刷新 |
-| `seatbelt.ts` | macOS Seatbelt 实现（sandbox-exec 包裹） |
-| `profile.ts` | Seatbelt Profile 生成（.sb 文件） |
-| `builtins.ts` | 系统必要路径的内置放行规则 |
-| `glob-to-regex.ts` | Glob 模式 → Seatbelt SBPL 正则转换 |
-| `doctor.ts` | 沙箱环境诊断 |
+| 文件               | 职责                                     |
+| ------------------ | ---------------------------------------- |
+| `index.ts`         | Sandbox 接口定义、状态管理               |
+| `init.ts`          | 初始化与策略刷新                         |
+| `seatbelt.ts`      | macOS Seatbelt 实现（sandbox-exec 包裹） |
+| `profile.ts`       | Seatbelt Profile 生成（.sb 文件）        |
+| `builtins.ts`      | 系统必要路径的内置放行规则               |
+| `glob-to-regex.ts` | Glob 模式 → Seatbelt SBPL 正则转换       |
+| `doctor.ts`        | 沙箱环境诊断                             |

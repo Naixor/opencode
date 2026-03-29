@@ -92,6 +92,7 @@ export namespace SecuritySchema {
     logging: Logging.optional(),
     authentication: Authentication.optional(),
     mcp: McpConfig.optional(),
+    trusted_commands: z.array(z.string()).optional(),
     allowlist: z.array(AllowlistEntry).optional(),
   })
 

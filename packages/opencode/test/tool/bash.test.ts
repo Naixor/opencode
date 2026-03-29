@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import os from "os"
 import path from "path"
 import { BashTool } from "../../src/tool/bash"
@@ -7,6 +7,9 @@ import { Filesystem } from "../../src/util/filesystem"
 import { tmpdir } from "../fixture/fixture"
 import type { PermissionNext } from "../../src/permission/next"
 import { Truncate } from "../../src/tool/truncation"
+import { SecurityConfig } from "../../src/security/config"
+import { SecurityAccess } from "../../src/security/access"
+import { resetSandbox, setActiveSandbox } from "../../src/sandbox"
 
 const ctx = {
   sessionID: "test",
@@ -20,6 +23,20 @@ const ctx = {
 }
 
 const projectRoot = path.join(__dirname, "../..")
+
+afterEach(() => {
+  resetSandbox()
+  SecurityConfig.resetConfig()
+})
+
+async function secure(dir: string, cmds?: string[]) {
+  await Bun.write(
+    path.join(dir, ".opencode-security.json"),
+    JSON.stringify({ version: "1.0", trusted_commands: cmds }, null, 2),
+  )
+  SecurityAccess.setProjectRoot(dir)
+  await SecurityConfig.loadSecurityConfig(dir, { forceWalk: true })
+}
 
 describe("tool.bash", () => {
   test("basic", async () => {
@@ -36,6 +53,108 @@ describe("tool.bash", () => {
         )
         expect(result.metadata.exit).toBe(0)
         expect(result.metadata.output).toContain("test")
+      },
+    })
+  })
+
+  test("trusted command skips sandbox wrapping", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await secure(tmp.path, ["printf"])
+    setActiveSandbox(
+      {
+        wrap() {
+          return ["/bin/sh", "-c", "printf sandboxed"]
+        },
+        async isAvailable() {
+          return true
+        },
+        async generatePolicy() {
+          return ""
+        },
+      },
+      "active",
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const result = await bash.execute(
+          {
+            command: "printf normal",
+            description: "Print trusted command",
+          },
+          ctx,
+        )
+        expect(result.output).toBe("normal")
+      },
+    })
+  })
+
+  test("untrusted command still runs inside sandbox", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await secure(tmp.path, ["bitsky"])
+    setActiveSandbox(
+      {
+        wrap() {
+          return ["/bin/sh", "-c", "printf sandboxed"]
+        },
+        async isAvailable() {
+          return true
+        },
+        async generatePolicy() {
+          return ""
+        },
+      },
+      "active",
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const result = await bash.execute(
+          {
+            command: "printf normal",
+            description: "Print untrusted command",
+          },
+          ctx,
+        )
+        expect(result.output).toBe("sandboxed")
+      },
+    })
+  })
+
+  test("trusted command only bypasses sandbox for a single direct command", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await secure(tmp.path, ["printf"])
+    setActiveSandbox(
+      {
+        wrap() {
+          return ["/bin/sh", "-c", "printf sandboxed"]
+        },
+        async isAvailable() {
+          return true
+        },
+        async generatePolicy() {
+          return ""
+        },
+      },
+      "active",
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const result = await bash.execute(
+          {
+            command: "printf normal && pwd",
+            description: "Run mixed command chain",
+          },
+          ctx,
+        )
+        expect(result.output).toBe("sandboxed")
       },
     })
   })
