@@ -1,4 +1,5 @@
 import { sign, verify } from "./jwt"
+import { createServer } from "node:http"
 
 const PORT = parseInt(process.env.PORT || "3456")
 const ISSUER_URL = process.env.ISSUER_URL || ""
@@ -193,12 +194,13 @@ async function proxy(req: Request, url: URL) {
     headers.set("authorization", `Bearer ${route.key}`)
     headers.delete("host")
 
-    const res = await fetch(upstream, {
+    const opts: RequestInit & Record<string, unknown> = {
       method: req.method,
       headers,
       body: req.body,
-      duplex: "half" as const,
-    })
+      duplex: "half",
+    }
+    const res = await fetch(upstream, opts)
 
     // Pass through SSE/streaming responses, stripping encoding to avoid
     // double-decompression issues when intermediary and client both decode
@@ -214,18 +216,80 @@ async function proxy(req: Request, url: URL) {
   return error("not found", 404)
 }
 
-const server = Bun.serve({
-  port: PORT,
-  async fetch(req) {
-    const url = new URL(req.url)
+// Request handler shared by both Bun.serve and Node.js http server
+async function handler(req: Request) {
+  const url = new URL(req.url)
 
-    if (url.pathname === "/.well-known/opencode" && req.method === "GET") return wellknown()
-    if (url.pathname === "/auth/token" && req.method === "POST") return token(req)
-    if (url.pathname === "/auth/refresh" && req.method === "POST") return refresh(req)
-    if (url.pathname.startsWith("/v1/")) return proxy(req, url)
+  if (url.pathname === "/.well-known/opencode" && req.method === "GET") return wellknown()
+  if (url.pathname === "/auth/token" && req.method === "POST") return token(req)
+  if (url.pathname === "/auth/refresh" && req.method === "POST") return refresh(req)
+  if (url.pathname.startsWith("/v1/")) return proxy(req, url)
 
-    return error("not found", 404)
-  },
-})
+  return error("not found", 404)
+}
 
-console.log(`Feishu auth server running on http://localhost:${server.port}`)
+// --------------------------------------------------------------------------
+// Runtime-adaptive server start
+// Bun: use Bun.serve (best perf, native streaming)
+// Node.js 18+: use node:http with Web API Request/Response bridge
+// --------------------------------------------------------------------------
+
+const isBun = "Bun" in globalThis
+
+if (isBun) {
+  const server = (globalThis as Record<string, any>).Bun.serve({ port: PORT, fetch: handler })
+  console.log(`Feishu auth server running on http://localhost:${server.port} (bun)`)
+} else {
+  const server = createServer(async (req, res) => {
+    // Build a Web-standard Request from Node.js IncomingMessage
+    const proto = req.headers["x-forwarded-proto"] || "http"
+    const host = req.headers.host || `localhost:${PORT}`
+    const url = `${proto}://${host}${req.url}`
+
+    const headers = new Headers()
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (v) headers.set(k, Array.isArray(v) ? v.join(", ") : v)
+    }
+
+    const hasBody = req.method !== "GET" && req.method !== "HEAD"
+    const body = hasBody
+      ? await new Promise<Buffer>((resolve) => {
+          const chunks: Buffer[] = []
+          req.on("data", (c: Buffer) => chunks.push(c))
+          req.on("end", () => resolve(Buffer.concat(chunks)))
+        })
+      : undefined
+
+    const request = new Request(url, {
+      method: req.method,
+      headers,
+      body,
+    })
+
+    const response = await handler(request)
+
+    // Write Web-standard Response back to Node.js ServerResponse
+    res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
+
+    if (!response.body) {
+      res.end()
+      return
+    }
+
+    // Stream response body (SSE / chunked transfer)
+    const reader = response.body.getReader()
+    const pump = async () => {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        res.write(value)
+      }
+      res.end()
+    }
+    pump().catch(() => res.end())
+  })
+
+  server.listen(PORT, () => {
+    console.log(`Feishu auth server running on http://localhost:${PORT} (node)`)
+  })
+}

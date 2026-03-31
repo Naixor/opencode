@@ -87,13 +87,22 @@ openssl rsa -in private.pem -pubout -out public.pem
 
 ### 运行环境
 
-服务端基于 Bun 运行。请确保已安装 [Bun](https://bun.sh/)。
+支持以下任一运行时（部署脚本会自动检测并安装）：
+
+- [Bun](https://bun.sh/) >= 1.0（推荐，性能最优）
+- [Node.js](https://nodejs.org/) >= 18（服务端无 Bun 时自动降级）
 
 ---
 
 ## 服务端部署
 
 ### 环境变量
+
+复制 `.env.example` 并填入实际值：
+
+```bash
+cp .env.example .env
+```
 
 | 变量                 | 必填 | 默认值                      | 说明                     |
 | -------------------- | ---- | --------------------------- | ------------------------ |
@@ -110,23 +119,51 @@ openssl rsa -in private.pem -pubout -out public.pem
 | `FEISHU_BASE_URL`    | 否   | `https://open.feishu.cn`    | 飞书 API 地址            |
 | `JWT_TTL`            | 否   | `172800`（48 小时）         | JWT 有效期（秒）         |
 
-### 启动
+### 方式一：部署脚本（推荐）
+
+一键部署脚本会自动检测/安装运行时、安装依赖、启动服务：
 
 ```bash
-bun run start
+# 自动检测运行时并启动（优先 bun，降级 node）
+bash script/deploy.sh
+
+# 仅检查环境，不启动
+bash script/deploy.sh --check
+
+# 仅安装运行时和依赖
+bash script/deploy.sh --install
+
+# 强制使用 Node.js（服务端无 bun 时）
+bash script/deploy.sh --node
+
+# 强制使用 Bun
+bash script/deploy.sh --bun
 ```
 
-服务启动后会输出 `Feishu auth server running on http://localhost:3456`。
+### 方式二：手动启动
 
-### 使用 Docker 部署
+```bash
+# 使用 Bun（推荐）
+npm run start:bun
 
-```dockerfile
-FROM oven/bun:1
-WORKDIR /app
-COPY package.json bun.lockb ./
-RUN bun install --production
-COPY src ./src
-CMD ["bun", "run", "src/index.ts"]
+# 使用 Node.js
+npm run start
+```
+
+服务启动后会输出 `Feishu auth server running on http://localhost:3456 (bun|node)`。
+
+### 方式三：Docker 部署
+
+已提供多运行时 Dockerfile：
+
+```bash
+# 默认使用 Bun（推荐）
+docker build -t feishu-server .
+docker run -d --name feishu-server --env-file .env -p 3456:3456 feishu-server
+
+# 使用 Node.js
+docker build --build-arg RUNTIME=node -t feishu-server .
+docker run -d --name feishu-server --env-file .env -p 3456:3456 feishu-server
 ```
 
 建议通过 Nginx 或 Cloudflare Tunnel 暴露 HTTPS 端口。

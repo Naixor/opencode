@@ -248,11 +248,13 @@
       "name": "@opencode-ai/feishu-server",
       "version": "0.1.0",
       "dependencies": {
+        "tsx": "^4.19.0",
         "zod": "catalog:",
       },
       "devDependencies": {
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
+        "@types/node": "^22.0.0",
         "typescript": "catalog:",
       },
     },

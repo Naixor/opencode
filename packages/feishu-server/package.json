@@ -4,15 +4,20 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "start": "node --import tsx src/index.ts",
+    "start:bun": "bun run src/index.ts",
+    "build": "tsx --version > /dev/null 2>&1 || npm install tsx",
+    "typecheck": "tsc --noEmit",
+    "deploy": "bash script/deploy.sh"
   },
   "devDependencies": {
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
+    "@types/node": "^22.0.0",
     "typescript": "catalog:"
   },
   "dependencies": {
+    "tsx": "^4.19.0",
     "zod": "catalog:"
   }
 }

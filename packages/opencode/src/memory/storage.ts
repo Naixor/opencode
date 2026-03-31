@@ -136,6 +136,7 @@ export namespace MemoryStorage {
   export async function loadAll(): Promise<MemoryRecord[]> {
     const fp = filePath()
     using _ = await Lock.read(fp)
+    cache = undefined
     const store = await load()
     return Object.values(store.memories)
   }
