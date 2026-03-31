@@ -14,12 +14,15 @@ const SDK_TOOLS = new Set(["json"])
 const BASE_BETAS = [
   "claude-code-20250219",
   "oauth-2025-04-20",
-  "context-1m-2025-08-07",
   "interleaved-thinking-2025-05-14",
   "redact-thinking-2026-02-12",
   "context-management-2025-06-27",
   "prompt-caching-scope-2026-01-05",
 ]
+
+// Only Opus 4.6+ supports the 1M long context beta
+const LONG_CONTEXT_BETA = "context-1m-2025-08-07"
+const LONG_CONTEXT_MODELS = ["claude-opus-4-6", "claude-opus-4.6"]
 
 // Additional betas appended at query time
 const QUERY_BETAS = ["advanced-tool-use-2025-11-20", "effort-2025-11-24"]
@@ -152,7 +155,19 @@ export async function AnthropicAuthPlugin({ client }: PluginInput): Promise<Hook
               .split(",")
               .map((b) => b.trim())
               .filter(Boolean)
-            headers.set("anthropic-beta", [...new Set([...BASE_BETAS, ...QUERY_BETAS, ...extra])].join(","))
+            const betas = [...new Set([...BASE_BETAS, ...QUERY_BETAS, ...extra])]
+
+            // Conditionally add long context beta based on model in request body
+            if (init?.body && typeof init.body === "string") {
+              try {
+                const peek = JSON.parse(init.body)
+                if (typeof peek.model === "string" && LONG_CONTEXT_MODELS.some((m) => peek.model.includes(m))) {
+                  betas.push(LONG_CONTEXT_BETA)
+                }
+              } catch {}
+            }
+
+            headers.set("anthropic-beta", betas.join(","))
             headers.set("authorization", `Bearer ${auth.access}`)
             headers.set("user-agent", `claude-code/${VERSION}`)
             headers.set("x-service-name", "claude-code")

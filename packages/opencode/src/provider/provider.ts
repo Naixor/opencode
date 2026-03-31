@@ -60,6 +60,13 @@ export namespace Provider {
     return isGpt5OrLater(modelID) && !modelID.startsWith("gpt-5-mini")
   }
 
+  // Only Opus 4.6+ supports the 1M long context beta
+  const LONG_CONTEXT_MODELS = ["claude-opus-4-6", "claude-opus-4.6"]
+
+  function supportsLongContext(model: string) {
+    return LONG_CONTEXT_MODELS.some((m) => model.includes(m))
+  }
+
   function googleVertexVars(options: Record<string, any>) {
     const project =
       options["project"] ?? Env.get("GOOGLE_CLOUD_PROJECT") ?? Env.get("GCP_PROJECT") ?? Env.get("GCLOUD_PROJECT")
@@ -123,7 +130,7 @@ export namespace Provider {
         options: {
           headers: {
             "anthropic-beta":
-              "claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24",
+              "claude-code-20250219,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24",
           },
         },
       }
@@ -1122,6 +1129,21 @@ export namespace Provider {
             }
             opts.body = JSON.stringify(body)
           }
+        }
+
+        // Conditionally add context-1m beta for Anthropic models that support 1M context
+        if (model.api.npm === "@ai-sdk/anthropic" && opts.body && opts.method === "POST") {
+          try {
+            const body = JSON.parse(opts.body as string)
+            if (typeof body.model === "string" && supportsLongContext(body.model)) {
+              const headers = new Headers(opts.headers as HeadersInit)
+              const beta = headers.get("anthropic-beta") || ""
+              if (!beta.includes("context-1m")) {
+                headers.set("anthropic-beta", beta ? `${beta},context-1m-2025-08-07` : "context-1m-2025-08-07")
+                opts.headers = headers
+              }
+            }
+          } catch {}
         }
 
         return fetchFn(input, {
