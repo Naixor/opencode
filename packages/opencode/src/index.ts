@@ -37,7 +37,6 @@ import { SecurityCommand } from "./cli/cmd/security"
 import { SandboxCommand } from "./cli/cmd/sandbox"
 import { ManagerCommand } from "./cli/cmd/manager"
 import { StopCommand } from "./cli/cmd/stop"
-import { LogViewerCommand } from "./cli/cmd/log-viewer"
 import { FeishuAuthCommand } from "./cli/cmd/feishu-auth"
 import { registerAllHooks } from "./session/hooks/register"
 
@@ -156,7 +155,6 @@ let cli = yargs(hideBin(process.argv))
   .command(SandboxCommand)
   .command(ManagerCommand)
   .command(StopCommand)
-  .command(LogViewerCommand)
   .command(FeishuAuthCommand)
 
 if (Installation.isLocal()) {

@@ -12,9 +12,9 @@ Execute a single test-fix cycle. Read the ledger, select the highest-priority `d
 
 ## Arguments
 
-| Argument | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `--ledger` | **Yes** | — | Path to the test-fix ledger JSON file (must conform to `.claude/schemas/test-fix-ledger.schema.json`) |
+| Argument   | Required | Default | Description                                                                                           |
+| ---------- | -------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `--ledger` | **Yes**  | —       | Path to the test-fix ledger JSON file (must conform to `.claude/schemas/test-fix-ledger.schema.json`) |
 
 ---
 
@@ -133,28 +133,36 @@ Use this data to pre-populate your understanding of the error before reading the
 Based on the root cause identified in 3.3, select exactly ONE fix strategy:
 
 #### Source Bug
+
 **Criteria:** The source code has a defect — it does not implement its intended behavior correctly.
+
 - The test's expected behavior is correct per the project's design.
 - The source code produces wrong output, crashes, or has a logic error.
 - **Action:** Fix the source code. Do not modify the test.
 - **Example:** A function returns `null` instead of an empty array because of a missing early return.
 
 #### API Change
+
 **Criteria:** The source API was intentionally changed (new parameter, renamed method, changed return type) but the test was not updated.
+
 - Check recent git history (`git log --oneline -10 -- <source_file>`) to confirm the change was intentional.
 - The source code's current behavior is correct per the new design.
 - **Action:** Adapt the test to match the new API. Update assertions, imports, and setup as needed.
 - **Example:** A function was refactored to return `Result<T>` instead of `T | null`, and the test still expects null-checking.
 
 #### Test Bug
+
 **Criteria:** The test itself has a logic error — wrong assertion, incorrect setup, or flawed test data.
+
 - The source code is correct and produces the expected output.
 - The test's assertion or setup does not match the source's actual contract.
 - **Action:** Fix the test. Add a `// Fixed: <reason>` comment on the corrected line explaining what was wrong.
 - **Example:** Test uses `toBe()` (reference equality) instead of `toEqual()` (deep equality) for object comparison.
 
 #### Environment Issue
+
 **Criteria:** The failure is caused by missing configuration, wrong paths, missing fixtures, or external dependency problems.
+
 - The source code and test logic are both correct.
 - The failure is caused by something outside the code itself.
 - **Action:** Fix the environment setup — add missing fixtures, correct paths, update config. If the fix requires changes outside the codebase (e.g., installing a system dependency), escalate instead of fixing.
@@ -196,7 +204,15 @@ Based on the root cause identified in 3.3, select exactly ONE fix strategy:
 
 ## Step 5: Verify the Fix
 
-After applying the fix in Step 4, run a targeted test to confirm the specific failure is resolved. Do not run the full suite yet — that happens in Step 7.
+After applying the fix in Step 4, run a build check first, then a targeted test to confirm the specific failure is resolved. Do not run the full suite yet — that happens in Step 7.
+
+### 5.0 Build Check
+
+1. Invoke `/build-verify --scope typecheck` to verify the fix doesn't introduce compile errors.
+2. If typecheck fails, treat this as a **failed fix** — the code change introduced compile errors. Proceed to Step 6 failure path.
+3. If typecheck passes, proceed to 5.1.
+
+This step catches import/resolve errors immediately, avoiding wasted time on tests that would all fail with `compile` errors.
 
 ### 5.1 Run Targeted Test
 
@@ -236,6 +252,7 @@ If the targeted test from Step 5.2 shows the entry's test now passes:
 5. Update the top-level `updated_at` field to the current ISO 8601 timestamp (e.g., `2026-02-24T14:30:00Z`).
 
 **Example of a fixed entry:**
+
 ```json
 {
   "id": "F-003",

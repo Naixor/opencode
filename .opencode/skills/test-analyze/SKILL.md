@@ -12,22 +12,50 @@ Run the project test suite, parse all output, and produce a structured Markdown 
 
 ## Arguments
 
-| Argument | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `--scope` | No | `bun` | Test scope to run: `bun` (unit/integration), `e2e` (end-to-end), `all` (both) |
-| `--file` | No | — | Run tests for a single file only (path relative to repo root) |
-| `--output` | No | — | Save the raw test output to this file path |
+| Argument         | Required | Default | Description                                                                                                              |
+| ---------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--scope`        | No       | `bun`   | Test scope to run: `bun` (unit/integration), `e2e` (end-to-end), `all` (both)                                            |
+| `--file`         | No       | —       | Run tests for a single file only (path relative to repo root)                                                            |
+| `--output`       | No       | —       | Save the raw test output to this file path                                                                               |
+| `--build-verify` | No       | false   | Run `/build-verify` before tests. If build fails, abort early and return the build error report instead of running tests |
 
 ---
 
 ## The Job
 
-1. **Run the test suite** based on the provided scope and file arguments
-2. **Capture the raw output** (stdout + stderr combined)
-3. **Parse the output** to extract every test result
-4. **Dual-verify** the failure count using two independent extraction methods
-5. **Classify each failure** by error type and assign priority
-6. **Generate a structured Markdown report**
+1. **Build verification** (if `--build-verify` is set) — run `/build-verify --scope all` first; abort early on failure
+2. **Run the test suite** based on the provided scope and file arguments
+3. **Capture the raw output** (stdout + stderr combined)
+4. **Parse the output** to extract every test result
+5. **Dual-verify** the failure count using two independent extraction methods
+6. **Classify each failure** by error type and assign priority
+7. **Generate a structured Markdown report**
+
+---
+
+## Step 0: Build Verification (Optional)
+
+If `--build-verify` is set, run `/build-verify --scope all` before executing any tests.
+
+- If build-verify returns `BUILD-VERIFY: PASS`, proceed to Step 1.
+- If build-verify returns `BUILD-VERIFY: FAIL`, **abort immediately**. Do not run tests — compile/resolve errors will cause cascading test failures that waste time and produce misleading reports.
+
+When aborting, return a report in this format:
+
+```markdown
+## Summary
+
+| Metric            | Value                                  |
+| ----------------- | -------------------------------------- |
+| **Build Verify**  | FAIL                                   |
+| **Tests Skipped** | Yes — build errors must be fixed first |
+
+## Build Errors
+
+<paste the concise error output from /build-verify>
+```
+
+This early-exit saves significant time when there are import/resolve errors that would cause many tests to fail with `compile` errors.
 
 ---
 
@@ -41,6 +69,7 @@ Based on the `--scope` argument, run the appropriate test command:
 - **`all`:** Run both commands sequentially
 
 If `--file` is provided, run only that file via test:parallel using `--pattern`:
+
 - `bun run --cwd packages/opencode test:parallel --workers 1 --pattern "**/<file>" 2>&1`
 
   Where `<file>` is the value passed to `--file`. The `--pattern` argument is matched against absolute file paths using minimatch, so prefixing with `**/` ensures it matches regardless of the absolute root. Example: `--file test/tool/bash.test.ts` → `--pattern "**/test/tool/bash.test.ts"`.
@@ -59,6 +88,7 @@ Capture ALL stdout and stderr combined (`2>&1`). If `--output` is provided, save
 2. **Per-test failure detail** (only for failing files, printed immediately after the per-file line): the full `bun test` stderr of the failing file, in the same format as standard `bun test` output.
 
 The final summary block appears after all per-file lines:
+
 ```
 ────────────────────────────────────────────────────────────
 Files:   120
@@ -98,11 +128,13 @@ Use TWO independent extraction methods to count failures, then cross-check with 
 ### Source A: Summary Line Extraction
 
 All scopes (`bun`, `e2e`, and `--file`) use `test:parallel`, which always emits the same summary block at the end of output:
+
 ```
 Pass:    N
 Fail:    N
 Skip:    N
 ```
+
 1. Search for `^Fail:\s+(\d+)` → `source_a_fail`
 2. Search for `^Pass:\s+(\d+)` → `source_a_pass`
 3. Search for `^Skip:\s+(\d+)` → `source_a_skip`
@@ -114,9 +146,11 @@ If the summary block is missing or unparseable, set `source_a_fail = UNKNOWN` an
 ### Source B: Individual Failure Counting
 
 All scopes use `test:parallel`, so count per-file failure markers — lines matching the `[N/M] ✗` pattern:
+
 ```
 grep -c '^\[.*\] ✗' <raw-output-file>
 ```
+
 Each `[N/M] ✗` line represents one failing test **file** (not one failing test case). Cross-check by summing the `Y fail` values from all `[N/M] ✗ <path> (X pass, Y fail, Z skip, T.Ts)` lines; the sum must equal `source_a_fail`. If they differ, flag for `COMPLETENESS_WARNING`.
 
 If `source_b_fail` differs from `source_a_fail`, flag for `COMPLETENESS_WARNING`.
@@ -240,14 +274,14 @@ If a failure matches **multiple** categories, apply this precedence order: `comp
 
 Assign priority P0–P5 based on `error_type` and whether the fault originates in a **source file** or a **test file**:
 
-| Priority | Rule | Rationale |
-|----------|------|-----------|
-| P0 | `compile` errors where `source_file` is under `src/` | Blocks compilation; likely cascades to many tests |
-| P1 | `compile` errors where `source_file` is under `test/` | Only affects the test itself but must be loadable |
-| P2 | `runtime` errors where `source_file` is under `src/` | Source code bug causing crashes |
-| P3 | `assertion` errors (any location) | Test logic vs source logic mismatch |
-| P4 | `timeout` errors (any location) | May be flaky or resource-related |
-| P5 | `environment` errors (any location) | External dependency or setup issue |
+| Priority | Rule                                                  | Rationale                                         |
+| -------- | ----------------------------------------------------- | ------------------------------------------------- |
+| P0       | `compile` errors where `source_file` is under `src/`  | Blocks compilation; likely cascades to many tests |
+| P1       | `compile` errors where `source_file` is under `test/` | Only affects the test itself but must be loadable |
+| P2       | `runtime` errors where `source_file` is under `src/`  | Source code bug causing crashes                   |
+| P3       | `assertion` errors (any location)                     | Test logic vs source logic mismatch               |
+| P4       | `timeout` errors (any location)                       | May be flaky or resource-related                  |
+| P5       | `environment` errors (any location)                   | External dependency or setup issue                |
 
 **Source vs Test distinction:** Inspect the `source_file` field (extracted from the stack trace). If the deepest non-node_modules, non-test frame points to a file under `src/`, it's a source file error. If it points to a file under `test/`, or if `source_file` cannot be determined, treat it as a test file error (use the lower-priority variant for compile/runtime).
 
@@ -270,18 +304,19 @@ In the final report, display correlated failures together under a group header s
 
 For each failure, produce a record with **all** of these fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `file` | string | Test file path relative to repo root |
-| `test` | string | Full test name including `describe` block (e.g., `"describe > test name"`) |
-| `error_type` | enum | One of: `compile`, `runtime`, `assertion`, `timeout`, `environment` |
-| `error_message` | string | First line of the error (truncated to 200 chars) |
-| `stack_trace` | string | Relevant stack frames, max 5 lines, trimmed of node_modules frames |
-| `source_file` | string \| null | Source file path from stack trace (deepest non-test, non-node_modules frame), or `null` if not identifiable |
-| `source_line` | number \| null | Line number in source_file, or `null` if not identifiable |
-| `priority` | enum | One of: `P0`, `P1`, `P2`, `P3`, `P4`, `P5` |
+| Field           | Type           | Description                                                                                                 |
+| --------------- | -------------- | ----------------------------------------------------------------------------------------------------------- |
+| `file`          | string         | Test file path relative to repo root                                                                        |
+| `test`          | string         | Full test name including `describe` block (e.g., `"describe > test name"`)                                  |
+| `error_type`    | enum           | One of: `compile`, `runtime`, `assertion`, `timeout`, `environment`                                         |
+| `error_message` | string         | First line of the error (truncated to 200 chars)                                                            |
+| `stack_trace`   | string         | Relevant stack frames, max 5 lines, trimmed of node_modules frames                                          |
+| `source_file`   | string \| null | Source file path from stack trace (deepest non-test, non-node_modules frame), or `null` if not identifiable |
+| `source_line`   | number \| null | Line number in source_file, or `null` if not identifiable                                                   |
+| `priority`      | enum           | One of: `P0`, `P1`, `P2`, `P3`, `P4`, `P5`                                                                  |
 
 Example record:
+
 ```
 - file: test/security/access_control.test.ts
 - test: checkAccess > rejects paths with null bytes
@@ -311,17 +346,17 @@ Always include this section. Fill in actual values from Steps 2–3.
 ```markdown
 ## Summary
 
-| Metric | Value |
-|--------|-------|
-| **Scope** | bun / e2e / all |
-| **Runner** | test:parallel |
-| **Total** | N |
-| **Pass** | N |
-| **Fail** | N |
-| **Skip** | N |
-| **Wall Time** | N.NNs |
-| **Speedup** | N.NNx (serial: N.NNs) |
-| **Dual Verification** | PASS / FAIL |
+| Metric                | Value                 |
+| --------------------- | --------------------- |
+| **Scope**             | bun / e2e / all       |
+| **Runner**            | test:parallel         |
+| **Total**             | N                     |
+| **Pass**              | N                     |
+| **Fail**              | N                     |
+| **Skip**              | N                     |
+| **Wall Time**         | N.NNs                 |
+| **Speedup**           | N.NNx (serial: N.NNs) |
+| **Dual Verification** | PASS / FAIL           |
 
 ### Verification Details
 
@@ -332,10 +367,12 @@ Always include this section. Fill in actual values from Steps 2–3.
 ```
 
 Rules:
+
 - **Runner** is always `test:parallel` for all scopes and for `--file` runs.
 - **Wall Time** and **Speedup** are always shown — `test:parallel` provides them in all cases.
 
 Rules:
+
 - `Dual Verification` is **PASS** only if **all four** checks pass (Source A/B match, arithmetic, silent skip).
 - If any check is `FAIL`, add a parenthetical with the specific check names that failed, e.g., `FAIL (Source A/B mismatch, silent skip)`.
 - If `source_a_fail = UNKNOWN`, display `Source A: UNKNOWN (summary line not found)`.
@@ -351,27 +388,28 @@ Include this section only if there are failures (`fail > 0`). Failures are group
 
 ### Group: src/provider/auth.ts (P0, 3 failures)
 
-| # | Priority | File | Test | Error Type | Error Message | Source |
-|---|----------|------|------|------------|---------------|--------|
-| 1 | P0 | test/provider/auth.test.ts | describe > validates token | compile | Cannot find module 'src/pro...' | src/provider/auth.ts:12 |
-| 2 | P2 | test/provider/auth.test.ts | describe > refreshes session | runtime | Cannot read properties of ... | src/provider/auth.ts:45 |
-| 3 | P3 | test/provider/login.test.ts | login > rejects expired | assertion | Expected: 401, Received: 200 | src/provider/auth.ts:78 |
+| #   | Priority | File                        | Test                         | Error Type | Error Message                   | Source                  |
+| --- | -------- | --------------------------- | ---------------------------- | ---------- | ------------------------------- | ----------------------- |
+| 1   | P0       | test/provider/auth.test.ts  | describe > validates token   | compile    | Cannot find module 'src/pro...' | src/provider/auth.ts:12 |
+| 2   | P2       | test/provider/auth.test.ts  | describe > refreshes session | runtime    | Cannot read properties of ...   | src/provider/auth.ts:45 |
+| 3   | P3       | test/provider/login.test.ts | login > rejects expired      | assertion  | Expected: 401, Received: 200    | src/provider/auth.ts:78 |
 
 ### Group: src/tool/file.ts (P2, 1 failure)
 
-| # | Priority | File | Test | Error Type | Error Message | Source |
-|---|----------|------|------|------------|---------------|--------|
-| 4 | P2 | test/tool/file.test.ts | file > handles missing path | runtime | TypeError: Cannot read pro... | src/tool/file.ts:33 |
+| #   | Priority | File                   | Test                        | Error Type | Error Message                 | Source              |
+| --- | -------- | ---------------------- | --------------------------- | ---------- | ----------------------------- | ------------------- |
+| 4   | P2       | test/tool/file.test.ts | file > handles missing path | runtime    | TypeError: Cannot read pro... | src/tool/file.ts:33 |
 
 ### Ungrouped (2 failures)
 
-| # | Priority | File | Test | Error Type | Error Message | Source |
-|---|----------|------|------|------------|---------------|--------|
-| 5 | P4 | test/agent/prompt.test.ts | prompt > loads templates | timeout | Test timed out after 5000ms | — |
-| 6 | P5 | test/server/routes.test.ts | routes > binds port | environment | EADDRINUSE: port 4096 alr... | — |
+| #   | Priority | File                       | Test                     | Error Type  | Error Message                | Source |
+| --- | -------- | -------------------------- | ------------------------ | ----------- | ---------------------------- | ------ |
+| 5   | P4       | test/agent/prompt.test.ts  | prompt > loads templates | timeout     | Test timed out after 5000ms  | —      |
+| 6   | P5       | test/server/routes.test.ts | routes > binds port      | environment | EADDRINUSE: port 4096 alr... | —      |
 ```
 
 Rules:
+
 - Each group gets a `### Group: <source_file> (P<N>, M failures)` header showing the group's shared source file, overall priority, and failure count.
 - The **#** column is a sequential number across the entire report (not per-group).
 - **Error Message** is truncated to 30 characters with `...` in the table. The full message appears in the Per-File Breakdown.
@@ -385,18 +423,20 @@ Rules:
 
 Always include this section if there are failures. One sub-heading per test file that contains at least one failure. Sorted alphabetically by file path.
 
-```markdown
+````markdown
 ## Per-File Breakdown
 
 ### test/provider/auth.test.ts (2 failures)
 
 1. **describe > validates token** — `compile` (P0)
+
    > Cannot find module 'src/provider/auth-v2' from 'test/provider/auth.test.ts'
 
 2. **describe > refreshes session** — `runtime` (P2)
    > Cannot read properties of undefined (reading 'expiresAt')
    >
    > Stack:
+   >
    > ```
    > at refreshSession (src/provider/auth.ts:45)
    > at Object.<anonymous> (test/provider/auth.test.ts:88)
@@ -406,9 +446,10 @@ Always include this section if there are failures. One sub-heading per test file
 
 1. **login > rejects expired** — `assertion` (P3)
    > Expected: 401, Received: 200
-```
+````
 
 Rules:
+
 - Each test file heading includes the failure count in parentheses.
 - Each failure entry shows: full test name, error_type, priority, full error message (not truncated), and stack trace (max 5 frames, excluding node_modules frames).
 - Stack traces are wrapped in a fenced code block inside a blockquote for readability.
@@ -425,13 +466,14 @@ Include this section **only** if the silent skip check (Step 3) detected test fi
 
 **N test file(s)** exist on disk but did not appear in test output:
 
-| # | File Path | Possible Reason |
-|---|-----------|-----------------|
-| 1 | test/security/symlink.test.ts | File may not match test runner glob |
-| 2 | test/util/deprecated.test.ts | File may be excluded by config |
+| #   | File Path                     | Possible Reason                     |
+| --- | ----------------------------- | ----------------------------------- |
+| 1   | test/security/symlink.test.ts | File may not match test runner glob |
+| 2   | test/util/deprecated.test.ts  | File may be excluded by config      |
 ```
 
 Rules:
+
 - List every silently skipped file with a sequential number.
 - The **Possible Reason** column is a best-effort guess (e.g., check if the file is excluded in a config, has a `.skip` marker, or uses an unusual extension). If no reason can be determined, write `Unknown`.
 - If there are no silent skips, omit this entire section.
@@ -457,6 +499,7 @@ Raw output was not saved to disk. Use `--output <path>` to persist the raw test 
 ```
 
 Rules:
+
 - The path must be wrapped in backticks for readability.
 - If `--output` was specified, confirm the file was written successfully. If it failed to write, note the error.
 
@@ -466,6 +509,7 @@ Rules:
 
 Before finalizing the report, verify:
 
+- [ ] Build verification was run if `--build-verify` was set (and aborted early on failure)
 - [ ] All tests were executed for the requested scope
 - [ ] Dual verification was performed (Source A vs Source B)
 - [ ] Arithmetic check passed (pass + fail + skip = total)
