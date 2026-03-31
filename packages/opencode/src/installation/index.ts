@@ -57,9 +57,11 @@ export namespace Installation {
     return CHANNEL === "local"
   }
 
+  const PKG = "lark-opencode"
+
   export async function method() {
-    if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl"
-    if (process.execPath.includes(path.join(".local", "bin"))) return "curl"
+    if (process.execPath.includes(path.join(".opencode", "bin"))) return "npm"
+    if (process.execPath.includes(path.join(".local", "bin"))) return "npm"
     const exec = process.execPath.toLowerCase()
 
     const checks = [
@@ -79,18 +81,6 @@ export namespace Installation {
         name: "bun" as const,
         command: () => $`bun pm ls -g`.throws(false).quiet().text(),
       },
-      {
-        name: "brew" as const,
-        command: () => $`brew list --formula opencode`.throws(false).quiet().text(),
-      },
-      {
-        name: "scoop" as const,
-        command: () => $`scoop list opencode`.throws(false).quiet().text(),
-      },
-      {
-        name: "choco" as const,
-        command: () => $`choco list --limit-output opencode`.throws(false).quiet().text(),
-      },
     ]
 
     checks.sort((a, b) => {
@@ -103,9 +93,7 @@ export namespace Installation {
 
     for (const check of checks) {
       const output = await check.command()
-      const installedName =
-        check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "opencode" : "lark-opencode"
-      if (output.includes(installedName)) {
+      if (output.includes(PKG)) {
         return check.name
       }
     }
@@ -120,64 +108,29 @@ export namespace Installation {
     }),
   )
 
-  async function getBrewFormula() {
-    const tapFormula = await $`brew list --formula anomalyco/tap/opencode`.throws(false).quiet().text()
-    if (tapFormula.includes("opencode")) return "anomalyco/tap/opencode"
-    const coreFormula = await $`brew list --formula opencode`.throws(false).quiet().text()
-    if (coreFormula.includes("opencode")) return "opencode"
-    return "opencode"
-  }
-
   export async function upgrade(method: Method, target: string) {
     let cmd
     switch (method) {
-      case "curl":
-        cmd = $`curl -fsSL https://opencode.ai/install | bash`.env({
-          ...process.env,
-          VERSION: target,
-        })
-        break
       case "npm":
-        cmd = $`npm install -g lark-opencode@${target}`
+        cmd = $`npm install -g ${PKG}@${target}`
         break
       case "pnpm":
-        cmd = $`pnpm install -g lark-opencode@${target}`
+        cmd = $`pnpm install -g ${PKG}@${target}`
         break
       case "bun":
-        cmd = $`bun install -g lark-opencode@${target}`
+        cmd = $`bun install -g ${PKG}@${target}`
         break
-      case "brew": {
-        const formula = await getBrewFormula()
-        if (formula.includes("/")) {
-          cmd =
-            $`brew tap anomalyco/tap && cd "$(brew --repo anomalyco/tap)" && git pull --ff-only && brew upgrade ${formula}`.env(
-              {
-                HOMEBREW_NO_AUTO_UPDATE: "1",
-                ...process.env,
-              },
-            )
-          break
-        }
-        cmd = $`brew upgrade ${formula}`.env({
-          HOMEBREW_NO_AUTO_UPDATE: "1",
-          ...process.env,
-        })
-        break
-      }
-      case "choco":
-        cmd = $`echo Y | choco upgrade opencode --version=${target}`
-        break
-      case "scoop":
-        cmd = $`scoop install opencode@${target}`
+      case "yarn":
+        cmd = $`yarn global add ${PKG}@${target}`
         break
       default:
-        throw new Error(`Unknown method: ${method}`)
+        cmd = $`npm install -g ${PKG}@${target}`
+        break
     }
     const result = await cmd.quiet().throws(false)
     if (result.exitCode !== 0) {
-      const stderr = method === "choco" ? "not running from an elevated command shell" : result.stderr.toString("utf8")
       throw new UpgradeFailedError({
-        stderr: stderr,
+        stderr: result.stderr.toString("utf8"),
       })
     }
     log.info("upgraded", {
@@ -193,69 +146,17 @@ export namespace Installation {
   export const CHANNEL = typeof OPENCODE_CHANNEL === "string" ? OPENCODE_CHANNEL : "local"
   export const USER_AGENT = `opencode/${CHANNEL}/${VERSION}/${Flag.OPENCODE_CLIENT}`
 
-  export async function latest(installMethod?: Method) {
-    const detectedMethod = installMethod || (await method())
-
-    if (detectedMethod === "brew") {
-      const formula = await getBrewFormula()
-      if (formula.includes("/")) {
-        const infoJson = await $`brew info --json=v2 ${formula}`.quiet().text()
-        const info = JSON.parse(infoJson)
-        const version = info.formulae?.[0]?.versions?.stable
-        if (!version) throw new Error(`Could not detect version for tap formula: ${formula}`)
-        return version
-      }
-      return fetch("https://formulae.brew.sh/api/formula/opencode.json")
-        .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
-          return res.json()
-        })
-        .then((data: any) => data.versions.stable)
-    }
-
-    if (detectedMethod === "npm" || detectedMethod === "bun" || detectedMethod === "pnpm") {
-      const registry = await iife(async () => {
-        const r = (await $`npm config get registry`.quiet().nothrow().text()).trim()
-        const reg = r || "https://registry.npmjs.org"
-        return reg.endsWith("/") ? reg.slice(0, -1) : reg
-      })
-      const channel = CHANNEL
-      return fetch(`${registry}/lark-opencode/${channel}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
-          return res.json()
-        })
-        .then((data: any) => data.version)
-    }
-
-    if (detectedMethod === "choco") {
-      return fetch(
-        "https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20IsLatestVersion&$select=Version",
-        { headers: { Accept: "application/json;odata=verbose" } },
-      )
-        .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
-          return res.json()
-        })
-        .then((data: any) => data.d.results[0].Version)
-    }
-
-    if (detectedMethod === "scoop") {
-      return fetch("https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/opencode.json", {
-        headers: { Accept: "application/json" },
-      })
-        .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
-          return res.json()
-        })
-        .then((data: any) => data.version)
-    }
-
-    return fetch("https://api.github.com/repos/anomalyco/opencode/releases/latest")
+  export async function latest(_installMethod?: Method) {
+    const registry = await iife(async () => {
+      const r = (await $`npm config get registry`.quiet().nothrow().text()).trim()
+      const reg = r || "https://registry.npmjs.org"
+      return reg.endsWith("/") ? reg.slice(0, -1) : reg
+    })
+    return fetch(`${registry}/${PKG}/${CHANNEL}`)
       .then((res) => {
         if (!res.ok) throw new Error(res.statusText)
         return res.json()
       })
-      .then((data: any) => data.tag_name.replace(/^v/, ""))
+      .then((data: any) => data.version)
   }
 }
