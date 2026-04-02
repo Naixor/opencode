@@ -1,4 +1,4 @@
-import { For, Show, createMemo, onCleanup, onMount, type Component } from "solid-js"
+import { For, Show, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@opencode-ai/ui/button"
 import { DockPrompt } from "@opencode-ai/ui/dock-prompt"
@@ -6,11 +6,22 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { showToast } from "@opencode-ai/ui/toast"
 import type { QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
+import { ACCEPTED_FILE_TYPES } from "@/components/prompt-input/attachments"
+import { uuid } from "@/utils/uuid"
+
+type ImageItem = {
+  id: string
+  filename: string
+  mime: string
+  dataUrl: string
+}
 
 export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit: () => void }> = (props) => {
   const sdk = useSDK()
   const language = useLanguage()
+  const platform = usePlatform()
 
   const questions = createMemo(() => props.request.questions)
   const total = createMemo(() => questions().length)
@@ -23,6 +34,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     editing: false,
     sending: false,
   })
+
+  const [images, setImages] = createSignal<ImageItem[]>([])
+  const [dragging, setDragging] = createSignal(false)
 
   let root: HTMLDivElement | undefined
 
@@ -38,6 +52,86 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   })
 
   const last = createMemo(() => store.tab >= total() - 1)
+
+  const addImage = (file: File) => {
+    if (!ACCEPTED_FILE_TYPES.includes(file.type)) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setImages((prev) => [
+        ...prev,
+        {
+          id: uuid(),
+          filename: file.name,
+          mime: file.type,
+          dataUrl: reader.result as string,
+        },
+      ])
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const removeImage = (id: string) => {
+    setImages((prev) => prev.filter((img) => img.id !== id))
+  }
+
+  const handlePaste = async (event: ClipboardEvent) => {
+    const data = event.clipboardData
+    if (!data) return
+
+    const items = Array.from(data.items)
+    const fileItems = items.filter((item) => item.kind === "file")
+    const accepted = fileItems.filter((item) => ACCEPTED_FILE_TYPES.includes(item.type))
+
+    if (accepted.length > 0) {
+      event.preventDefault()
+      event.stopPropagation()
+      for (const item of accepted) {
+        const file = item.getAsFile()
+        if (file) addImage(file)
+      }
+      return
+    }
+
+    if (fileItems.length > 0) {
+      event.preventDefault()
+      showToast({
+        title: language.t("prompt.toast.pasteUnsupported.title"),
+        description: language.t("prompt.toast.pasteUnsupported.description"),
+      })
+      return
+    }
+
+    // Desktop: no image items and no text, try native clipboard
+    const text = data.getData("text/plain") ?? ""
+    if (platform.readClipboardImage && !text) {
+      const file = await platform.readClipboardImage()
+      if (file) {
+        event.preventDefault()
+        addImage(file)
+      }
+    }
+  }
+
+  const handleDragOver = (event: DragEvent) => {
+    if (!event.dataTransfer?.types.includes("Files")) return
+    event.preventDefault()
+    setDragging(true)
+  }
+
+  const handleDragLeave = (event: DragEvent) => {
+    if (event.relatedTarget && root?.contains(event.relatedTarget as Node)) return
+    setDragging(false)
+  }
+
+  const handleDrop = (event: DragEvent) => {
+    event.preventDefault()
+    setDragging(false)
+    const files = event.dataTransfer?.files
+    if (!files) return
+    for (const file of Array.from(files)) {
+      if (ACCEPTED_FILE_TYPES.includes(file.type)) addImage(file)
+    }
+  }
 
   const customUpdate = (value: string, selected: boolean = on()) => {
     const prev = input().trim()
@@ -100,10 +194,22 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     if (dock instanceof HTMLElement) observer.observe(dock)
     if (scroller instanceof HTMLElement) observer.observe(scroller)
 
+    // Drag & drop on the whole dock
+    if (root) {
+      root.addEventListener("dragover", handleDragOver)
+      root.addEventListener("dragleave", handleDragLeave)
+      root.addEventListener("drop", handleDrop)
+    }
+
     onCleanup(() => {
       window.removeEventListener("resize", update)
       observer.disconnect()
       if (raf !== undefined) cancelAnimationFrame(raf)
+      if (root) {
+        root.removeEventListener("dragover", handleDragOver)
+        root.removeEventListener("dragleave", handleDragLeave)
+        root.removeEventListener("drop", handleDrop)
+      }
     })
   })
 
@@ -118,7 +224,20 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     props.onSubmit()
     setStore("sending", true)
     try {
-      await sdk.client.question.reply({ requestID: props.request.id, answers })
+      const imgs = images()
+      await sdk.client.question.reply({
+        requestID: props.request.id,
+        answers,
+        ...(imgs.length > 0
+          ? {
+              images: imgs.map((img) => ({
+                mime: img.mime,
+                url: img.dataUrl,
+                filename: img.filename,
+              })),
+            }
+          : {}),
+      })
     } catch (err) {
       fail(err)
     } finally {
@@ -402,6 +521,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
                 value={input()}
                 rows={1}
                 disabled={store.sending}
+                onPaste={handlePaste}
                 onKeyDown={(e) => {
                   if (e.key === "Escape") {
                     e.preventDefault()
@@ -422,6 +542,42 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
           </form>
         </Show>
       </div>
+
+      <Show when={images().length > 0}>
+        <div data-slot="question-images">
+          <For each={images()}>
+            {(img) => (
+              <div data-slot="question-image-item">
+                <Show
+                  when={img.mime.startsWith("image/")}
+                  fallback={
+                    <div data-slot="question-image-fallback">
+                      <Icon name="folder" />
+                    </div>
+                  }
+                >
+                  <img src={img.dataUrl} alt={img.filename} data-slot="question-image-preview" />
+                </Show>
+                <button
+                  type="button"
+                  data-slot="question-image-remove"
+                  onClick={() => removeImage(img.id)}
+                  aria-label={language.t("prompt.attachment.remove")}
+                >
+                  <Icon name="close" size="small" />
+                </button>
+                <div data-slot="question-image-name">
+                  <span>{img.filename}</span>
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      <Show when={dragging()}>
+        <div data-slot="question-drop-overlay">{language.t("prompt.dropzone.label")}</div>
+      </Show>
     </DockPrompt>
   )
 }

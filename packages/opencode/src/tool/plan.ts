@@ -22,7 +22,7 @@ export const PlanExitTool = Tool.define("plan_exit", {
   async execute(_params, ctx) {
     const session = await Session.get(ctx.sessionID)
     const plan = path.relative(Instance.worktree, Session.plan(session))
-    const answers = await Question.ask({
+    const result = await Question.ask({
       sessionID: ctx.sessionID,
       questions: [
         {
@@ -38,7 +38,7 @@ export const PlanExitTool = Tool.define("plan_exit", {
       tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
     })
 
-    const answer = answers[0]?.[0]
+    const answer = result.answers[0]?.[0]
     if (answer === "No") throw new Question.RejectedError()
 
     const model = await getLastModel(ctx.sessionID)
@@ -79,7 +79,7 @@ export const PlanEnterTool = Tool.define("plan_enter", {
     const session = await Session.get(ctx.sessionID)
     const plan = path.relative(Instance.worktree, Session.plan(session))
 
-    const answers = await Question.ask({
+    const result = await Question.ask({
       sessionID: ctx.sessionID,
       questions: [
         {
@@ -95,7 +95,7 @@ export const PlanEnterTool = Tool.define("plan_enter", {
       tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
     })
 
-    const answer = answers[0]?.[0]
+    const answer = result.answers[0]?.[0]
 
     if (answer === "No") throw new Question.RejectedError()
 

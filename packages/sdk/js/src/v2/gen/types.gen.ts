@@ -118,6 +118,7 @@ export type FileDiff = {
 export type UserMessage = {
   id: string
   sessionID: string
+  updateSeq?: number
   role: "user"
   time: {
     created: number
@@ -204,6 +205,7 @@ export type ApiError = {
 export type AssistantMessage = {
   id: string
   sessionID: string
+  updateSeq?: number
   role: "assistant"
   time: {
     created: number
@@ -264,6 +266,7 @@ export type TextPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "text"
   text: string
   synthetic?: boolean
@@ -281,6 +284,7 @@ export type SubtaskPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "subtask"
   prompt: string
   description: string
@@ -296,6 +300,7 @@ export type ReasoningPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "reasoning"
   text: string
   metadata?: {
@@ -352,6 +357,7 @@ export type FilePart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "file"
   mime: string
   filename?: string
@@ -420,6 +426,7 @@ export type ToolPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "tool"
   callID: string
   tool: string
@@ -427,12 +434,14 @@ export type ToolPart = {
   metadata?: {
     [key: string]: unknown
   }
+  retain?: boolean
 }
 
 export type StepStartPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "step-start"
   snapshot?: string
 }
@@ -441,6 +450,7 @@ export type StepFinishPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "step-finish"
   reason: string
   snapshot?: string
@@ -461,6 +471,7 @@ export type SnapshotPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "snapshot"
   snapshot: string
 }
@@ -469,6 +480,7 @@ export type PatchPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "patch"
   hash: string
   files: Array<string>
@@ -478,6 +490,7 @@ export type AgentPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "agent"
   name: string
   source?: {
@@ -491,6 +504,7 @@ export type RetryPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "retry"
   attempt: number
   error: ApiError
@@ -503,6 +517,7 @@ export type CompactionPart = {
   id: string
   sessionID: string
   messageID: string
+  updateSeq?: number
   type: "compaction"
   auto: boolean
   overflow?: boolean
@@ -607,6 +622,14 @@ export type EventSessionIdle = {
   }
 }
 
+export type EventFileWatcherUpdated = {
+  type: "file.watcher.updated"
+  properties: {
+    file: string
+    event: "add" | "change" | "unlink"
+  }
+}
+
 export type QuestionOption = {
   /**
    * Display text (1-5 words, concise)
@@ -682,14 +705,6 @@ export type EventSessionCompacted = {
   type: "session.compacted"
   properties: {
     sessionID: string
-  }
-}
-
-export type EventFileWatcherUpdated = {
-  type: "file.watcher.updated"
-  properties: {
-    file: string
-    event: "add" | "change" | "unlink"
   }
 }
 
@@ -785,6 +800,373 @@ export type EventMcpBrowserOpenFailed = {
   }
 }
 
+export type EventBackgroundTaskCreated = {
+  type: "background.task.created"
+  properties: {
+    task: {
+      id: string
+      description?: string
+      status: "pending" | "running" | "completed" | "failed" | "cancelled"
+      provider?: string
+      model?: string
+      category?: string
+      sessionID?: string
+      createdAt: number
+      startedAt?: number
+      completedAt?: number
+      result?: unknown
+      error?: string
+    }
+  }
+}
+
+export type EventBackgroundTaskStarted = {
+  type: "background.task.started"
+  properties: {
+    task: {
+      id: string
+      description?: string
+      status: "pending" | "running" | "completed" | "failed" | "cancelled"
+      provider?: string
+      model?: string
+      category?: string
+      sessionID?: string
+      createdAt: number
+      startedAt?: number
+      completedAt?: number
+      result?: unknown
+      error?: string
+    }
+  }
+}
+
+export type EventBackgroundTaskCompleted = {
+  type: "background.task.completed"
+  properties: {
+    task: {
+      id: string
+      description?: string
+      status: "pending" | "running" | "completed" | "failed" | "cancelled"
+      provider?: string
+      model?: string
+      category?: string
+      sessionID?: string
+      createdAt: number
+      startedAt?: number
+      completedAt?: number
+      result?: unknown
+      error?: string
+    }
+  }
+}
+
+export type EventBackgroundTaskFailed = {
+  type: "background.task.failed"
+  properties: {
+    task: {
+      id: string
+      description?: string
+      status: "pending" | "running" | "completed" | "failed" | "cancelled"
+      provider?: string
+      model?: string
+      category?: string
+      sessionID?: string
+      createdAt: number
+      startedAt?: number
+      completedAt?: number
+      result?: unknown
+      error?: string
+    }
+  }
+}
+
+export type EventBackgroundTaskCancelled = {
+  type: "background.task.cancelled"
+  properties: {
+    task: {
+      id: string
+      description?: string
+      status: "pending" | "running" | "completed" | "failed" | "cancelled"
+      provider?: string
+      model?: string
+      category?: string
+      sessionID?: string
+      createdAt: number
+      startedAt?: number
+      completedAt?: number
+      result?: unknown
+      error?: string
+    }
+  }
+}
+
+export type EventPersistentTaskCreated = {
+  type: "persistent-task.created"
+  properties: {
+    task: {
+      id: string
+      subject: string
+      description?: string
+      status: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+      blockedBy?: Array<string>
+      blocks?: Array<string>
+      owner?: string
+      metadata?: {
+        [key: string]: unknown
+      }
+      activeForm?: string
+      createdAt: number
+      updatedAt: number
+    }
+  }
+}
+
+export type EventPersistentTaskUpdated = {
+  type: "persistent-task.updated"
+  properties: {
+    task: {
+      id: string
+      subject: string
+      description?: string
+      status: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+      blockedBy?: Array<string>
+      blocks?: Array<string>
+      owner?: string
+      metadata?: {
+        [key: string]: unknown
+      }
+      activeForm?: string
+      createdAt: number
+      updatedAt: number
+    }
+  }
+}
+
+export type EventPersistentTaskDeleted = {
+  type: "persistent-task.deleted"
+  properties: {
+    id: string
+  }
+}
+
+export type EventMemoryCreated = {
+  type: "memory.created"
+  properties: {
+    info: {
+      id: string
+      content: string
+      category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      scope: "personal" | "team"
+      status?: "pending" | "confirmed"
+      tags?: Array<string>
+      source: {
+        sessionID: string
+        llmLogID?: string
+        messageID?: string
+        method: "auto" | "manual" | "promoted" | "pulled"
+        contextSnapshot?: string
+      }
+      citations?: Array<string>
+      score?: number
+      baseScore?: number
+      useCount?: number
+      hitCount?: number
+      lastUsedAt?: number
+      createdAt: number
+      updatedAt: number
+      confirmedAt?: number
+      expiresAt?: number
+      inject?: boolean
+      teamCandidateAt?: number
+      teamSubmittedAt?: number
+      teamApprovedAt?: number
+      promotedBy?: string
+      teamScope?: {
+        global?: boolean
+        projectIds?: Array<string>
+        languages?: Array<string>
+        techStack?: Array<string>
+        modules?: Array<string>
+      }
+    }
+  }
+}
+
+export type EventMemoryUpdated = {
+  type: "memory.updated"
+  properties: {
+    info: {
+      id: string
+      content: string
+      category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      scope: "personal" | "team"
+      status?: "pending" | "confirmed"
+      tags?: Array<string>
+      source: {
+        sessionID: string
+        llmLogID?: string
+        messageID?: string
+        method: "auto" | "manual" | "promoted" | "pulled"
+        contextSnapshot?: string
+      }
+      citations?: Array<string>
+      score?: number
+      baseScore?: number
+      useCount?: number
+      hitCount?: number
+      lastUsedAt?: number
+      createdAt: number
+      updatedAt: number
+      confirmedAt?: number
+      expiresAt?: number
+      inject?: boolean
+      teamCandidateAt?: number
+      teamSubmittedAt?: number
+      teamApprovedAt?: number
+      promotedBy?: string
+      teamScope?: {
+        global?: boolean
+        projectIds?: Array<string>
+        languages?: Array<string>
+        techStack?: Array<string>
+        modules?: Array<string>
+      }
+    }
+  }
+}
+
+export type EventMemoryRemoved = {
+  type: "memory.removed"
+  properties: {
+    id: string
+  }
+}
+
+export type EventMemoryConfirmed = {
+  type: "memory.confirmed"
+  properties: {
+    info: {
+      id: string
+      content: string
+      category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      scope: "personal" | "team"
+      status?: "pending" | "confirmed"
+      tags?: Array<string>
+      source: {
+        sessionID: string
+        llmLogID?: string
+        messageID?: string
+        method: "auto" | "manual" | "promoted" | "pulled"
+        contextSnapshot?: string
+      }
+      citations?: Array<string>
+      score?: number
+      baseScore?: number
+      useCount?: number
+      hitCount?: number
+      lastUsedAt?: number
+      createdAt: number
+      updatedAt: number
+      confirmedAt?: number
+      expiresAt?: number
+      inject?: boolean
+      teamCandidateAt?: number
+      teamSubmittedAt?: number
+      teamApprovedAt?: number
+      promotedBy?: string
+      teamScope?: {
+        global?: boolean
+        projectIds?: Array<string>
+        languages?: Array<string>
+        techStack?: Array<string>
+        modules?: Array<string>
+      }
+    }
+  }
+}
+
+export type EventMemoryRecallComplete = {
+  type: "memory.recall.complete"
+  properties: {
+    sessionID: string
+    injectedCount: number
+    recalledCount: number
+  }
+}
+
+export type EventMemoryConflictDetected = {
+  type: "memory.conflict.detected"
+  properties: {
+    sessionID: string
+    conflicts: Array<{
+      memoryA: string
+      memoryB: string
+      reason: string
+    }>
+  }
+}
+
+export type EventMemoryCapacityWarning = {
+  type: "memory.capacity.warning"
+  properties: {
+    poolSize: number
+    poolLimit: number
+    usage: number
+  }
+}
+
+export type EventMemoryTeamCandidates = {
+  type: "memory.team.candidates"
+  properties: {
+    candidates: Array<{
+      id: string
+      content: string
+      category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      scope: "personal" | "team"
+      status?: "pending" | "confirmed"
+      tags?: Array<string>
+      source: {
+        sessionID: string
+        llmLogID?: string
+        messageID?: string
+        method: "auto" | "manual" | "promoted" | "pulled"
+        contextSnapshot?: string
+      }
+      citations?: Array<string>
+      score?: number
+      baseScore?: number
+      useCount?: number
+      hitCount?: number
+      lastUsedAt?: number
+      createdAt: number
+      updatedAt: number
+      confirmedAt?: number
+      expiresAt?: number
+      inject?: boolean
+      teamCandidateAt?: number
+      teamSubmittedAt?: number
+      teamApprovedAt?: number
+      promotedBy?: string
+      teamScope?: {
+        global?: boolean
+        projectIds?: Array<string>
+        languages?: Array<string>
+        techStack?: Array<string>
+        modules?: Array<string>
+      }
+    }>
+  }
+}
+
+export type EventMemoryWarning = {
+  type: "memory.warning"
+  properties: {
+    type: string
+    agent: string
+    model: string
+  }
+}
+
 export type EventCommandExecuted = {
   type: "command.executed"
   properties: {
@@ -836,6 +1218,7 @@ export type Session = {
     snapshot?: string
     diff?: string
   }
+  updateSeq?: number
 }
 
 export type EventSessionCreated = {
@@ -957,6 +1340,45 @@ export type EventWorktreeFailed = {
   }
 }
 
+export type EventClientConnected = {
+  type: "client.connected"
+  properties: {
+    clientID: string
+    role: "owner" | "observer"
+    type: string
+    remoteIP: string
+  }
+}
+
+export type EventClientDisconnected = {
+  type: "client.disconnected"
+  properties: {
+    clientID: string
+  }
+}
+
+export type EventInstanceOwnerChanged = {
+  type: "instance.owner.changed"
+  properties: {
+    ownerClientID: string | null
+  }
+}
+
+export type EventTakeoverAvailable = {
+  type: "takeover.available"
+  properties: {
+    available: boolean
+  }
+}
+
+export type EventSessionTyping = {
+  type: "session.typing"
+  properties: {
+    sessionID: string
+    clientID: string
+  }
+}
+
 export type Event =
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
@@ -976,11 +1398,11 @@ export type Event =
   | EventPermissionReplied
   | EventSessionStatus
   | EventSessionIdle
+  | EventFileWatcherUpdated
   | EventQuestionAsked
   | EventQuestionReplied
   | EventQuestionRejected
   | EventSessionCompacted
-  | EventFileWatcherUpdated
   | EventTodoUpdated
   | EventTuiPromptAppend
   | EventTuiCommandExecute
@@ -988,6 +1410,23 @@ export type Event =
   | EventTuiSessionSelect
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
+  | EventBackgroundTaskCreated
+  | EventBackgroundTaskStarted
+  | EventBackgroundTaskCompleted
+  | EventBackgroundTaskFailed
+  | EventBackgroundTaskCancelled
+  | EventPersistentTaskCreated
+  | EventPersistentTaskUpdated
+  | EventPersistentTaskDeleted
+  | EventMemoryCreated
+  | EventMemoryUpdated
+  | EventMemoryRemoved
+  | EventMemoryConfirmed
+  | EventMemoryRecallComplete
+  | EventMemoryConflictDetected
+  | EventMemoryCapacityWarning
+  | EventMemoryTeamCandidates
+  | EventMemoryWarning
   | EventCommandExecuted
   | EventSessionCreated
   | EventSessionUpdated
@@ -1003,6 +1442,11 @@ export type Event =
   | EventPtyDeleted
   | EventWorktreeReady
   | EventWorktreeFailed
+  | EventClientConnected
+  | EventClientDisconnected
+  | EventInstanceOwnerChanged
+  | EventTakeoverAvailable
+  | EventSessionTyping
 
 export type GlobalEvent = {
   directory: string
@@ -1113,6 +1557,8 @@ export type AgentConfig = {
    */
   maxSteps?: number
   permission?: PermissionConfig
+  tools_include?: Array<string>
+  prompt_level?: "full" | "medium" | "lite"
   [key: string]:
     | unknown
     | string
@@ -1137,6 +1583,10 @@ export type AgentConfig = {
     | "info"
     | number
     | PermissionConfig
+    | Array<string>
+    | "full"
+    | "medium"
+    | "lite"
     | undefined
 }
 
@@ -1241,7 +1691,7 @@ export type McpLocalConfig = {
   /**
    * Environment variables to set when running the MCP server
    */
-  environment?: {
+  env?: {
     [key: string]: string
   }
   /**
@@ -1308,6 +1758,12 @@ export type Config = {
    * JSON schema reference for configuration validation
    */
   $schema?: string
+  /**
+   * Global environment variables injected into all subprocesses (bash, MCP, formatter, PTY). Per-module env (e.g. mcp.env) takes precedence over global env.
+   */
+  env?: {
+    [key: string]: string
+  }
   logLevel?: LogLevel
   server?: ServerConfig
   /**
@@ -1388,10 +1844,21 @@ export type Config = {
    * Agent configuration, see https://opencode.ai/docs/agents
    */
   agent?: {
+    sisyphus?: AgentConfig
     plan?: AgentConfig
     build?: AgentConfig
     general?: AgentConfig
     explore?: AgentConfig
+    "omo-explore"?: AgentConfig
+    oracle?: AgentConfig
+    hephaestus?: AgentConfig
+    prometheus?: AgentConfig
+    atlas?: AgentConfig
+    librarian?: AgentConfig
+    metis?: AgentConfig
+    momus?: AgentConfig
+    "multimodal-looker"?: AgentConfig
+    "sisyphus-junior"?: AgentConfig
     title?: AgentConfig
     summary?: AgentConfig
     compaction?: AgentConfig
@@ -1420,7 +1887,7 @@ export type Config = {
         [key: string]: {
           disabled?: boolean
           command?: Array<string>
-          environment?: {
+          env?: {
             [key: string]: string
           }
           extensions?: Array<string>
@@ -1473,6 +1940,241 @@ export type Config = {
      * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
      */
     reserved?: number
+    /**
+     * Token buffer for compaction trigger (default: 20000). Mutually exclusive with trigger_ratio.
+     */
+    buffer?: number
+    /**
+     * Context usage ratio (0.0-1.0) at which compaction triggers. E.g. 0.7 = trigger at 70% context usage. Mutually exclusive with buffer.
+     */
+    trigger_ratio?: number
+    /**
+     * Per-tool importance weights for heuristic retain inference (0.0-1.0). E.g., { read: 0.8, bash: 0.3 }
+     */
+    tool_weights?: {
+      [key: string]: number
+    }
+  }
+  /**
+   * Hook configuration: enable or disable individual hooks by name
+   */
+  hooks?: {
+    [key: string]: {
+      /**
+       * Enable or disable this hook
+       */
+      enabled: boolean
+    }
+  }
+  /**
+   * Code analytics plugin configuration (requires Feishu login)
+   */
+  code_analytics?: {
+    /**
+     * Shell command to run for analytics collection
+     */
+    command?: string
+    /**
+     * Regex pattern to match tool names that trigger PostToolUse analytics (default: ^(write|edit)$)
+     */
+    tools?: string
+  }
+  /**
+   * Background task manager configuration
+   */
+  background_task?: {
+    /**
+     * Maximum concurrent background tasks (default: 3)
+     */
+    defaultConcurrency?: number
+    /**
+     * Per-provider concurrency limits
+     */
+    providerConcurrency?: {
+      [key: string]: number
+    }
+    /**
+     * Per-model concurrency limits
+     */
+    modelConcurrency?: {
+      [key: string]: number
+    }
+    /**
+     * Timeout in ms for stale task detection (default: 180000)
+     */
+    staleTimeoutMs?: number
+    /**
+     * Keep background tasks running on session exit (default: false)
+     */
+    persist_on_exit?: boolean
+  }
+  /**
+   * Task categories for delegated work routing — user categories merge with/override defaults
+   */
+  categories?: {
+    [key: string]: {
+      /**
+       * Description of when to use this category
+       */
+      description: string
+      /**
+       * Model to use for tasks in this category (provider/model format)
+       */
+      model?: string
+      /**
+       * Additional prompt text appended for tasks in this category
+       */
+      prompt_append?: string
+    }
+  }
+  /**
+   * List of built-in MCP server names to disable even when their API key is available
+   */
+  disabled_mcps?: Array<string>
+  /**
+   * OS-native sandbox configuration for kernel-level file system isolation
+   */
+  sandbox?: {
+    /**
+     * Enable OS-level sandbox for bash and MCP commands
+     */
+    enabled?: boolean
+    /**
+     * Additional paths to allow read-write access in the sandbox
+     */
+    paths?: Array<string>
+  }
+  /**
+   * Notification settings for task completion events
+   */
+  notification?: {
+    /**
+     * Enable or disable notifications (default: true)
+     */
+    enabled?: boolean
+    /**
+     * Enable or disable notification sounds (default: true)
+     */
+    sound?: boolean
+  }
+  /**
+   * LLM communication log settings for request/response tracing
+   */
+  llmLog?: {
+    /**
+     * Enable or disable LLM communication logging (default: true)
+     */
+    enabled?: boolean
+    /**
+     * Maximum number of log records to keep (default: 10000)
+     */
+    max_records?: number
+    /**
+     * Maximum age in days for log records (default: 30)
+     */
+    max_age_days?: number
+    /**
+     * Interval in hours between automatic cleanup runs (default: 24)
+     */
+    cleanup_interval_hours?: number
+  }
+  /**
+   * Memory system configuration
+   */
+  memory?: {
+    /**
+     * Enable memory system
+     */
+    enabled?: boolean
+    /**
+     * Enable automatic memory extraction on compaction
+     */
+    autoExtract?: boolean
+    /**
+     * Number of LLM steps between periodic memory extractions (default: 10)
+     */
+    extractInterval?: number
+    /**
+     * Number of LLM steps between periodic memory extractions (default: 20)
+     */
+    extract_interval?: number
+    /**
+     * Minimum messages required before memory extraction (default: 6)
+     */
+    extract_min_messages?: number
+    /**
+     * Maximum age in days for recovery extraction (default: 7)
+     */
+    recovery_max_age_days?: number
+    /**
+     * Enable automatic memory optimization (decay + candidate detection)
+     */
+    autoOptimize?: boolean
+    /**
+     * Maximum tokens for memory injection into system prompt (default: 2000)
+     */
+    injectLimit?: number
+    /**
+     * Decay half-life in days (default: 30)
+     */
+    decayHalfLife?: number
+    /**
+     * Maximum number of memories in the inject candidate pool (default: 200)
+     */
+    injectPoolLimit?: number
+    /**
+     * Maximum team memories cached locally (default: 100)
+     */
+    teamLimit?: number
+    /**
+     * Model for memory-recall agent (null = auto select small model)
+     */
+    recallModel?: string
+    /**
+     * Provider for memory-recall agent (null = follow main provider)
+     */
+    recallProvider?: string
+    /**
+     * Model for LLM optimization (null = auto select)
+     */
+    optimizerModel?: string
+    /**
+     * Memory Manager Web UI port (default: 19836)
+     */
+    managerPort?: number
+    /**
+     * Feishu team server URL for team memory sync
+     */
+    teamServerUrl?: string
+    /**
+     * Override auto-detected project ID
+     */
+    projectId?: string
+    /**
+     * Override auto-detected languages
+     */
+    languages?: Array<string>
+    /**
+     * Override auto-detected tech stack
+     */
+    techStack?: Array<string>
+    /**
+     * Thresholds for detecting team promotion candidates
+     */
+    promotionThreshold?: {
+      /**
+       * Minimum score for team promotion candidate (default: 5.0)
+       */
+      minScore?: number
+      /**
+       * Minimum use count for promotion (default: 5)
+       */
+      minUseCount?: number
+      /**
+       * Minimum age in days for promotion (default: 14)
+       */
+      minAgeInDays?: number
+    }
   }
   experimental?: {
     disable_paste_summary?: boolean
@@ -1700,6 +2402,7 @@ export type GlobalSession = {
     snapshot?: string
     diff?: string
   }
+  updateSeq?: number
   project: ProjectSummary | null
 }
 
@@ -1713,6 +2416,7 @@ export type McpResource = {
 
 export type TextPartInput = {
   id?: string
+  updateSeq?: number
   type: "text"
   text: string
   synthetic?: boolean
@@ -1728,6 +2432,7 @@ export type TextPartInput = {
 
 export type FilePartInput = {
   id?: string
+  updateSeq?: number
   type: "file"
   mime: string
   filename?: string
@@ -1737,6 +2442,7 @@ export type FilePartInput = {
 
 export type AgentPartInput = {
   id?: string
+  updateSeq?: number
   type: "agent"
   name: string
   source?: {
@@ -1748,6 +2454,7 @@ export type AgentPartInput = {
 
 export type SubtaskPartInput = {
   id?: string
+  updateSeq?: number
   type: "subtask"
   prompt: string
   description: string
@@ -1757,6 +2464,21 @@ export type SubtaskPartInput = {
     modelID: string
   }
   command?: string
+}
+
+export type QuestionImagePart = {
+  /**
+   * Image MIME type (e.g. image/png)
+   */
+  mime: string
+  /**
+   * Data URL of the image
+   */
+  url: string
+  /**
+   * Original filename
+   */
+  filename?: string
 }
 
 export type ProviderAuthMethod = {
@@ -1888,6 +2610,9 @@ export type Agent = {
     [key: string]: unknown
   }
   steps?: number
+  lite?: boolean
+  prompt_level?: "full" | "medium" | "lite"
+  tools_include?: Array<string>
 }
 
 export type LspStatus = {
@@ -3549,6 +4274,7 @@ export type SessionCommandData = {
     variant?: string
     parts?: Array<{
       id?: string
+      updateSeq?: number
       type: "file"
       mime: string
       filename?: string
@@ -3827,6 +4553,10 @@ export type QuestionReplyData = {
      * User answers in order of questions (each answer is an array of selected labels)
      */
     answers: Array<QuestionAnswer>
+    /**
+     * Optional images attached by the user
+     */
+    images?: Array<QuestionImagePart>
   }
   path: {
     requestID: string
@@ -4766,6 +5496,337 @@ export type TuiControlResponseResponses = {
 
 export type TuiControlResponseResponse = TuiControlResponseResponses[keyof TuiControlResponseResponses]
 
+export type MemoryAppData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/app"
+}
+
+export type MemoryStatsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/stats"
+}
+
+export type MemoryMaintainData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/maintain"
+}
+
+export type MemoryBatchDeleteData = {
+  body?: {
+    ids: Array<string>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/batch-delete"
+}
+
+export type MemoryListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    scope?: "personal" | "team"
+    category?: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+    status?: "pending" | "confirmed"
+    method?: "auto" | "manual" | "promoted" | "pulled"
+  }
+  url: "/memory"
+}
+
+export type MemoryListResponses = {
+  /**
+   * List of memories
+   */
+  200: Array<{
+    id: string
+    content: string
+    category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+    scope: "personal" | "team"
+    status?: "pending" | "confirmed"
+    tags?: Array<string>
+    source: {
+      sessionID: string
+      llmLogID?: string
+      messageID?: string
+      method: "auto" | "manual" | "promoted" | "pulled"
+      contextSnapshot?: string
+    }
+    citations?: Array<string>
+    score?: number
+    baseScore?: number
+    useCount?: number
+    hitCount?: number
+    lastUsedAt?: number
+    createdAt: number
+    updatedAt: number
+    confirmedAt?: number
+    expiresAt?: number
+    inject?: boolean
+    teamCandidateAt?: number
+    teamSubmittedAt?: number
+    teamApprovedAt?: number
+    promotedBy?: string
+    teamScope?: {
+      global?: boolean
+      projectIds?: Array<string>
+      languages?: Array<string>
+      techStack?: Array<string>
+      modules?: Array<string>
+    }
+  }>
+}
+
+export type MemoryListResponse = MemoryListResponses[keyof MemoryListResponses]
+
+export type MemoryDeleteData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/{id}"
+}
+
+export type MemoryGetData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/{id}"
+}
+
+export type MemoryGetResponses = {
+  /**
+   * Memory details
+   */
+  200: {
+    id: string
+    content: string
+    category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+    scope: "personal" | "team"
+    status?: "pending" | "confirmed"
+    tags?: Array<string>
+    source: {
+      sessionID: string
+      llmLogID?: string
+      messageID?: string
+      method: "auto" | "manual" | "promoted" | "pulled"
+      contextSnapshot?: string
+    }
+    citations?: Array<string>
+    score?: number
+    baseScore?: number
+    useCount?: number
+    hitCount?: number
+    lastUsedAt?: number
+    createdAt: number
+    updatedAt: number
+    confirmedAt?: number
+    expiresAt?: number
+    inject?: boolean
+    teamCandidateAt?: number
+    teamSubmittedAt?: number
+    teamApprovedAt?: number
+    promotedBy?: string
+    teamScope?: {
+      global?: boolean
+      projectIds?: Array<string>
+      languages?: Array<string>
+      techStack?: Array<string>
+      modules?: Array<string>
+    }
+  }
+}
+
+export type MemoryGetResponse = MemoryGetResponses[keyof MemoryGetResponses]
+
+export type MemoryUpdateData = {
+  body?: {
+    content?: string
+    category?: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+    tags?: Array<string>
+    status?: "pending" | "confirmed"
+    inject?: boolean
+  }
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/memory/{id}"
+}
+
+export type ManagerAppData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/manager/app"
+}
+
+export type ManagerServicesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/manager/services"
+}
+
+export type ManagerServicesResponses = {
+  /**
+   * List of services
+   */
+  200: Array<{
+    id: string
+    name: string
+    description: string
+    url: string
+    icon: string
+  }>
+}
+
+export type ManagerServicesResponse = ManagerServicesResponses[keyof ManagerServicesResponses]
+
+export type SessionTypingData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/typing"
+}
+
+export type SessionTypingErrors = {
+  /**
+   * Not the owner
+   */
+  403: unknown
+}
+
+export type SessionTypingResponses = {
+  /**
+   * Typing recorded
+   */
+  200: unknown
+}
+
+export type InstanceTakeoverData = {
+  body?: {
+    force?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/instance/takeover"
+}
+
+export type InstanceTakeoverErrors = {
+  /**
+   * Takeover conditions not met
+   */
+  409: unknown
+}
+
+export type InstanceTakeoverResponses = {
+  /**
+   * Takeover successful
+   */
+  200: unknown
+}
+
+export type InstanceActivityData = {
+  body?: {
+    active: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/instance/activity"
+}
+
+export type InstanceActivityErrors = {
+  /**
+   * Not the owner
+   */
+  403: unknown
+}
+
+export type InstanceActivityResponses = {
+  /**
+   * Activity recorded
+   */
+  200: unknown
+}
+
+export type ClientsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/clients"
+}
+
+export type ClientsListResponses = {
+  /**
+   * Connected clients
+   */
+  200: {
+    ownerClientID: string | null
+    takeoverAvailable: boolean
+    clients: Array<{
+      clientID: string
+      role: "owner" | "observer"
+      type: string
+      remoteIP: string
+      connectedAt: number
+      duration: number
+    }>
+  }
+}
+
+export type ClientsListResponse = ClientsListResponses[keyof ClientsListResponses]
+
 export type InstanceDisposeData = {
   body?: never
   path?: never
@@ -4927,6 +5988,8 @@ export type AppSkillsResponses = {
     description: string
     location: string
     content: string
+    mcp?: Array<string>
+    agent?: Array<string>
   }>
 }
 
@@ -4969,6 +6032,51 @@ export type FormatterStatusResponses = {
 }
 
 export type FormatterStatusResponse = FormatterStatusResponses[keyof FormatterStatusResponses]
+
+export type AttachInfoGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/attach-info"
+}
+
+export type AttachInfoGetResponses = {
+  /**
+   * Attach info
+   */
+  200: {
+    url: string
+    token: string | null
+    command: string
+  }
+}
+
+export type AttachInfoGetResponse = AttachInfoGetResponses[keyof AttachInfoGetResponses]
+
+export type SandboxStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/sandbox"
+}
+
+export type SandboxStatusResponses = {
+  /**
+   * Sandbox status
+   */
+  200: {
+    status: "off" | "active" | "failed"
+    error: string | null
+  }
+}
+
+export type SandboxStatusResponse = SandboxStatusResponses[keyof SandboxStatusResponses]
 
 export type EventSubscribeData = {
   body?: never

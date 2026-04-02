@@ -8,11 +8,13 @@ import type {
   AppLogErrors,
   AppLogResponses,
   AppSkillsResponses,
+  AttachInfoGetResponses,
   Auth as Auth3,
   AuthRemoveErrors,
   AuthRemoveResponses,
   AuthSetErrors,
   AuthSetResponses,
+  ClientsListResponses,
   CommandListResponses,
   Config as Config3,
   ConfigGetResponses,
@@ -46,8 +48,13 @@ import type {
   GlobalDisposeResponses,
   GlobalEventResponses,
   GlobalHealthResponses,
+  InstanceActivityErrors,
+  InstanceActivityResponses,
   InstanceDisposeResponses,
+  InstanceTakeoverErrors,
+  InstanceTakeoverResponses,
   LspStatusResponses,
+  ManagerServicesResponses,
   McpAddErrors,
   McpAddResponses,
   McpAuthAuthenticateErrors,
@@ -63,6 +70,8 @@ import type {
   McpLocalConfig,
   McpRemoteConfig,
   McpStatusResponses,
+  MemoryGetResponses,
+  MemoryListResponses,
   OutputFormat,
   Part as Part2,
   PartDeleteErrors,
@@ -98,11 +107,13 @@ import type {
   PtyUpdateErrors,
   PtyUpdateResponses,
   QuestionAnswer,
+  QuestionImagePart,
   QuestionListResponses,
   QuestionRejectErrors,
   QuestionRejectResponses,
   QuestionReplyErrors,
   QuestionReplyResponses,
+  SandboxStatusResponses,
   SessionAbortErrors,
   SessionAbortResponses,
   SessionChildrenErrors,
@@ -142,6 +153,8 @@ import type {
   SessionSummarizeResponses,
   SessionTodoErrors,
   SessionTodoResponses,
+  SessionTypingErrors,
+  SessionTypingResponses,
   SessionUnrevertErrors,
   SessionUnrevertResponses,
   SessionUnshareErrors,
@@ -1995,6 +2008,7 @@ export class Session2 extends HeyApiClient {
       variant?: string
       parts?: Array<{
         id?: string
+        updateSeq?: number
         type: "file"
         mime: string
         filename?: string
@@ -2149,6 +2163,38 @@ export class Session2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<SessionUnrevertResponses, SessionUnrevertErrors, ThrowOnError>({
       url: "/session/{sessionID}/unrevert",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Report typing status
+   *
+   * Owner reports that they are typing in a session
+   */
+  public typing<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionTypingResponses, SessionTypingErrors, ThrowOnError>({
+      url: "/session/{sessionID}/typing",
       ...options,
       ...params,
     })
@@ -2390,6 +2436,7 @@ export class Question extends HeyApiClient {
       directory?: string
       workspace?: string
       answers?: Array<QuestionAnswer>
+      images?: Array<QuestionImagePart>
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2402,6 +2449,7 @@ export class Question extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "answers" },
+            { in: "body", key: "images" },
           ],
         },
       ],
@@ -3530,7 +3578,419 @@ export class Tui extends HeyApiClient {
   }
 }
 
+export class Memory extends HeyApiClient {
+  /**
+   * Memory Manager UI
+   *
+   * Serve the Memory Manager web interface.
+   */
+  public app<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<unknown, unknown, ThrowOnError>({
+      url: "/memory/app",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Memory statistics
+   *
+   * Get memory count, capacity, and category breakdown.
+   */
+  public stats<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<unknown, unknown, ThrowOnError>({
+      url: "/memory/stats",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Run maintenance
+   *
+   * Trigger decay update and pending confirmation check.
+   */
+  public maintain<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<unknown, unknown, ThrowOnError>({
+      url: "/memory/maintain",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Batch delete memories
+   */
+  public batchDelete<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      ids?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "ids" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<unknown, unknown, ThrowOnError>({
+      url: "/memory/batch-delete",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List memories
+   *
+   * Get all memories with optional filtering.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      scope?: "personal" | "team"
+      category?: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      status?: "pending" | "confirmed"
+      method?: "auto" | "manual" | "promoted" | "pulled"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "scope" },
+            { in: "query", key: "category" },
+            { in: "query", key: "status" },
+            { in: "query", key: "method" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryListResponses, unknown, ThrowOnError>({
+      url: "/memory",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete memory
+   *
+   * Delete a memory by ID.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<unknown, unknown, ThrowOnError>({
+      url: "/memory/{id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get memory
+   *
+   * Get a single memory by ID.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<MemoryGetResponses, unknown, ThrowOnError>({
+      url: "/memory/{id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update memory
+   *
+   * Update a memory's content, tags, category, or status.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+      content?: string
+      category?: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      tags?: Array<string>
+      status?: "pending" | "confirmed"
+      inject?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "content" },
+            { in: "body", key: "category" },
+            { in: "body", key: "tags" },
+            { in: "body", key: "status" },
+            { in: "body", key: "inject" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<unknown, unknown, ThrowOnError>({
+      url: "/memory/{id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Manager extends HeyApiClient {
+  /**
+   * Manager Dashboard
+   *
+   * Serve the Manager dashboard web interface.
+   */
+  public app<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<unknown, unknown, ThrowOnError>({
+      url: "/manager/app",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List registered services
+   *
+   * Get the list of web services registered with the manager.
+   */
+  public services<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ManagerServicesResponses, unknown, ThrowOnError>({
+      url: "/manager/services",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Instance extends HeyApiClient {
+  /**
+   * Take over instance ownership
+   *
+   * Observer takes over instance ownership when conditions are met
+   */
+  public takeover<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      force?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "force" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<InstanceTakeoverResponses, InstanceTakeoverErrors, ThrowOnError>({
+      url: "/instance/takeover",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Report owner activity
+   *
+   * Owner sends activity heartbeat
+   */
+  public activity<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      active?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "active" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<InstanceActivityResponses, InstanceActivityErrors, ThrowOnError>({
+      url: "/instance/activity",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   /**
    * Dispose instance
    *
@@ -3556,6 +4016,38 @@ export class Instance extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<InstanceDisposeResponses, unknown, ThrowOnError>({
       url: "/instance/dispose",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Clients extends HeyApiClient {
+  /**
+   * List connected clients
+   *
+   * Get list of connected clients and their roles
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ClientsListResponses, unknown, ThrowOnError>({
+      url: "/clients",
       ...options,
       ...params,
     })
@@ -3829,6 +4321,70 @@ export class Formatter extends HeyApiClient {
   }
 }
 
+export class AttachInfo extends HeyApiClient {
+  /**
+   * Get attach info
+   *
+   * Get the command needed to attach to this running server from another terminal
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<AttachInfoGetResponses, unknown, ThrowOnError>({
+      url: "/attach-info",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Sandbox extends HeyApiClient {
+  /**
+   * Get sandbox status
+   *
+   * Get OS-native sandbox status
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SandboxStatusResponses, unknown, ThrowOnError>({
+      url: "/sandbox",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Event extends HeyApiClient {
   /**
    * Subscribe to events
@@ -3954,9 +4510,24 @@ export class OpencodeClient extends HeyApiClient {
     return (this._tui ??= new Tui({ client: this.client }))
   }
 
+  private _memory?: Memory
+  get memory(): Memory {
+    return (this._memory ??= new Memory({ client: this.client }))
+  }
+
+  private _manager?: Manager
+  get manager(): Manager {
+    return (this._manager ??= new Manager({ client: this.client }))
+  }
+
   private _instance?: Instance
   get instance(): Instance {
     return (this._instance ??= new Instance({ client: this.client }))
+  }
+
+  private _clients?: Clients
+  get clients(): Clients {
+    return (this._clients ??= new Clients({ client: this.client }))
   }
 
   private _path?: Path
@@ -3987,6 +4558,16 @@ export class OpencodeClient extends HeyApiClient {
   private _formatter?: Formatter
   get formatter(): Formatter {
     return (this._formatter ??= new Formatter({ client: this.client }))
+  }
+
+  private _attachInfo?: AttachInfo
+  get attachInfo(): AttachInfo {
+    return (this._attachInfo ??= new AttachInfo({ client: this.client }))
+  }
+
+  private _sandbox?: Sandbox
+  get sandbox(): Sandbox {
+    return (this._sandbox ??= new Sandbox({ client: this.client }))
   }
 
   private _event?: Event

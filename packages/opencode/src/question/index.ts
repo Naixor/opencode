@@ -53,10 +53,22 @@ export namespace Question {
   })
   export type Answer = z.infer<typeof Answer>
 
+  export const ImagePart = z
+    .object({
+      mime: z.string().describe("Image MIME type (e.g. image/png)"),
+      url: z.string().describe("Data URL of the image"),
+      filename: z.string().optional().describe("Original filename"),
+    })
+    .meta({
+      ref: "QuestionImagePart",
+    })
+  export type ImagePart = z.infer<typeof ImagePart>
+
   export const Reply = z.object({
     answers: z
       .array(Answer)
       .describe("User answers in order of questions (each answer is an array of selected labels)"),
+    images: z.array(ImagePart).optional().describe("Optional images attached by the user"),
   })
   export type Reply = z.infer<typeof Reply>
 
@@ -79,12 +91,17 @@ export namespace Question {
     ),
   }
 
+  export type Result = {
+    answers: Answer[]
+    images?: ImagePart[]
+  }
+
   const state = Instance.state(async () => {
     const pending: Record<
       string,
       {
         info: Request
-        resolve: (answers: Answer[]) => void
+        resolve: (result: Result) => void
         reject: (e: any) => void
       }
     > = {}
@@ -98,13 +115,13 @@ export namespace Question {
     sessionID: string
     questions: Info[]
     tool?: { messageID: string; callID: string }
-  }): Promise<Answer[]> {
+  }): Promise<Result> {
     const s = await state()
     const id = Identifier.ascending("question")
 
     log.info("asking", { id, questions: input.questions.length })
 
-    return new Promise<Answer[]>((resolve, reject) => {
+    return new Promise<Result>((resolve, reject) => {
       const info: Request = {
         id,
         sessionID: input.sessionID,
@@ -120,7 +137,7 @@ export namespace Question {
     })
   }
 
-  export async function reply(input: { requestID: string; answers: Answer[] }): Promise<void> {
+  export async function reply(input: { requestID: string; answers: Answer[]; images?: ImagePart[] }): Promise<void> {
     const s = await state()
     const existing = s.pending[input.requestID]
     if (!existing) {
@@ -137,7 +154,7 @@ export namespace Question {
       answers: input.answers,
     })
 
-    existing.resolve(input.answers)
+    existing.resolve({ answers: input.answers, images: input.images })
   }
 
   export async function reject(requestID: string): Promise<void> {

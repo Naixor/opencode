@@ -9,7 +9,7 @@ export const QuestionTool = Tool.define("question", {
     questions: z.array(Question.Info.omit({ custom: true })).describe("Questions to ask"),
   }),
   async execute(params, ctx) {
-    const answers = await Question.ask({
+    const result = await Question.ask({
       sessionID: ctx.sessionID,
       questions: params.questions,
       tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
@@ -20,14 +20,22 @@ export const QuestionTool = Tool.define("question", {
       return answer.join(", ")
     }
 
-    const formatted = params.questions.map((q, i) => `"${q.question}"="${format(answers[i])}"`).join(", ")
+    const formatted = params.questions.map((q, i) => `"${q.question}"="${format(result.answers[i])}"`).join(", ")
+
+    const attachments = result.images?.map((img) => ({
+      type: "file" as const,
+      mime: img.mime,
+      url: img.url,
+      filename: img.filename,
+    }))
 
     return {
       title: `Asked ${params.questions.length} question${params.questions.length > 1 ? "s" : ""}`,
       output: `User has answered your questions: ${formatted}. You can now continue with the user's answers in mind.`,
       metadata: {
-        answers,
+        answers: result.answers,
       },
+      ...(attachments?.length ? { attachments } : {}),
     }
   },
 })

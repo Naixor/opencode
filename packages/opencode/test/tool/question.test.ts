@@ -19,7 +19,7 @@ describe("tool.question", () => {
 
   beforeEach(() => {
     askSpy = spyOn(QuestionModule.Question, "ask").mockImplementation(async () => {
-      return []
+      return { answers: [] }
     })
   })
 
@@ -41,7 +41,7 @@ describe("tool.question", () => {
       },
     ]
 
-    askSpy.mockResolvedValueOnce([["Red"]])
+    askSpy.mockResolvedValueOnce({ answers: [["Red"]] })
 
     const result = await tool.execute({ questions }, ctx)
     expect(askSpy).toHaveBeenCalledTimes(1)
@@ -58,7 +58,7 @@ describe("tool.question", () => {
       },
     ]
 
-    askSpy.mockResolvedValueOnce([["Dog"]])
+    askSpy.mockResolvedValueOnce({ answers: [["Dog"]] })
 
     const result = await tool.execute({ questions }, ctx)
     expect(result.output).toContain(`"What is your favorite animal?"="Dog"`)

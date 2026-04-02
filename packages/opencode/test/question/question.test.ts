@@ -85,8 +85,8 @@ test("reply - resolves the pending ask with answers", async () => {
         answers: [["Option 1"]],
       })
 
-      const answers = await askPromise
-      expect(answers).toEqual([["Option 1"]])
+      const result = await askPromise
+      expect(result.answers).toEqual([["Option 1"]])
     },
   })
 })
@@ -247,8 +247,8 @@ test("ask - handles multiple questions", async () => {
         answers: [["Build"], ["Dev"]],
       })
 
-      const answers = await askPromise
-      expect(answers).toEqual([["Build"], ["Dev"]])
+      const result = await askPromise
+      expect(result.answers).toEqual([["Build"], ["Dev"]])
     },
   })
 })
