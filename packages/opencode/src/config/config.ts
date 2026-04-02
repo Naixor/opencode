@@ -163,7 +163,8 @@ export namespace Config {
 
     for (const dir of unique(directories)) {
       if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-        for (const file of ["opencode.jsonc", "opencode.json"]) {
+        // lark-opencode variants loaded after opencode to take priority
+        for (const file of ["opencode.jsonc", "opencode.json", "lark-opencode.jsonc", "lark-opencode.json"]) {
           log.debug(`loading config from ${path.join(dir, file)}`)
           result = mergeConfigConcatArrays(result, await loadFile(path.join(dir, file)))
           // to satisfy the type checker
@@ -203,7 +204,7 @@ export namespace Config {
     // which would fail on system directories requiring elevated permissions
     // This way it only loads config file and not skills/plugins/commands
     if (existsSync(managedDir)) {
-      for (const file of ["opencode.jsonc", "opencode.json"]) {
+      for (const file of ["opencode.jsonc", "opencode.json", "lark-opencode.jsonc", "lark-opencode.json"]) {
         result = mergeConfigConcatArrays(result, await loadFile(path.join(managedDir, file)))
       }
     }
@@ -1421,12 +1422,13 @@ export namespace Config {
   export type Info = z.output<typeof Info>
 
   export const global = lazy(async () => {
-    let result: Info = pipe(
-      {},
-      mergeDeep(await loadFile(path.join(Global.Path.config, "config.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.json"))),
-      mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.jsonc"))),
-    )
+    // Load order: config.json → opencode.json{,c} → lark-opencode.json{,c}
+    // lark-opencode variants take priority to avoid config conflicts
+    const files = ["config.json", "opencode.json", "opencode.jsonc", "lark-opencode.json", "lark-opencode.jsonc"]
+    let result: Info = {}
+    for (const file of files) {
+      result = mergeDeep(result, await loadFile(path.join(Global.Path.config, file)))
+    }
 
     const legacy = path.join(Global.Path.config, "config")
     if (existsSync(legacy)) {
@@ -1544,9 +1546,14 @@ export namespace Config {
   }
 
   function globalConfigFile() {
-    const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
-      path.join(Global.Path.config, file),
-    )
+    // Prefer lark-opencode variants (highest priority) when they exist
+    const candidates = [
+      "lark-opencode.jsonc",
+      "lark-opencode.json",
+      "opencode.jsonc",
+      "opencode.json",
+      "config.json",
+    ].map((file) => path.join(Global.Path.config, file))
     for (const file of candidates) {
       if (existsSync(file)) return file
     }

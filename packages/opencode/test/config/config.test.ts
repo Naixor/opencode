@@ -1949,3 +1949,201 @@ describe("OPENCODE_CONFIG_CONTENT token substitution", () => {
     }
   })
 })
+
+// lark-opencode config priority tests
+
+describe("lark-opencode config priority", () => {
+  test("lark-opencode.json overrides opencode.json in project root", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await writeConfig(dir, {
+          $schema: "https://opencode.ai/config.json",
+          model: "opencode/model",
+          username: "opencode-user",
+        })
+        await writeConfig(
+          dir,
+          {
+            $schema: "https://opencode.ai/config.json",
+            model: "lark/model",
+          },
+          "lark-opencode.json",
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await Config.get()
+        // lark-opencode.json model should win
+        expect(config.model).toBe("lark/model")
+        // username not in lark-opencode.json falls back to opencode.json
+        expect(config.username).toBe("opencode-user")
+      },
+    })
+  })
+
+  test("lark-opencode.jsonc overrides opencode.jsonc in project root", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Filesystem.write(
+          path.join(dir, "opencode.jsonc"),
+          `{
+            // base config
+            "$schema": "https://opencode.ai/config.json",
+            "model": "opencode/model",
+            "username": "base-user"
+          }`,
+        )
+        await Filesystem.write(
+          path.join(dir, "lark-opencode.jsonc"),
+          `{
+            // lark override
+            "$schema": "https://opencode.ai/config.json",
+            "model": "lark/model"
+          }`,
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await Config.get()
+        expect(config.model).toBe("lark/model")
+        expect(config.username).toBe("base-user")
+      },
+    })
+  })
+
+  test("lark-opencode.json in .opencode dir overrides opencode.json in .opencode dir", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        const ocDir = path.join(dir, ".opencode")
+        await fs.mkdir(ocDir, { recursive: true })
+        await writeConfig(
+          ocDir,
+          {
+            $schema: "https://opencode.ai/config.json",
+            model: "opencode/dotdir",
+          },
+          "opencode.json",
+        )
+        await writeConfig(
+          ocDir,
+          {
+            $schema: "https://opencode.ai/config.json",
+            model: "lark/dotdir",
+          },
+          "lark-opencode.json",
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await Config.get()
+        expect(config.model).toBe("lark/dotdir")
+      },
+    })
+  })
+
+  test("only lark-opencode.json works without opencode.json", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await writeConfig(
+          dir,
+          {
+            $schema: "https://opencode.ai/config.json",
+            model: "lark-only/model",
+            username: "lark-only-user",
+          },
+          "lark-opencode.json",
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await Config.get()
+        expect(config.model).toBe("lark-only/model")
+        expect(config.username).toBe("lark-only-user")
+      },
+    })
+  })
+
+  test("managed lark-opencode.json overrides managed opencode.json", async () => {
+    await using tmp = await tmpdir()
+
+    await writeManagedSettings(
+      {
+        $schema: "https://opencode.ai/config.json",
+        model: "managed/opencode",
+      },
+      "opencode.json",
+    )
+    await writeManagedSettings(
+      {
+        $schema: "https://opencode.ai/config.json",
+        model: "managed/lark",
+      },
+      "lark-opencode.json",
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await Config.get()
+        expect(config.model).toBe("managed/lark")
+      },
+    })
+  })
+
+  test("lark-opencode.json merges with opencode.json (deep merge)", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await writeConfig(dir, {
+          $schema: "https://opencode.ai/config.json",
+          model: "opencode/model",
+          mcp: {
+            server1: {
+              type: "remote",
+              url: "https://s1.example.com",
+              enabled: true,
+            },
+            server2: {
+              type: "remote",
+              url: "https://s2.example.com",
+              enabled: true,
+            },
+          },
+        })
+        await writeConfig(
+          dir,
+          {
+            $schema: "https://opencode.ai/config.json",
+            model: "lark/model",
+            mcp: {
+              server1: {
+                type: "remote",
+                url: "https://s1.example.com",
+                enabled: false,
+              },
+            },
+          },
+          "lark-opencode.json",
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await Config.get()
+        expect(config.model).toBe("lark/model")
+        // server1 disabled by lark-opencode
+        expect(config.mcp?.server1?.enabled).toBe(false)
+        // server2 preserved from opencode.json
+        expect(config.mcp?.server2?.enabled).toBe(true)
+      },
+    })
+  })
+})

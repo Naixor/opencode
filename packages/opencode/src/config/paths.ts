@@ -8,12 +8,20 @@ import { Flag } from "@/flag/flag"
 import { Global } from "@/global"
 
 export namespace ConfigPaths {
+  // Config file name variants in priority order (low → high).
+  // "lark-opencode" variants override "opencode" to avoid sharing
+  // the same config between opencode and lark-opencode.
+  const NAMES = ["opencode", "lark-opencode"]
+
   export async function projectFiles(name: string, directory: string, worktree: string) {
+    const names = name === "opencode" ? NAMES : [name]
     const files: string[] = []
-    for (const file of [`${name}.jsonc`, `${name}.json`]) {
-      const found = await Filesystem.findUp(file, directory, worktree)
-      for (const resolved of found.toReversed()) {
-        files.push(resolved)
+    for (const n of names) {
+      for (const file of [`${n}.jsonc`, `${n}.json`]) {
+        const found = await Filesystem.findUp(file, directory, worktree)
+        for (const resolved of found.toReversed()) {
+          files.push(resolved)
+        }
       }
     }
     return files
@@ -43,7 +51,8 @@ export namespace ConfigPaths {
   }
 
   export function fileInDirectory(dir: string, name: string) {
-    return [path.join(dir, `${name}.jsonc`), path.join(dir, `${name}.json`)]
+    const names = name === "opencode" ? NAMES : [name]
+    return names.flatMap((n) => [path.join(dir, `${n}.jsonc`), path.join(dir, `${n}.json`)])
   }
 
   export const JsonError = NamedError.create(
