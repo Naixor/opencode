@@ -4,6 +4,7 @@ import { SessionStatus } from "../status"
 import { HookChain } from "./index"
 import { tmpdir } from "os"
 import { join } from "path"
+import { MemoryInject } from "../../memory/engine/injector"
 
 // Lazy imports to avoid circular dependency at module load time.
 // Session, SessionPrompt, and TuiEvent are resolved on first use.
@@ -78,9 +79,10 @@ export namespace RalphLoop {
   function buildIterationPrompt(loopState: LoopState): string {
     const maxLabel = String(loopState.maxIterations)
     const prefix = loopState.ultrawork ? "ultrawork " : ""
-    const memoryInstruction = loopState.iteration > 1
-      ? `\n\nMEMORY FILE: ${loopState.memoryFile}\nRead this file FIRST to understand what previous iterations accomplished. Update it with your progress before finishing.\n`
-      : `\n\nMEMORY FILE: ${loopState.memoryFile}\nThis file tracks your progress across iterations. Update it with your progress before finishing.\n`
+    const memoryInstruction =
+      loopState.iteration > 1
+        ? `\n\nMEMORY FILE: ${loopState.memoryFile}\nRead this file FIRST to understand what previous iterations accomplished. Update it with your progress before finishing.\n`
+        : `\n\nMEMORY FILE: ${loopState.memoryFile}\nThis file tracks your progress across iterations. Update it with your progress before finishing.\n`
 
     if (loopState.verificationPending) {
       return `${prefix}[SYSTEM DIRECTIVE - ULTRAWORK LOOP VERIFICATION ${loopState.iteration}/${maxLabel}]
@@ -199,7 +201,9 @@ ${loopState.prompt}`
 
     const block = `\n## ${label}\n\n${summary}\n\n---\n`
 
-    const existing = await Bun.file(loopState.memoryFile).text().catch(() => "")
+    const existing = await Bun.file(loopState.memoryFile)
+      .text()
+      .catch(() => "")
     await Bun.write(loopState.memoryFile, existing + block).catch((err: unknown) => {
       log.error("failed to append to memory file", {
         path: loopState.memoryFile,
@@ -210,7 +214,11 @@ ${loopState.prompt}`
 
   // --- Toast Helper ---
 
-  async function showToast(title: string, message: string, variant: "info" | "success" | "warning" | "error"): Promise<void> {
+  async function showToast(
+    title: string,
+    message: string,
+    variant: "info" | "success" | "warning" | "error",
+  ): Promise<void> {
     const TuiEvent = await getTuiEvent()
     Bus.publish(TuiEvent.ToastShow, { title, message, variant })
   }
@@ -344,7 +352,10 @@ ${loopState.prompt}`
 
       if (verified) {
         finishLoop(loopState)
-        log.info("ultrawork loop verified and complete", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
+        log.info("ultrawork loop verified and complete", {
+          originSessionID: loopState.originSessionID,
+          iteration: loopState.iteration,
+        })
         await showToast(
           "ULTRAWORK LOOP COMPLETE!",
           `Task completed and verified after ${loopState.iteration} iteration(s)`,
@@ -373,8 +384,15 @@ ${loopState.prompt}`
     // Not completed — continue iteration with a new session
     if (loopState.iteration >= loopState.maxIterations) {
       finishLoop(loopState)
-      log.info("loop max iterations reached", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
-      await showToast("Ralph Loop", `Max iterations (${loopState.maxIterations}) reached without completion.`, "warning")
+      log.info("loop max iterations reached", {
+        originSessionID: loopState.originSessionID,
+        iteration: loopState.iteration,
+      })
+      await showToast(
+        "Ralph Loop",
+        `Max iterations (${loopState.maxIterations}) reached without completion.`,
+        "warning",
+      )
       return
     }
 
@@ -382,7 +400,10 @@ ${loopState.prompt}`
     await appendToMemory(loopState, `Iteration ${loopState.iteration}`, currentSessionID)
 
     loopState.iteration++
-    log.info("loop continuing with new session", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
+    log.info("loop continuing with new session", {
+      originSessionID: loopState.originSessionID,
+      iteration: loopState.iteration,
+    })
 
     await startNewIteration(loopState, buildIterationPrompt(loopState))
   }
@@ -397,10 +418,13 @@ ${loopState.prompt}`
       await appendToMemory(loopState, `Iteration ${loopState.iteration} (DONE emitted)`, loopState.currentSessionID)
 
       loopState.iteration++
-      await startNewIteration(loopState, buildIterationPrompt(loopState))
+      await startNewIteration(loopState, buildIterationPrompt(loopState), { inherit: false })
 
       await showToast("ULTRAWORK LOOP", "DONE detected. Oracle verification is now required.", "info")
-      log.info("ultrawork verification phase started", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
+      log.info("ultrawork verification phase started", {
+        originSessionID: loopState.originSessionID,
+        iteration: loopState.iteration,
+      })
       return
     }
 
@@ -424,20 +448,24 @@ ${loopState.prompt}`
     loopState.verificationSessionID = undefined
     loopState.iteration++
 
-    await startNewIteration(loopState, buildVerificationFailurePrompt(loopState))
+    await startNewIteration(loopState, buildVerificationFailurePrompt(loopState), { inherit: false })
 
-    log.info("ultrawork verification failed, continuing", { originSessionID: loopState.originSessionID, iteration: loopState.iteration })
+    log.info("ultrawork verification failed, continuing", {
+      originSessionID: loopState.originSessionID,
+      iteration: loopState.iteration,
+    })
     await showToast("ULTRAWORK LOOP", "Oracle verification failed. Resuming work.", "warning")
   }
 
   // --- Session Management ---
 
-  async function startNewIteration(loopState: LoopState, prompt: string): Promise<void> {
+  async function startNewIteration(loopState: LoopState, prompt: string, opts?: { inherit?: boolean }): Promise<void> {
     const Session = await getSession()
     const SessionPrompt = await getSessionPrompt()
+    const parentID = loopState.currentSessionID
 
     // Remove old currentSessionID mapping
-    sessionToOrigin.delete(loopState.currentSessionID)
+    sessionToOrigin.delete(parentID)
 
     // Create a fresh session for this iteration
     const newSession = await Session.create({
@@ -455,6 +483,17 @@ ${loopState.prompt}`
       finishLoop(loopState)
       await showToast("Ralph Loop", "Failed to create new session. Loop stopped.", "error")
       return
+    }
+
+    const inherit = opts?.inherit ?? true
+    if (inherit) {
+      const copied = MemoryInject.inheritResolved(parentID, newSession.id)
+      log.info("iteration memory inheritance", {
+        originSessionID: loopState.originSessionID,
+        parentID,
+        sessionID: newSession.id,
+        copied,
+      })
     }
 
     // Update loop state to point to the new session

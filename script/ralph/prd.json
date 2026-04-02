@@ -1,104 +1,104 @@
 {
   "project": "OpenCode",
-  "branchName": "ralph/log-viewer-manager-merge",
-  "description": "Merge LLM Log Viewer into Manager — convert standalone LogServer to Hono sub-routes mounted on the main server, remove independent port",
+  "branchName": "ralph/loop-child-memory-inheritance",
+  "description": "Keep loop child sessions on fresh session history while inheriting the parent session's resolved <memory> view for stable multi-iteration behavior.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Convert LogServer to Hono sub-routes",
-      "description": "As a developer, I need the log viewer API converted from a standalone Bun.serve() server to Hono sub-routes so it can be mounted on the main server.",
+      "title": "Persist resolved memory payload per session",
+      "description": "As a developer, I need one session-linked place to store the resolved memory payload so loop-created child sessions can inherit the exact rendered memory view.",
       "acceptanceCriteria": [
-        "Create src/log/routes.ts exporting LogViewerRoutes as a lazy Hono sub-router (same pattern as MemoryRoutes in src/memory/web/api.ts)",
-        "Move all API route handlers from src/log/server.ts handleApiRoute() into Hono route definitions: GET /api/logs, GET /api/logs/stats, GET /api/logs/analyze, GET /api/logs/:id, POST /api/logs/:id/annotations, DELETE /api/logs/annotations/:id, POST /api/logs/cleanup, GET /api/health",
-        "Add GET /app route serving embedded log-viewer HTML (same pattern as MemoryRoutes /app route using import with { type: 'text' })",
-        "Serve embedded log-viewer static assets (JS/CSS) via GET /assets/* route using the OPENCODE_LOG_VIEWER_ASSETS global",
-        "SPA fallback: non-API, non-asset routes return index.html for client-side routing",
-        "Remove CORS headers (main server handles CORS via Hono middleware)",
-        "Typecheck passes"
+        "Add one session-linked storage path for a session's rendered <memory> block, rendered memory conflict block, and deterministic empty-memory state",
+        "Store the final rendered text shown to the model, not only memory IDs or recall metadata",
+        "Keep existing non-loop sessions functional after the storage path is added",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Created src/log/routes.ts with lazy Hono sub-router. All API routes ported from handleApiRoute(). Assets served via /app and /app/* routes using OPENCODE_LOG_VIEWER_ASSETS global. SPA fallback returns index.html for unmatched paths."
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Mount LogViewerRoutes on main server",
-      "description": "As a developer, I need the log viewer routes mounted on the main server so they're accessible at /log-viewer/*.",
+      "title": "Capture rendered memory during injection",
+      "description": "As a loop system, I want memory injection to save the resolved payload for the current session so later loop children can reuse it without recomputing on their first turn.",
       "acceptanceCriteria": [
-        "Import LogViewerRoutes in src/server/server.ts",
-        "Add .route('/log-viewer', LogViewerRoutes()) to the main Hono app chain (after MemoryRoutes, before ManagerRoutes)",
-        "Verify /log-viewer/app serves the log viewer HTML page",
-        "Verify /log-viewer/api/logs returns log data",
-        "Verify /log-viewer/api/health returns { status: 'ok' }",
-        "Typecheck passes"
+        "When memory injection adds a <memory> block, save the exact rendered block to the session-linked storage path",
+        "When memory injection adds a memory conflict block, save the exact rendered conflict block to the same session-linked storage path",
+        "When no memory is injected, save the explicit empty-memory state selected for this feature",
+        "Existing memory injection output for normal sessions remains unchanged",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Added import and .route('/log-viewer', LogViewerRoutes()) between MemoryRoutes and ManagerRoutes in server.ts."
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Update manager.ts to remove independent LogServer",
-      "description": "As a developer, I need the manager CLI command to stop launching a separate LogServer and instead use the main server's /log-viewer/ routes.",
+      "title": "Inherit resolved memory for loop child first turn",
+      "description": "As a loop-created child session, I want to reuse the parent session's resolved memory payload on my first LLM turn so memory context stays stable across /ralph-loop and /ultrawork iterations.",
       "acceptanceCriteria": [
-        "Remove import of LogServer from manager.ts",
-        "Remove LogServer.start({ port: logViewerPort }) call",
-        "Remove --log-viewer-port CLI option",
-        "Remove logViewer.stop() from shutdown handler",
-        "Update ManagerState.register() log-viewer service entry: url changes from logViewer.url to `${mainBaseUrl}/log-viewer/app`",
-        "Update services array: Log Viewer path becomes '/log-viewer/app', url becomes `${mainBaseUrl}/log-viewer/app`",
-        "Update switch case 'log-viewer': openUrl becomes `${mainBaseUrl}/log-viewer/app`",
-        "Typecheck passes"
+        "When /ralph-loop creates a child session, copy the parent session's latest resolved memory payload into the child session before the child's first LLM turn",
+        "When /ultrawork creates a child session, copy the parent session's latest resolved memory payload into the child session before the child's first LLM turn",
+        "The child's first LLM turn uses the inherited rendered memory payload instead of recomputing memory injection",
+        "Loop child sessions still do not inherit parent message history",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Removed LogServer import, start call, --log-viewer-port option, and logViewer.stop(). All URLs updated to use ${mainBaseUrl}/log-viewer/app. Added --reset-logs option."
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Remove standalone log-viewer CLI command",
-      "description": "As a developer, I need to remove the independent opencode log-viewer CLI subcommand since log viewer is now accessed via the manager.",
+      "title": "Refresh inherited memory only on normal triggers",
+      "description": "As the memory system, I want loop child sessions to keep inherited memory until existing dirty or re-recall rules require recomputation so continuity improves without inventing a second refresh policy.",
       "acceptanceCriteria": [
-        "Delete src/cli/cmd/log-viewer.ts",
-        "Remove LogViewerCommand import and registration from src/index.ts",
-        "Preserve the LlmLog.reset() functionality — add --reset-logs option to the manager command instead",
-        "Manager --reset-logs flag calls LlmLog.reset(), prints result, and exits (no server start)",
-        "Typecheck passes"
+        "After the first child turn, inherited rendered memory remains active across child turns until dirty-state or re-recall threshold rules require recomputation",
+        "If recomputation happens, save the child's newly resolved rendered memory payload for future descendants",
+        "If the parent session has no resolved memory payload, the child falls back to the normal memory injection flow on its first turn",
+        "Non-loop sessions continue using the current memory refresh behavior",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Deleted log-viewer.ts. Removed import and .command(LogViewerCommand) from index.ts. Reset functionality moved to manager --reset-logs flag."
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Update log-viewer web app API base path",
-      "description": "As a developer, I need the log-viewer React app to use /log-viewer/api/ as its API base path instead of /api/.",
+      "title": "Preserve loop scope boundaries",
+      "description": "As a maintainer, I want loop memory inheritance to stay narrowly scoped so only later loop-created child sessions change behavior.",
       "acceptanceCriteria": [
-        "Find and update the API base URL in packages/log-viewer/ source code from /api/ to /log-viewer/api/",
-        "If there's an API client or fetch wrapper, update the base path there",
-        "If API URLs are hardcoded in components, update each one",
-        "Vite dev server proxy config updated to match new path prefix",
-        "Build and verify the log-viewer package compiles successfully",
-        "Typecheck passes"
+        "The initial session where /ralph-loop or /ultrawork is invoked keeps its current behavior",
+        "Oracle verification sessions keep their current behavior and do not inherit parent resolved memory in this feature",
+        "Task tool, subagent-created child sessions, manual forks, and unrelated child-session flows keep their current behavior",
+        "No task-local work summary is copied into <memory> as part of this feature",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Updated all 7 fetch calls across 4 pages from /api/ to /log-viewer/api/. Updated vite.config.ts base to /log-viewer/app/ and proxy to /log-viewer/api. Added basename: '/log-viewer/app' to createBrowserRouter. Build succeeds."
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Clean up src/log/server.ts",
-      "description": "As a developer, I need to remove the standalone server code from src/log/server.ts since it's replaced by Hono routes.",
+      "title": "Add regression tests for loop memory inheritance",
+      "description": "As a developer, I want automated coverage for loop memory inheritance so later refactors do not silently reintroduce recomputation or scope creep.",
       "acceptanceCriteria": [
-        "Remove or simplify src/log/server.ts — keep only if helper functions are reused by routes.ts, otherwise delete the file",
-        "Remove tryPort(), start(), ServerOptions, ServerInstance exports that are no longer needed",
-        "Remove standalone Bun.serve() related code (handleRequest, serveStaticFile, serveEmbeddedAsset)",
-        "Ensure no other files import from src/log/server.ts (check manager.ts, log-viewer.ts already removed)",
-        "Typecheck passes"
+        "Add test coverage for saving rendered <memory> and conflict payloads on a parent session",
+        "Add test coverage for /ralph-loop child first-turn inheritance",
+        "Add test coverage for /ultrawork child first-turn inheritance",
+        "Add test coverage showing loop child sessions do not inherit parent message history",
+        "Add test coverage for first-turn fallback to normal injection when the parent has no resolved payload",
+        "Add test coverage showing initial invocation sessions and Oracle verification sessions keep current behavior",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "Deleted src/log/server.ts entirely. All helper functions (parseListFilters etc) were reimplemented in routes.ts. No remaining imports."
+      "notes": ""
     }
   ]
 }

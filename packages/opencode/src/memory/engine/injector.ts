@@ -25,7 +25,19 @@ export namespace MemoryInject {
     count: number
   }
 
+  interface Resolved {
+    memory: string
+    conflict: string
+    ids: string[]
+    conflicts: CachedRecall["conflicts"]
+    count: number
+    sticky: boolean
+    empty: boolean
+    fresh: boolean
+  }
+
   const cache = new Map<string, CachedRecall>()
+  const resolved = new Map<string, Resolved>()
 
   /**
    * Build the candidate pool: manual memories in full + auto memories by score up to limit.
@@ -82,10 +94,116 @@ export namespace MemoryInject {
   }
 
   /**
+   * Save the resolved prompt payload for a session.
+   */
+  export function saveResolved(
+    sessionID: string,
+    input: {
+      memory?: string
+      conflict?: string
+      ids?: string[]
+      conflicts?: CachedRecall["conflicts"]
+      count: number
+      sticky?: boolean
+    },
+  ): void {
+    const prev = resolved.get(sessionID)
+    resolved.set(sessionID, {
+      memory: input.memory ?? "",
+      conflict: input.conflict ?? "",
+      ids: input.ids ? [...input.ids] : [],
+      conflicts: input.conflicts ? input.conflicts.map((item) => ({ ...item })) : [],
+      count: input.count,
+      sticky: input.sticky ?? prev?.sticky ?? false,
+      empty: !input.memory && !input.conflict,
+      fresh: false,
+    })
+  }
+
+  /**
+   * Save an explicit empty-memory result for a session.
+   */
+  export function saveEmpty(sessionID: string, count: number): void {
+    const prev = resolved.get(sessionID)
+    resolved.set(sessionID, {
+      memory: "",
+      conflict: "",
+      ids: [],
+      conflicts: [],
+      count,
+      sticky: prev?.sticky ?? false,
+      empty: true,
+      fresh: false,
+    })
+  }
+
+  /**
+   * Read the stored prompt payload for a session.
+   */
+  export function getResolved(sessionID: string): Resolved | undefined {
+    return resolved.get(sessionID)
+  }
+
+  /**
+   * Copy a parent's resolved payload into a loop child session.
+   */
+  export function inheritResolved(parentID: string, sessionID: string): boolean {
+    const state = resolved.get(parentID)
+    if (!state || state.empty) return false
+
+    resolved.set(sessionID, {
+      memory: state.memory,
+      conflict: state.conflict,
+      ids: [...state.ids],
+      conflicts: state.conflicts.map((item) => ({ ...item })),
+      count: 0,
+      sticky: true,
+      empty: false,
+      fresh: true,
+    })
+
+    const cached = cache.get(parentID)
+    if (!cached) return true
+
+    cache.set(sessionID, {
+      relevant: [...cached.relevant],
+      conflicts: cached.conflicts.map((item) => ({ ...item })),
+      count: 0,
+    })
+    return true
+  }
+
+  /**
+   * Reuse inherited prompt payload until the normal refresh triggers fire.
+   */
+  export function useResolved(sessionID: string, count: number): Resolved | undefined {
+    const state = resolved.get(sessionID)
+    if (!state || state.empty || !state.sticky) return
+    if (Memory.isDirty(sessionID)) return
+    if (!state.fresh && count - state.count >= RE_RECALL_INTERVAL) return
+
+    if (state.fresh) {
+      state.count = count
+      state.fresh = false
+    }
+
+    return state
+  }
+
+  /**
    * Clear recall cache for a session (e.g., on session end).
    */
   export function clearCache(sessionID: string): void {
     cache.delete(sessionID)
+    resolved.delete(sessionID)
+  }
+
+  /**
+   * Reset all session-scoped injector state.
+   */
+  export function reset(): void {
+    cache.clear()
+    resolved.clear()
   }
 
   /**
