@@ -1,8 +1,16 @@
 import fs from "fs/promises"
 import path from "path"
+import os from "os"
 import type { SecuritySchema } from "../security/schema"
 import { generateBuiltins } from "./builtins"
 import { isGlobPattern, globToSbplRegex } from "./glob-to-regex"
+
+/** Expand leading `~/` to the user's home directory. */
+function expand(p: string): string {
+  if (p === "~") return os.homedir()
+  if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2))
+  return p
+}
 
 export interface ProfileInput {
   projectRoot: string
@@ -46,12 +54,13 @@ async function resolveAllowlistEntry(
   projectRoot: string,
 ): Promise<string | string[]> {
   if (isGlobPattern(entry.pattern)) {
-    const regex = await globToSbplRegex(entry.pattern, projectRoot)
+    const expanded = expand(entry.pattern)
+    const regex = await globToSbplRegex(expanded, projectRoot)
     return [`;; glob: ${entry.pattern}`, allowWrite(sbplRegex(regex))]
   }
 
-  const pattern = entry.pattern.replace(/\/\*\*$/, "").replace(/\*\*/g, "")
-  const abs = path.isAbsolute(pattern) ? pattern : path.resolve(projectRoot, pattern)
+  const raw = expand(entry.pattern.replace(/\/\*\*$/, "").replace(/\*\*/g, ""))
+  const abs = path.isAbsolute(raw) ? raw : path.resolve(projectRoot, raw)
   const resolved = await realpath(abs)
 
   // Reads are globally allowed; allowlist grants write access
@@ -59,17 +68,15 @@ async function resolveAllowlistEntry(
   return allowWrite(sbplLiteral(resolved))
 }
 
-async function resolveDenyEntry(
-  rule: SecuritySchema.Rule,
-  projectRoot: string,
-): Promise<string | string[]> {
+async function resolveDenyEntry(rule: SecuritySchema.Rule, projectRoot: string): Promise<string | string[]> {
   if (isGlobPattern(rule.pattern)) {
-    const regex = await globToSbplRegex(rule.pattern, projectRoot)
+    const expanded = expand(rule.pattern)
+    const regex = await globToSbplRegex(expanded, projectRoot)
     return [`;; glob: ${rule.pattern}`, denyRW(sbplRegex(regex))]
   }
 
-  const pattern = rule.pattern.replace(/\/\*\*$/, "").replace(/\*\*/g, "")
-  const abs = path.isAbsolute(pattern) ? pattern : path.resolve(projectRoot, pattern)
+  const raw = expand(rule.pattern.replace(/\/\*\*$/, "").replace(/\*\*/g, ""))
+  const abs = path.isAbsolute(raw) ? raw : path.resolve(projectRoot, raw)
   const resolved = await realpath(abs)
 
   if (rule.type === "directory") return denyRW(sbplSubpath(resolved))
@@ -77,12 +84,7 @@ async function resolveDenyEntry(
 }
 
 export async function generateProfile(input: ProfileInput): Promise<string> {
-  const lines: string[] = [
-    "(version 1)",
-    "(allow default)",
-    "",
-    ";; --- Allowlist write rules ---",
-  ]
+  const lines: string[] = ["(version 1)", "(allow default)", "", ";; --- Allowlist write rules ---"]
 
   const allowResults = await Promise.all(
     input.allowlist.map((entry) => resolveAllowlistEntry(entry, input.projectRoot)),
@@ -93,7 +95,8 @@ export async function generateProfile(input: ProfileInput): Promise<string> {
     lines.push("")
     lines.push(";; --- User-configured extra paths (rw) ---")
     for (const p of input.extraPaths) {
-      const resolved = await realpath(path.isAbsolute(p) ? p : path.resolve(input.projectRoot, p))
+      const expanded = expand(p)
+      const resolved = await realpath(path.isAbsolute(expanded) ? expanded : path.resolve(input.projectRoot, expanded))
       lines.push(allowWrite(sbplSubpath(resolved)))
     }
   }
@@ -101,9 +104,7 @@ export async function generateProfile(input: ProfileInput): Promise<string> {
   if (input.deny.length > 0) {
     lines.push("")
     lines.push(";; --- Deny rules (block read+write) ---")
-    const denyResults = await Promise.all(
-      input.deny.map((rule) => resolveDenyEntry(rule, input.projectRoot)),
-    )
+    const denyResults = await Promise.all(input.deny.map((rule) => resolveDenyEntry(rule, input.projectRoot)))
     lines.push(...denyResults.flat())
   }
 

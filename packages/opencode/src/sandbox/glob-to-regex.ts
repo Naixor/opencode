@@ -1,5 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
+import os from "os"
 
 const GLOB_CHARS = /[*?[{]/
 
@@ -64,7 +65,9 @@ export async function globToSbplRegex(pattern: string, projectRoot: string): Pro
 
   let fixedPath: string
   if (fixedSegments.length > 0) {
-    const rawFixed = fixedSegments.join("/")
+    let rawFixed = fixedSegments.join("/")
+    if (rawFixed === "~") rawFixed = os.homedir()
+    else if (rawFixed.startsWith("~/")) rawFixed = path.join(os.homedir(), rawFixed.slice(2))
     const absFixed = path.isAbsolute(rawFixed) ? rawFixed : path.resolve(projectRoot, rawFixed)
     fixedPath = await realpathSafe(absFixed)
   } else {
