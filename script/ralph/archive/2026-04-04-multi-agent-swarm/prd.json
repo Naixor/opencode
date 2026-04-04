@@ -1,0 +1,577 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/multi-agent-swarm",
+  "description": "Multi-Main-Agent Swarm Collaboration — SharedBoard, Conductor Agent, Swarm lifecycle, Dashboard UI, Agent self-evolution",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Feature flag and config schema for Swarm",
+      "description": "As a developer, I want the entire Swarm feature behind a feature flag with config schema so that it can be incrementally enabled.",
+      "acceptanceCriteria": [
+        "Add OPENCODE_SWARM to src/flag/flag.ts (env var OPENCODE_SWARM=1, default false)",
+        "Add swarm config schema to src/config/config.ts: swarm?: { max_workers: number (default 4), auto_escalate: boolean (default true), verify_on_complete: boolean (default true) }",
+        "Swarm config is optional — missing means feature disabled unless flag is set",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Phase 1 foundation. Must land first — all other stories check this flag."
+    },
+    {
+      "id": "US-002",
+      "title": "SharedBoard — Task schema and CRUD",
+      "description": "As a developer, I need a SharedBoard module that stores Tasks as JSON files with CRUD operations.",
+      "acceptanceCriteria": [
+        "Create src/board/task.ts with BoardTask namespace",
+        "BoardTask.Info Zod schema extends PersistentTask fields (id, subject, description, status, blockedBy, blocks) with new fields: assignee (string, optional), type (implement | review | test | investigate | fix | refactor), scope (string array), artifacts (string array), swarm_id (string)",
+        "Tasks stored at Instance data dir board/<swarm-id>/tasks/<task-id>.json",
+        "Implement BoardTask.create(), get(), list(swarmID), update(), remove() using Lock module for concurrent safety",
+        "BoardTask.ready(swarmID) returns pending tasks whose blockedBy deps are all completed",
+        "Define Bus events: SharedBoard.Event.TaskCreated, TaskUpdated, TaskDeleted",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Core data model. Path: Instance.directory equivalent for data, e.g. Global.Path.data/projects/<hash>/board/"
+    },
+    {
+      "id": "US-003",
+      "title": "SharedBoard — Artifact schema and CRUD",
+      "description": "As a developer, I need Artifact storage so Workers can publish analysis results, code change summaries, and checkpoints.",
+      "acceptanceCriteria": [
+        "Create src/board/artifact.ts with BoardArtifact namespace",
+        "BoardArtifact.Info Zod schema: id (A-uuid), type (analysis | code_change | test_result | decision | finding | checkpoint), task_id (string), swarm_id (string), author (string — agent name + session ID), content (string — Markdown), files (string array), created_at (number), supersedes (optional string)",
+        "Artifacts stored at board/<swarm-id>/artifacts/<artifact-id>.json",
+        "Implement BoardArtifact.post(), get(), list(filter: { swarmID, taskID?, type?, author? })",
+        "Define Bus event: SharedBoard.Event.ArtifactCreated",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Checkpoint type used by US-009b for worker failure recovery."
+    },
+    {
+      "id": "US-004",
+      "title": "SharedBoard — Signal pub/sub",
+      "description": "As a developer, I need a Signal system so Workers can send real-time notifications and Conductor can react.",
+      "acceptanceCriteria": [
+        "Create src/board/signal.ts with BoardSignal namespace",
+        "BoardSignal.Info Zod schema: id (uuid), channel (string), type (progress | conflict | question | done | blocked | need_review | failed), from (string — session ID), payload (Record<string, unknown>), timestamp (number), swarm_id (string)",
+        "BoardSignal.send() appends JSON line to board/<swarm-id>/signals.jsonl and publishes SharedBoard.Event.Signal via Bus",
+        "BoardSignal.watch(swarmID, channel, callback) subscribes to Bus events filtered by swarm_id and channel",
+        "BoardSignal.recent(swarmID, channel?, limit=50) reads last N lines from signals.jsonl",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "SharedBoard — Board snapshot and index",
+      "description": "As a developer, I need a snapshot function that returns full board state for Conductor decision-making.",
+      "acceptanceCriteria": [
+        "Create src/board/index.ts that re-exports BoardTask, BoardArtifact, BoardSignal as SharedBoard namespace",
+        "SharedBoard.snapshot(swarmID) returns { tasks, artifacts, recentSignals, stats } where stats has total/pending/running/completed/failed task counts, active worker count, last_updated timestamp",
+        "Snapshot result cached for 5 seconds, invalidated on any SharedBoard Bus event",
+        "SharedBoard.init(swarmID) creates the board/<swarm-id>/ directory structure (tasks/, artifacts/)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Board Tools — board_read tool",
+      "description": "As a developer, I want a board_read tool so Agents can query SharedBoard data through normal tool calls.",
+      "acceptanceCriteria": [
+        "Create src/tool/board.ts",
+        "Define board_read tool via Tool.define() with parameters: operation (tasks | artifacts | signals | snapshot), swarm_id (string), filter (optional: { task_id?, type?, author?, channel?, limit? })",
+        "For operation=tasks: call SharedBoard list/ready based on filter",
+        "For operation=artifacts: call SharedBoard listArtifacts with filter",
+        "For operation=signals: call SharedBoard recent with channel and limit",
+        "For operation=snapshot: call SharedBoard.snapshot()",
+        "Register in registry.ts all() gated by Flag.OPENCODE_SWARM",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Board Tools — board_write tool",
+      "description": "As a developer, I want a board_write tool so Agents can create tasks, publish artifacts, and send signals.",
+      "acceptanceCriteria": [
+        "Add board_write tool to src/tool/board.ts via Tool.define()",
+        "Parameters: operation (create_task | update_task | post_artifact | signal), swarm_id (string), data (object matching the operation)",
+        "For create_task: call BoardTask.create() with data fields",
+        "For update_task: call BoardTask.update() with task id and changes",
+        "For post_artifact: call BoardArtifact.post() with data fields",
+        "For signal: call BoardSignal.send() with data fields",
+        "Register in registry.ts all() gated by Flag.OPENCODE_SWARM",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Board Tools — board_status tool",
+      "description": "As a developer, I want a board_status tool that returns a concise board summary.",
+      "acceptanceCriteria": [
+        "Add board_status tool to src/tool/board.ts via Tool.define()",
+        "Parameters: swarm_id (string)",
+        "Returns SharedBoard.snapshot(swarmID).stats formatted as readable text",
+        "Register in registry.ts all() gated by Flag.OPENCODE_SWARM",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Conductor Agent — built-in definition",
+      "description": "As a developer, I want the Conductor defined as a built-in native agent in agent.ts.",
+      "acceptanceCriteria": [
+        "Add conductor entry to the result object in src/agent/agent.ts state() function",
+        "Set mode: primary, native: true, hidden: false",
+        "Set temperature: 0.1, prompt_level: full",
+        "Do NOT set model override — Conductor follows user's current model selection",
+        "Permission: board_read: allow, board_write: allow, board_status: allow, delegate_task: allow, persistent_task: allow, question: allow, read: allow, grep: allow, glob: allow, bash: allow, edit: deny, write: deny",
+        "Gate the entire conductor entry behind Flag.OPENCODE_SWARM — only add to result when flag is enabled",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Prompt loaded in next story."
+    },
+    {
+      "id": "US-010",
+      "title": "Conductor Prompt — Soul layer",
+      "description": "As a developer, I need the Conductor's fixed Soul prompt defining its identity and core protocols.",
+      "acceptanceCriteria": [
+        "Create src/agent/prompt/conductor.txt with Soul layer content",
+        "Content includes: Identity (Conductor orchestrating Workers), Core Values (accuracy over speed, decouple before parallelize, minimize human interruption, learn from experience), Tool Protocol (board_read/board_write/board_status/delegate_task usage), Escalation Boundary (only ask human for architecture/security/retries-exhausted/post-arbitration-disagreement)",
+        "Prompt length under 1500 tokens",
+        "Import conductor.txt in agent.ts and set as conductor agent prompt",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Conductor Prompt — Strategy layer loading",
+      "description": "As a developer, I need the Conductor to load a dynamic Strategy file and append it to the Soul prompt.",
+      "acceptanceCriteria": [
+        "In Conductor agent initialization (or via a hook in session/hooks), check if board/conductor-strategy.md exists in Instance data dir",
+        "If not exists, copy from a built-in template at src/board/strategy-template.md",
+        "Template includes sections: Planning Protocol, Assignment Protocol, Monitoring Protocol, Scope Decouple Protocol, Conflict Resolution, Verification Protocol",
+        "Strategy content appended to Conductor system prompt (after Soul) via pre-llm hook or agent options",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Strategy evolution (retrospective updates) handled in later story."
+    },
+    {
+      "id": "US-012",
+      "title": "Swarm namespace — Info schema and registry",
+      "description": "As a developer, I need the Swarm data model and a registry file to track active Swarms.",
+      "acceptanceCriteria": [
+        "Create src/session/swarm.ts with Swarm namespace",
+        "Swarm.Info Zod schema: id (string), goal (string), conductor (string — session ID), workers (array of { session_id, agent, task_id, status: active|idle|done|failed }), config ({ max_workers, auto_escalate, verify_on_complete }), status (planning|running|paused|completed|failed), time ({ created, updated, completed? })",
+        "Swarm registry stored at board/swarms.json as array of Swarm.Info",
+        "Implement Swarm.save(info) and Swarm.load(id) for persistence using Lock module",
+        "Implement Swarm.list() that reads swarms.json",
+        "Define Bus events: Swarm.Event.Created, Updated, Completed, Failed",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Swarm.launch() — create Conductor and start",
+      "description": "As a developer, I want Swarm.launch() to create the board, spawn a Conductor session, and send it the goal.",
+      "acceptanceCriteria": [
+        "Implement Swarm.launch({ goal, config? }) in src/session/swarm.ts",
+        "Step 1: Call SharedBoard.init(swarmID) to create board/<swarm-id>/ dirs",
+        "Step 2: Create Conductor session via Session.createNext({ directory: Instance.directory, title: 'Swarm: ' + goal.slice(0, 50) })",
+        "Step 3: Send goal as user message via SessionPrompt.prompt({ sessionID, parts: [{ type: text, text: goal }], agent: conductor }). Do NOT await completion — Conductor runs async",
+        "Step 4: Save Swarm.Info to swarms.json with status: planning",
+        "Publish Swarm.Event.Created",
+        "Return Swarm.Info (id and conductor session ID)",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Swarm status, pause, resume, stop, intervene",
+      "description": "As a developer, I need Swarm lifecycle control functions.",
+      "acceptanceCriteria": [
+        "Swarm.status(id) loads from swarms.json, merges live Session status for each worker (via SessionStatus.get), returns Swarm.Info",
+        "Swarm.pause(id) calls SessionPrompt.cancel() for each running worker session, sets Swarm status to paused",
+        "Swarm.resume(id) calls SessionPrompt.loop({ sessionID, resume_existing: true }) for each paused worker, sets status to running",
+        "Swarm.stop(id) cancels all worker + conductor sessions, sets status to failed",
+        "Swarm.intervene(id, message) sends a user text message to the Conductor session via SessionPrompt.prompt()",
+        "All ops update swarms.json and publish Swarm.Event.Updated",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Enhance delegate_task for Swarm workers",
+      "description": "As a developer, I want delegate_task to create independent Primary Sessions when called from a Conductor with a swarm_id.",
+      "acceptanceCriteria": [
+        "Add optional swarm_id and task_id parameters to delegateParameters schema in delegate-task.ts",
+        "When swarm_id is present AND caller agent is conductor: create session via Session.createNext() without parentID (independent Primary Session)",
+        "Worker uses sisyphus agent (hardcode subagent_type to sisyphus when swarm_id is present)",
+        "Inject board permissions into Worker session: board_read: allow, board_write: allow, swarm_launch: deny",
+        "After session creation, update Swarm.Info.workers[] array via Swarm.save()",
+        "Register worker in BackgroundManager with provider/model from resolved model",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Key integration point. Workers are full sisyphus agents with board access but no swarm nesting."
+    },
+    {
+      "id": "US-016",
+      "title": "Swarm monitor — event-driven Conductor wakeup",
+      "description": "As a developer, I need a monitor that watches Worker events and sends synthetic messages to the Conductor.",
+      "acceptanceCriteria": [
+        "Implement Swarm.monitor(swarmID) in src/session/swarm.ts",
+        "Subscribe to SharedBoard.Event.Signal filtered by swarm_id",
+        "Subscribe to SessionStatus.Event.Status for all worker session IDs",
+        "On Signal type=done/failed/blocked/conflict: build summary text including the signal payload and current board snapshot stats, then send as user message to Conductor session",
+        "On worker SessionStatus=idle but task not completed (check BoardTask status): send stale-worker warning to Conductor",
+        "Store unsubscribe functions; Swarm.stop() and Swarm complete both call them to cleanup",
+        "Call Swarm.monitor() automatically after Swarm.launch() succeeds",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Scope lock — file-level lock and pre-tool hook",
+      "description": "As a developer, I need file-level scope locks to prevent Workers from editing the same file.",
+      "acceptanceCriteria": [
+        "Add scope_lock Map<string, { agent: string, taskID: string }> to SharedBoard state (Instance-scoped via Instance.state)",
+        "SharedBoard.lockScope(swarmID, taskID, scope: string[], agent: string) locks each file path",
+        "SharedBoard.unlockScope(swarmID, taskID) releases all locks for that task",
+        "SharedBoard.checkLock(swarmID, path: string, agent: string) returns lock info if locked by another agent",
+        "Register a pre-tool hook in src/session/hooks/register.ts for edit and write tools: if current session has a swarm_id in context, call checkLock; if locked by another, throw error with message including the locking agent and task",
+        "BoardTask.update(id, { status: completed }) automatically calls unlockScope",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "Safety net. Primary conflict avoidance is Conductor's intelligent scope assignment."
+    },
+    {
+      "id": "US-018",
+      "title": "Escalation Policy engine",
+      "description": "As a developer, I need an escalation policy engine that recommends actions for failure scenarios.",
+      "acceptanceCriteria": [
+        "Create src/board/escalation.ts with Escalation namespace",
+        "Escalation.Rule Zod schema: condition (string), action (retry | arbitrate | reassign | ask_human), max_retries (number, default 3)",
+        "Default rules: task_failed+retries<3 -> retry, conflict_same_file -> arbitrate, architecture_decision -> ask_human, all_retries_exhausted -> ask_human, security_sensitive -> ask_human",
+        "Escalation.evaluate(event: { type, retries, context }) returns recommended action by matching first rule whose condition matches",
+        "Rules configurable via Config swarm.escalation field (merged with defaults)",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "SwarmStats — performance collection",
+      "description": "As a developer, I want to collect Agent performance statistics from Swarm executions.",
+      "acceptanceCriteria": [
+        "Create src/board/stats.ts with SwarmStats namespace",
+        "Stats persisted at board/stats.json (shared across Swarms)",
+        "Schema: Record<agent_name, { tasks_completed, tasks_failed, avg_steps, avg_duration_ms, retry_rate, types_completed: Record<type, number>, escalation_count }>",
+        "SwarmStats.record({ agent, type, steps, duration, success, escalated }) updates aggregated stats",
+        "Subscribe to SharedBoard.Event.TaskUpdated — when task status becomes completed or failed, call record() with data from the task",
+        "SwarmStats.get() returns current stats",
+        "SwarmStats.recommend(taskType) returns agent name with highest success rate for that type",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Playbook — storage and CRUD",
+      "description": "As a developer, I need Playbook file management so Conductor can read and update operational playbooks.",
+      "acceptanceCriteria": [
+        "Create src/board/playbook.ts with Playbook namespace",
+        "Playbooks stored at board/playbooks/<name>.md (shared across Swarms)",
+        "Playbook format: YAML frontmatter (name, trigger, version, success_rate, last_updated) + Markdown body (Steps, Lessons Learned, Anti-patterns)",
+        "Playbook.list() returns array of { name, trigger, version }",
+        "Playbook.get(name) returns full content string",
+        "Playbook.update(name, content) writes file and increments version in frontmatter",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Swarm Tools — user-facing launch/status/stop",
+      "description": "As a developer, I want tools so users can launch and manage Swarms from any Primary Session.",
+      "acceptanceCriteria": [
+        "Create src/tool/swarm.ts with the following tools via Tool.define():",
+        "swarm_launch: params { goal: string, max_workers?: number }, calls Swarm.launch()",
+        "swarm_status: params { id: string }, calls Swarm.status()",
+        "swarm_intervene: params { id: string, message: string }, calls Swarm.intervene()",
+        "swarm_stop: params { id: string }, calls Swarm.stop()",
+        "swarm_list: no params, calls Swarm.list()",
+        "Register all in registry.ts gated by Flag.OPENCODE_SWARM",
+        "Permission: only primary mode agents can call these (deny for subagents)",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "SDK API — Swarm REST endpoints",
+      "description": "As a developer, I want SDK server routes for Swarm management.",
+      "acceptanceCriteria": [
+        "Add routes following existing session/message route patterns in the SDK server:",
+        "POST /swarm — body: { goal, config? } — calls Swarm.launch()",
+        "GET /swarm — calls Swarm.list()",
+        "GET /swarm/:id — calls Swarm.status(id)",
+        "POST /swarm/:id/intervene — body: { message } — calls Swarm.intervene()",
+        "POST /swarm/:id/pause — calls Swarm.pause()",
+        "POST /swarm/:id/resume — calls Swarm.resume()",
+        "POST /swarm/:id/stop — calls Swarm.stop()",
+        "Use existing auth and error handling patterns",
+        "Regenerate JS SDK by running ./packages/sdk/js/script/build.ts",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "SDK API — Swarm SSE event stream",
+      "description": "As a developer, I want an SSE endpoint for real-time Swarm events.",
+      "acceptanceCriteria": [
+        "Add GET /swarm/:id/events SSE endpoint to SDK server",
+        "Subscribe to Bus events: SharedBoard.Event.TaskUpdated, ArtifactCreated, Signal, Swarm.Event.Updated — filtered by swarm_id",
+        "Each event sent as SSE data: JSON with { type, payload, timestamp }",
+        "Connection closes when Swarm reaches completed or failed status",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Web Dashboard — Swarm overview page shell",
+      "description": "As a user, I want a /swarm/:id page that shows the Swarm goal, status, and basic layout.",
+      "acceptanceCriteria": [
+        "Create packages/app/src/pages/swarm/ directory",
+        "Create swarm-dashboard.tsx component with route /swarm/:id",
+        "Add route to app router",
+        "Page header shows: Swarm goal text, status badge (planning/running/paused/completed/failed), elapsed time",
+        "Page has 3 sections (can be empty placeholders): Workers area, Task graph area, Activity feed area",
+        "Fetch Swarm data via SDK GET /swarm/:id on mount",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Web Dashboard — Worker Agent cards",
+      "description": "As a user, I want to see each Worker Agent as a card with status and progress.",
+      "acceptanceCriteria": [
+        "Create WorkerCard component in packages/app/src/pages/swarm/",
+        "Each card shows: agent name, current task title (truncated), status indicator (blue=active, green=done, gray=idle/blocked, red=failed)",
+        "Cards laid out in horizontal row below Swarm header",
+        "Clicking a card navigates to that Worker's session page",
+        "Cards update in real-time via SSE subscription to /swarm/:id/events",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Web Dashboard — Task dependency graph",
+      "description": "As a user, I want to see a DAG of task dependencies with color-coded statuses.",
+      "acceptanceCriteria": [
+        "Create TaskGraph component in packages/app/src/pages/swarm/",
+        "Render tasks as nodes, blockedBy relationships as directed edges",
+        "Node colors: green=completed, blue=running, gray=pending, red=failed",
+        "Each node shows task title (truncated) and assignee agent name",
+        "Use simple CSS-based layout (no heavy graph library) — vertical layers by dependency depth",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 26,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Web Dashboard — Attention queue",
+      "description": "As a user, I want to see and answer Conductor's questions directly in the Dashboard.",
+      "acceptanceCriteria": [
+        "Create AttentionQueue component in packages/app/src/pages/swarm/",
+        "Displays pending questions from Conductor (fetched via SDK — permission.asked events for conductor session)",
+        "Each question shows: question text, option buttons if available, context preview",
+        "Clicking an option sends the answer via SDK (permission response API)",
+        "Queue updates in real-time via SSE",
+        "Empty state: 'No items need your attention' message",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 27,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "Web Dashboard — Activity feed",
+      "description": "As a user, I want a real-time activity feed showing Signal events.",
+      "acceptanceCriteria": [
+        "Create ActivityFeed component in packages/app/src/pages/swarm/",
+        "Displays recent Signals formatted as readable text: timestamp + agent name + action description",
+        "Example: '14:32 Agent A completed DB Schema' or '14:38 Agent B: conflict on shared/types.ts'",
+        "Feed updates in real-time via SSE subscription",
+        "Shows last 50 events, auto-scrolls to bottom on new events",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 28,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "Web Dashboard — Control buttons",
+      "description": "As a user, I want Pause, Resume, Stop buttons and a message input on the Dashboard.",
+      "acceptanceCriteria": [
+        "Add control bar to swarm-dashboard.tsx header area",
+        "Pause button: calls SDK POST /swarm/:id/pause, disabled when status is not running",
+        "Resume button: calls SDK POST /swarm/:id/resume, disabled when status is not paused",
+        "Stop button: calls SDK POST /swarm/:id/stop, disabled when status is completed or failed",
+        "Send Message input + button: calls SDK POST /swarm/:id/intervene with text content",
+        "Buttons update state reactively from SSE events",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 29,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-030",
+      "title": "Web Sidebar — Swarm section",
+      "description": "As a user, I want to see active Swarms in the sidebar and launch new ones.",
+      "acceptanceCriteria": [
+        "Add Swarm section to sidebar (above Sessions list) in packages/app/src/pages/layout/",
+        "List active Swarms: goal text truncated, status badge, worker count",
+        "Clicking a Swarm item navigates to /swarm/:id",
+        "New Swarm button opens dialog with goal text input and max_workers number input, calls swarm_launch on submit",
+        "Completed/failed Swarms shown grayed out",
+        "Section hidden when Flag.OPENCODE_SWARM is disabled",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 30,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-031",
+      "title": "TUI — /swarm commands",
+      "description": "As a TUI user, I want /swarm commands to launch, check status, and stop Swarms.",
+      "acceptanceCriteria": [
+        "Register /swarm command in TUI command system",
+        "/swarm launch <goal> calls Swarm.launch() and displays swarm ID",
+        "/swarm status displays table of active Swarms (id, goal truncated, status, worker count)",
+        "/swarm stop <id> calls Swarm.stop() and displays confirmation",
+        "/swarm msg <id> <message> calls Swarm.intervene() and displays confirmation",
+        "Commands gated by Flag.OPENCODE_SWARM",
+        "Typecheck passes"
+      ],
+      "priority": 31,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "TUI — Swarm status bar indicator",
+      "description": "As a TUI user, I want to see Swarm activity in the status bar.",
+      "acceptanceCriteria": [
+        "When any Swarm is active, TUI status bar shows bee emoji + Swarm: X workers active",
+        "Count derived from Swarm.list() filtering status=running and summing active workers",
+        "Indicator updates when Swarm events are received via Bus subscription",
+        "Hidden when no Swarms are active or Flag.OPENCODE_SWARM is disabled",
+        "Typecheck passes"
+      ],
+      "priority": 32,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "Worker checkpoint — auto-publish on key milestones",
+      "description": "As a developer, I need Workers to automatically publish checkpoint artifacts so Conductor can recover from failures.",
+      "acceptanceCriteria": [
+        "Add a post-tool hook in src/session/hooks/register.ts that fires after bash tool completes",
+        "If the bash command was tsc/typecheck and succeeded AND the session has swarm context (swarm_id in session metadata): publish a checkpoint artifact via BoardArtifact.post() with type=checkpoint, content summarizing completed work so far (use tool output as basis)",
+        "Also publish checkpoint after delegate_task tool completes successfully in a swarm context",
+        "Checkpoint content includes: completed steps summary, files modified (from session diff), remaining work description",
+        "Typecheck passes"
+      ],
+      "priority": 33,
+      "passes": true,
+      "notes": "Conductor-side recovery logic (reading checkpoint on retry) is driven by Conductor prompt, not by code."
+    },
+    {
+      "id": "US-034",
+      "title": "Conductor Strategy template",
+      "description": "As a developer, I need a built-in Strategy template that gets copied for new projects.",
+      "acceptanceCriteria": [
+        "Create src/board/strategy-template.md with Strategy layer content",
+        "Sections: Planning Protocol (decompose goal into Tasks with dependencies), Assignment Protocol (use stats.recommend() for agent selection), Monitoring Protocol (respond to signals, check board_status periodically), Scope Decouple Protocol (check scope overlap, create refactor task if needed), Conflict Resolution (compare artifacts, pick project-convention-aligned approach), Verification Protocol (run typecheck + tests after all tasks complete)",
+        "Template length under 2000 tokens",
+        "Typecheck passes"
+      ],
+      "priority": 34,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

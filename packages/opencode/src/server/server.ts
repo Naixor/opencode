@@ -51,6 +51,7 @@ import { Client } from "./client"
 import { MemoryRoutes } from "../memory/web/api"
 import { LogViewerRoutes } from "../log/routes"
 import { ManagerRoutes } from "./routes/manager"
+import { SwarmRoutes } from "./routes/swarm"
 import { TIMEOUT } from "./lifecycle"
 import os from "os"
 
@@ -315,6 +316,7 @@ export namespace Server {
         .route("/memory", MemoryRoutes())
         .route("/log-viewer", LogViewerRoutes())
         .route("/manager", ManagerRoutes())
+        .route("/swarm", SwarmRoutes())
         .post(
           "/session/:sessionID/typing",
           describeRoute({

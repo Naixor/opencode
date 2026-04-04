@@ -1280,6 +1280,40 @@ export namespace Config {
         .array(z.string())
         .optional()
         .describe("List of built-in MCP server names to disable even when their API key is available"),
+      swarm: z
+        .object({
+          max_workers: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .default(4)
+            .describe("Maximum concurrent worker agents in a Swarm (default: 4)"),
+          auto_escalate: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe("Automatically escalate failures per escalation policy (default: true)"),
+          verify_on_complete: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe("Run verification after all tasks complete (default: true)"),
+          escalation: z
+            .array(
+              z.object({
+                condition: z.string().describe("Condition to match"),
+                action: z
+                  .enum(["retry", "arbitrate", "reassign", "ask_human"])
+                  .describe("Action to take when condition matches"),
+                max_retries: z.number().int().positive().optional().default(3).describe("Max retries (default: 3)"),
+              }),
+            )
+            .optional()
+            .describe("Custom escalation rules merged with defaults"),
+        })
+        .optional()
+        .describe("Swarm multi-agent collaboration configuration"),
       sandbox: z
         .object({
           enabled: z.boolean().optional().default(false).describe("Enable OS-level sandbox for bash and MCP commands"),

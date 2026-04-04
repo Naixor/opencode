@@ -122,6 +122,7 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+- If you want to test `packages/opencode`, use `test-analyze` skill. Never use `cd packages/opencode && bun test`, its too slow, use `bun run --cwd packages/opencode/test/ test:parallel` instead.
 
 ## Sandbox Architecture Decisions
 

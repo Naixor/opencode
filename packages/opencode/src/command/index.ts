@@ -13,10 +13,12 @@ import PROMPT_RALPH_LOOP from "./template/ralph-loop.txt"
 import PROMPT_ULTRAWORK from "./template/ultrawork.txt"
 import PROMPT_REMEMBER from "./template/remember.txt"
 import PROMPT_FORGET from "./template/forget.txt"
+import PROMPT_SWARM from "./template/swarm.txt"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import { load as loadPrompt } from "../memory/prompt/loader"
 import { ConfigPaths } from "../config/paths"
+import { Flag } from "../flag/flag"
 
 export namespace Command {
   export const Event = {
@@ -73,6 +75,7 @@ export namespace Command {
     MEMORY_REMEMBER: "memory:remember",
     MEMORY_FORGET: "memory:forget",
     MEMORY_LIST: "memory:list",
+    SWARM: "swarm",
   } as const
 
   const state = Instance.state(async () => {
@@ -180,6 +183,18 @@ export namespace Command {
         },
         hints: [],
       },
+    }
+
+    if (Flag.OPENCODE_SWARM) {
+      result[Default.SWARM] = {
+        name: Default.SWARM,
+        description: "launch, check status, or stop a multi-agent Swarm",
+        source: "command",
+        get template() {
+          return PROMPT_SWARM
+        },
+        hints: hints(PROMPT_SWARM),
+      }
     }
 
     for (const [name, command] of Object.entries(cfg.command ?? {})) {

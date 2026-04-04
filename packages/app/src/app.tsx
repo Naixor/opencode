@@ -31,6 +31,7 @@ import { ErrorPage } from "./pages/error"
 
 const Home = lazy(() => import("@/pages/home"))
 const Session = lazy(() => import("@/pages/session"))
+const SwarmDashboard = lazy(() => import("@/pages/swarm/swarm-dashboard"))
 const Loading = () => <div class="size-full" />
 
 const HomeRoute = () => (
@@ -48,6 +49,12 @@ const SessionRoute = () => (
 )
 
 const SessionIndexRoute = () => <Navigate href="session" />
+
+const SwarmRoute = () => (
+  <Suspense fallback={<Loading />}>
+    <SwarmDashboard />
+  </Suspense>
+)
 
 function UiI18nBridge(props: ParentProps) {
   const language = useLanguage()
@@ -157,6 +164,7 @@ export function AppInterface(props: {
               <Route path="/:dir" component={DirectoryLayout}>
                 <Route path="/" component={SessionIndexRoute} />
                 <Route path="/session/:id?" component={SessionRoute} />
+                <Route path="/swarm/:id" component={SwarmRoute} />
               </Route>
             </Router>
           </GlobalSyncProvider>

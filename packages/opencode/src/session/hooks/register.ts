@@ -8,6 +8,7 @@ import { SessionLifecycleHooks } from "./session-lifecycle"
 import { LlmLogCapture } from "../../log/capture"
 import { RalphLoop } from "./ralph-loop"
 import { registerMemoryHooks } from "../../memory/hooks/register"
+import { SwarmHooks } from "./swarm-hooks"
 
 export function registerAllHooks(): void {
   ContextInjectionHooks.register()
@@ -20,4 +21,5 @@ export function registerAllHooks(): void {
   LlmLogCapture.register()
   RalphLoop.register()
   registerMemoryHooks()
+  SwarmHooks.register()
 }

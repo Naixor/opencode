@@ -1,0 +1,39 @@
+## Discussion Mode Protocol
+
+Orchestrate a structured multi-role debate using session reuse and board operations.
+
+### Round 1 — Proposals
+
+1. Create a "discuss" task via board_write: `{ operation: "create_task", swarm_id, data: { subject: topic, type: "discuss" } }`
+2. For each role, call delegate_task with:
+   - `subagent_type`: the role's agent
+   - `discussion_channel`: the channel name (e.g., "discuss-{topic-slug}")
+   - `run_in_background: true`
+   - `prompt`: "Your perspective: {perspective}. Read the discussion channel via board_read({ operation: 'discussion', swarm_id, filter: { channel } }), then post your proposal as a signal via board_write({ operation: 'signal', swarm_id, data: { channel, type: 'proposal', from: '{role}', payload: { summary: '...' } } })."
+3. Record each returned `session_id` mapped to its role name — you will reuse these.
+4. **WAIT** — Do NOT proceed until you see the Monitor message: `[Discussion Round 1 Complete]`.
+
+### Round 2+ — Reviews
+
+1. Advance the round: `board_write({ operation: "advance_round", swarm_id, data: { channel } })`
+2. For each role, call delegate_task with:
+   - `session_id`: the saved session ID for this role (reuses existing session)
+   - `run_in_background: true`
+   - `prompt`: "Round {N} review. Read the discussion channel, then respond to these points: {summary of previous round signals}. Post your response as a signal with type 'opinion' or 'objection'."
+3. **WAIT** for Monitor: `[Discussion Round {N} Complete]`.
+
+### Final Round — Consensus
+
+1. Advance the round.
+2. For each role, call delegate_task with `session_id` and:
+   - `prompt`: "Final round. Read the full thread. Post a consensus signal: board_write({ operation: 'signal', swarm_id, data: { channel, type: 'consensus', from: '{role}', payload: { position: 'agree'|'disagree'|'modify', summary: 'your reasoning' } } })."
+3. **WAIT** for Monitor round complete and tally.
+4. If unanimous agree → post a "decision" artifact summarizing the agreed approach.
+5. If not unanimous → make a final call, noting dissent in the decision artifact.
+
+### Key Rules
+
+- Each delegate_task prompt MUST instruct the Worker to call board_write with a signal.
+- Always use `run_in_background: true` for Worker delegation.
+- Never proceed to the next round before the Monitor confirms completion.
+- Read discussion status anytime via: `board_read({ operation: "discussion", swarm_id, filter: { channel } })`

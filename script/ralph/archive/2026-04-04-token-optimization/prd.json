@@ -1,0 +1,323 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/token-optimization",
+  "description": "Token consumption optimization — smart prune, prompt caching, tool trimming, memory tuning, log-viewer diagnostics",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Log-viewer list API: add cache token fields",
+      "description": "As a developer, I want the log-viewer list API to return cache_read_tokens and cache_write_tokens so that I can see caching behavior at a glance.",
+      "acceptanceCriteria": [
+        "In log/query.ts list(), add cache_read_tokens and cache_write_tokens to the select from LlmLogTokensTable join",
+        "Update ListItem interface to include cache_read_tokens: number | null, cache_write_tokens: number | null",
+        "Existing list API response shape is a superset of before (backward compatible)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Phase 1 observability. File: packages/opencode/src/log/query.ts lines 35-101"
+    },
+    {
+      "id": "US-002",
+      "title": "Log-viewer detail API: add computed diagnostic fields",
+      "description": "As a developer, I want detail API to include system_prompt_tokens, tool_count, and message_count so I can diagnose token waste per request.",
+      "acceptanceCriteria": [
+        "In log/query.ts get(), after decompressing system_prompt, compute system_prompt_tokens = Math.round(Buffer.byteLength(systemPrompt, 'utf-8') / 4)",
+        "Compute tool_count from requestRow.tools (parse JSON, count array length or object keys)",
+        "Compute message_count from decompressed messages array length",
+        "Add these three fields to the Detail interface and return object",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Phase 1 observability. File: packages/opencode/src/log/query.ts lines 104-301"
+    },
+    {
+      "id": "US-003",
+      "title": "Log-viewer stats API: add total_tokens aggregation",
+      "description": "As a developer, I want the stats API to return total_tokens so I can see overall token consumption.",
+      "acceptanceCriteria": [
+        "In log/query.ts stats(), add total_tokens to StatsSummary: total_input_tokens + total_output_tokens + total_reasoning_tokens + total_cache_read_tokens + total_cache_write_tokens",
+        "Update StatsSummary interface to include total_tokens: number",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Phase 1 observability. File: packages/opencode/src/log/query.ts lines 358-435"
+    },
+    {
+      "id": "US-004",
+      "title": "Log-viewer analyze API: add memory_model_cost and tool_count_high suggestions",
+      "description": "As a developer, I want analyze to detect when memory agents use expensive models and when tool counts are too high.",
+      "acceptanceCriteria": [
+        "In log/query.ts analyze(), after existing suggestions, add memory_model_cost check: query for agent in ('memory-extractor','memory-recall') and check if avg cost.input > 3.0 per MTok, if so add suggestion with category 'memory_model_cost'",
+        "Add tool_count_high check: query LlmLogToolCallTable grouped by llm_log_id, compute avg tool count, if > 30 add suggestion with category 'tool_count_high'",
+        "Both suggestions include description, impact, and recommended_action fields",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Phase 1 observability. File: packages/opencode/src/log/query.ts lines 473-625"
+    },
+    {
+      "id": "US-005",
+      "title": "Log-viewer analyze API: add category_no_model and prompt_prefix_unstable suggestions",
+      "description": "As a developer, I want analyze to detect when task categories lack model config and when system prompt prefix is unstable.",
+      "acceptanceCriteria": [
+        "Add category_no_model check: look for llm_log entries where variant contains a category name but the model matches the most common (primary) model, suggest configuring category-specific models",
+        "Add prompt_prefix_unstable check: if prompt_prefix_hash column exists in annotations or log metadata, check variation frequency within sessions, if > 50% changes suggest stabilizing prompt prefix",
+        "If prompt_prefix_hash data is not yet available (depends on US-008), skip this check gracefully",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Phase 1 observability. prompt_prefix_unstable may be a no-op until US-008 lands."
+    },
+    {
+      "id": "US-006",
+      "title": "Log-viewer stats: per-session cache hit rate",
+      "description": "As a developer, I want stats group_by=session to include cache_hit_rate so I can see caching effectiveness per conversation.",
+      "acceptanceCriteria": [
+        "In log/query.ts stats(), when group_by is 'session', add cache_hit_rate to each StatsGrouped entry",
+        "cache_hit_rate = coalesce(sum(cache_read_tokens), 0) / nullif(coalesce(sum(input_tokens), 0) + coalesce(sum(cache_read_tokens), 0) + coalesce(sum(cache_write_tokens), 0), 0)",
+        "Update StatsGrouped interface to include optional cache_hit_rate: number",
+        "Return 0 when denominator is 0",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Phase 1 observability. File: packages/opencode/src/log/query.ts stats() function"
+    },
+    {
+      "id": "US-007",
+      "title": "Stabilize system prompt prefix for cache hits",
+      "description": "As a developer, I want the system prompt prefix to be stable across LLM calls so Anthropic's prefix-based caching maximizes hits.",
+      "acceptanceCriteria": [
+        "In session/system.ts environment(), move the 'You are powered by the model named ...' line to the end of the <env> block, after Platform and Today's date",
+        "Add a code comment in memory/hooks/inject.ts explaining that priority 130 ensures memory is appended last in system prompt, which is critical for prefix caching stability",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Phase 1 cache optimization. Files: packages/opencode/src/session/system.ts, packages/opencode/src/memory/hooks/inject.ts"
+    },
+    {
+      "id": "US-008",
+      "title": "Record prompt_prefix_hash in log capture",
+      "description": "As a developer, I want each LLM call to record a hash of the system prompt prefix so I can detect prompt instability in log-viewer.",
+      "acceptanceCriteria": [
+        "In log/capture.ts pre-llm hook, compute prompt_prefix_hash = Bun.hash(systemPromptString.slice(0, 2000)).toString(16)",
+        "Store prompt_prefix_hash as an annotation on the llm_log entry with type 'prompt_prefix_hash' and content = the hash string",
+        "Only record when system prompt is non-empty",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Phase 1 observability. File: packages/opencode/src/log/capture.ts"
+    },
+    {
+      "id": "US-009",
+      "title": "Skip denied tools in resolveTools schema registration",
+      "description": "As a developer, I want tools that are deny-only in agent permissions to not be registered so their JSON schema doesn't waste tokens.",
+      "acceptanceCriteria": [
+        "In session/prompt.ts resolveTools(), before registering each tool, check if the agent's permission rules contain a deny rule for that tool with no 'ask' fallback",
+        "If the tool is fully denied, skip registering it (do not add to the tools object passed to the LLM)",
+        "Tools with 'ask' permission are still registered (user may approve at runtime)",
+        "The explore agent (which denies most tools via permission '*': 'deny' then allows specific ones) should only have its allowed tools registered",
+        "Verify by checking that explore agent's tool count is significantly less than sisyphus agent's tool count",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Phase 2. File: packages/opencode/src/session/prompt.ts resolveTools() around line 818"
+    },
+    {
+      "id": "US-010",
+      "title": "Add tools_include whitelist to Agent config",
+      "description": "As a developer, I want to configure an explicit tool whitelist per agent so I can precisely control which tools are registered.",
+      "acceptanceCriteria": [
+        "Add optional tools_include: string[] to Agent.Info schema",
+        "In resolveTools(), if agent.tools_include is set, only register tools whose names are in the list",
+        "Support MCP server wildcard: 'lark-mcp/*' matches all tools from the lark-mcp server",
+        "When tools_include is not set, fall back to existing behavior (register all, then US-009 deny filtering)",
+        "Add tools_include to the agent config schema in config/config.ts so users can set it via config file",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Phase 2. Files: packages/opencode/src/agent/agent.ts, packages/opencode/src/session/prompt.ts, packages/opencode/src/config/config.ts"
+    },
+    {
+      "id": "US-011",
+      "title": "Add retain field to ToolPart and prune timing adjustment",
+      "description": "As a developer, I want tool parts to carry a retain flag and prune to run before overflow checks so smart pruning can prevent expensive compaction.",
+      "acceptanceCriteria": [
+        "Add optional retain: boolean field to MessageV2.ToolPart type definition in session/message-v2.ts",
+        "Move the prune() call from prompt.ts:793 (agent stopped) to processor.ts just before the isOverflow check at line 283-288",
+        "Keep the existing prune() call at agent stopped as well (belt and suspenders)",
+        "Prune logic: when retain === false, always prune regardless of position; when retain === true, skip; when undefined, use existing position-based logic (PRUNE_PROTECT/PRUNE_MINIMUM)",
+        "Add prune log: log.info('pruned', { count, retained, saved_tokens })",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Phase 2. Core of smart prune. Files: packages/opencode/src/session/message-v2.ts, packages/opencode/src/session/compaction.ts, packages/opencode/src/session/processor.ts"
+    },
+    {
+      "id": "US-012",
+      "title": "Heuristic retain inference for unmarked tool outputs",
+      "description": "As a developer, I want a fallback heuristic that infers tool output importance when LLM doesn't mark retain, based on tool type and whether output was referenced.",
+      "acceptanceCriteria": [
+        "Create a heuristic module in session/prune-heuristic.ts (or similar)",
+        "Default tool weights: read=0.8, grep=0.5, glob=0.4, bash=0.3 (configurable via config.compaction.tool_weights)",
+        "Reference check: scan the next assistant message's text parts for substrings from the tool output (file paths, variable names — first 5 significant tokens)",
+        "If weight > 0.5 OR output was referenced, set inferred retain = true; otherwise retain = false",
+        "Only runs for parts where retain === undefined",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Phase 2. Depends on US-011 for the retain field."
+    },
+    {
+      "id": "US-013",
+      "title": "Prune hook chain for user-defined trimming",
+      "description": "As a developer, I want a prune hook so users can customize how tool outputs are trimmed, even for retained outputs.",
+      "acceptanceCriteria": [
+        "Register a new HookChain type 'prune' in session/hooks.ts (or wherever HookChain types are defined)",
+        "Before prune marks a part as compacted, execute the prune hook chain with the part as input",
+        "Hook receives: { part, retain, toolName, outputBytes } and can return: { retain: boolean, trimmedOutput?: string }",
+        "If hook returns trimmedOutput, update part.state.output with the trimmed content instead of fully compacting",
+        "Set a timeout of 100ms per hook call to prevent blocking",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Phase 2. Depends on US-011."
+    },
+    {
+      "id": "US-014",
+      "title": "Memory extraction frequency reduction and smart skip",
+      "description": "As a developer, I want memory extraction to run less often and skip trivial rounds so background LLM calls are reduced.",
+      "acceptanceCriteria": [
+        "In memory/hooks/auto-extract.ts, change DEFAULT_INTERVAL from 10 to read from config.memory.extract_interval (default 20)",
+        "Change MIN_MESSAGES from 4 to read from config.memory.extract_min_messages (default 6)",
+        "Add smart skip: count user text messages since last extraction, if < 2 skip this round",
+        "Log when skipped: log.info('extraction skipped', { reason, sessionID, userMsgCount })",
+        "Add config schema entries for extract_interval and extract_min_messages in config/config.ts",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Phase 2. Files: packages/opencode/src/memory/hooks/auto-extract.ts, packages/opencode/src/config/config.ts"
+    },
+    {
+      "id": "US-015",
+      "title": "Recovery extraction: time limit and batching",
+      "description": "As a developer, I want recovery extraction to be limited to recent sessions and process in batches to avoid startup overload.",
+      "acceptanceCriteria": [
+        "In memory/hooks/auto-extract.ts recoveryExtract(), filter sessions to only those with time_created within config.memory.recovery_max_age_days (default 7) days",
+        "Process sessions in batches of 5: extract batch, await all, then next batch",
+        "Add config.memory.recovery_max_age_days to config schema",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Phase 2. File: packages/opencode/src/memory/hooks/auto-extract.ts"
+    },
+    {
+      "id": "US-016",
+      "title": "Add prompt_level field to Agent.Info",
+      "description": "As a developer, I want a prompt_level field on agents so system prompt injection can be tiered.",
+      "acceptanceCriteria": [
+        "In agent/agent.ts, add prompt_level: 'full' | 'medium' | 'lite' to Agent.Info schema (optional, inferred from defaults)",
+        "Backward compat: if lite: true is set, treat as prompt_level: 'lite'",
+        "Default inference: mode === 'primary' → 'full'; mode === 'subagent' → 'medium'; lite: true → 'lite'",
+        "Set compaction agent to prompt_level: 'lite', title/summary agents to 'lite'",
+        "Set memory-extractor/memory-recall to 'lite' (already lite: true)",
+        "Allow user override via config.agent.<name>.prompt_level",
+        "Add prompt_level to agent config schema in config/config.ts",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Phase 3. File: packages/opencode/src/agent/agent.ts, packages/opencode/src/config/config.ts"
+    },
+    {
+      "id": "US-017",
+      "title": "Implement prompt_level system prompt construction",
+      "description": "As a developer, I want prompt.ts to use prompt_level when building the system prompt array so medium agents skip AGENTS.md.",
+      "acceptanceCriteria": [
+        "In session/prompt.ts where system prompt is built (around line 720), replace the agent.lite ternary with a switch on agent.prompt_level",
+        "full: [...SystemPrompt.environment(model), ...InstructionPrompt.system()] (current non-lite behavior)",
+        "medium: [...SystemPrompt.environment(model)] (skip InstructionPrompt.system() — no AGENTS.md)",
+        "lite: [] (current lite behavior)",
+        "Memory injection hook still runs for full and medium (not lite) — verify inject.ts hook checks prompt_level !== 'lite'",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "Phase 3. Depends on US-016. File: packages/opencode/src/session/prompt.ts"
+    },
+    {
+      "id": "US-018",
+      "title": "Memory and category model usage warnings",
+      "description": "As a developer, I want to be warned when memory agents or task categories use my expensive primary model so I can configure cheaper alternatives.",
+      "acceptanceCriteria": [
+        "In memory/engine/extractor.ts, when resolved model equals Provider.defaultModel(), emit log.warn('memory-extractor using primary model, consider config.agent.memory-extractor.model') on first call per session",
+        "In memory/engine/recall.ts, same warning for memory-recall",
+        "In tool/delegate-task.ts, when category is specified but has no model configured, emit log.warn('category X has no model, using primary. Configure via config.categories.X.model') on first use per session",
+        "Publish warnings via Bus.publish() so TUI can display them",
+        "Use a Set per session to ensure each warning type fires at most once",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "Phase 3. Files: packages/opencode/src/memory/engine/extractor.ts, recall.ts, tool/delegate-task.ts"
+    },
+    {
+      "id": "US-019",
+      "title": "Compaction input slimming: stripSynthetic option",
+      "description": "As a developer, I want compaction to skip synthetic text parts and slim pruned tool output placeholders so the compaction LLM call is cheaper.",
+      "acceptanceCriteria": [
+        "In session/message-v2.ts toModelMessages(), add stripSynthetic option (default false): when true, skip parts where part.synthetic === true",
+        "When stripSynthetic is true and a tool output is already compacted, replace '[output compacted]' with a shorter placeholder: tool name + first 200 chars of input params only",
+        "In compaction.ts process(), pass { stripMedia: true, stripSynthetic: true } to toModelMessages",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": true,
+      "notes": "Phase 3. Files: packages/opencode/src/session/message-v2.ts, packages/opencode/src/session/compaction.ts"
+    },
+    {
+      "id": "US-020",
+      "title": "TUI: display cache hit rate below Context indicator",
+      "description": "As a developer, I want to see the current session's cache hit rate in the TUI so I can verify caching effectiveness in real time.",
+      "acceptanceCriteria": [
+        "In the TUI component that displays the Context usage indicator, add a line below it showing cache hit rate (e.g. 'Cache: 67%')",
+        "Cache hit rate = cumulative cache_read_tokens / (input_tokens + cache_read_tokens + cache_write_tokens) for the current session",
+        "Data source: use the existing token tracking from assistant message tokens (no new LLM calls)",
+        "When there is no cache data (non-Anthropic provider, or first call), hide the Cache line entirely",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": true,
+      "notes": "Phase 3. TUI Context component."
+    },
+    {
+      "id": "US-021",
+      "title": "Compaction trigger_ratio configuration",
+      "description": "As a developer, I want to configure compaction trigger as a ratio of context usage so I can control when the expensive compaction fires.",
+      "acceptanceCriteria": [
+        "In compaction.ts isOverflow(), read config.compaction.buffer (default 20000) and config.compaction.trigger_ratio (optional 0.0-1.0)",
+        "If trigger_ratio is set, use threshold = context * trigger_ratio instead of context - buffer",
+        "If both trigger_ratio and buffer are set, log a config validation error and prefer trigger_ratio",
+        "Add both config entries to config/config.ts schema",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": true,
+      "notes": "Phase 4. File: packages/opencode/src/session/compaction.ts, packages/opencode/src/config/config.ts"
+    }
+  ]
+}

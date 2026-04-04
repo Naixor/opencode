@@ -1,0 +1,62 @@
+# Multi-Agent Swarm — Ralph Progress
+
+## Status: COMPLETED
+
+## Stories
+
+### Phase 1: Foundation (US-001 to US-005) ✅
+- US-001: Feature flag (OPENCODE_SWARM) and config schema — DONE
+- US-002: BoardTask schema and CRUD — DONE
+- US-003: BoardArtifact schema and CRUD — DONE
+- US-004: BoardSignal pub/sub — DONE
+- US-005: SharedBoard snapshot and index — DONE
+
+### Phase 2: Board Tools (US-006 to US-008) ✅
+- US-006: board_read tool — DONE
+- US-007: board_write tool — DONE
+- US-008: board_status tool — DONE
+
+### Phase 3: Conductor Agent (US-009 to US-011) ✅
+- US-009: Conductor agent definition (gated by Flag.OPENCODE_SWARM) — DONE
+- US-010: Conductor Soul prompt — DONE
+- US-011: Strategy layer loading (pre-llm hook) — DONE
+
+### Phase 4: Swarm Lifecycle (US-012 to US-016) ✅
+- US-012: Swarm namespace, Info schema, registry — DONE
+- US-013: Swarm.launch() — DONE
+- US-014: Swarm status/pause/resume/stop/intervene — DONE
+- US-015: delegate_task Swarm worker integration — DONE
+- US-016: Swarm monitor (event-driven Conductor wakeup) — DONE
+
+### Phase 5: Safety & Policy (US-017 to US-020) ✅
+- US-017: Scope lock (file-level lock, pre-tool hook, auto-unlock) — DONE
+- US-018: Escalation Policy engine — DONE
+- US-019: SwarmStats performance collection — DONE
+- US-020: Playbook storage and CRUD — DONE
+
+### Phase 6: User-facing Tools & API (US-021 to US-023) ✅
+- US-021: Swarm tools (launch/status/intervene/stop/list) — DONE
+- US-022: SDK REST endpoints — DONE
+- US-023: SDK SSE event stream — DONE
+
+### Phase 7: Web Dashboard (US-024 to US-030) ✅
+- US-024: Swarm overview page shell — DONE
+- US-025: Worker Agent cards — DONE
+- US-026: Task dependency graph — DONE
+- US-027: Attention queue — DONE
+- US-028: Activity feed — DONE
+- US-029: Control buttons — DONE
+- US-030: Web Sidebar Swarm section — DONE
+
+### Phase 8: TUI Integration (US-031 to US-032) ✅
+- US-031: /swarm TUI command — DONE
+- US-032: TUI Swarm status bar indicator — DONE
+
+### Phase 9: Worker Features (US-033 to US-034) ✅
+- US-033: Worker checkpoint auto-publish (post-tool hook) — DONE
+- US-034: Conductor Strategy template — DONE
+
+## Verification
+- Typecheck: PASS (tsgo --noEmit)
+- Tests: 175 files, 2659 pass, 0 fail
+- Build: PASS

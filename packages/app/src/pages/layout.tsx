@@ -77,6 +77,7 @@ import {
 import { workspaceOpenState } from "./layout/sidebar-workspace-helpers"
 import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { SidebarSwarm } from "./layout/sidebar-swarm"
 
 export default function Layout(props: ParentProps) {
   const [store, setStore, , ready] = persisted(
@@ -1933,6 +1934,7 @@ export default function Layout(props: ParentProps) {
                           </Button>
                         </TooltipKeybind>
                       </div>
+                      <SidebarSwarm />
                       <div class="flex-1 min-h-0">
                         <LocalWorkspace
                           ctx={workspaceSidebarCtx}

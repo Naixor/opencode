@@ -18,7 +18,9 @@ import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import PROMPT_MEMORY_EXTRACTOR from "./prompt/memory-extractor.txt"
 import PROMPT_MEMORY_RECALL from "./prompt/memory-recall.txt"
+import PROMPT_CONDUCTOR from "./prompt/conductor.txt"
 import { PermissionNext } from "@/permission/next"
+import { Flag } from "@/flag/flag"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
 import path from "path"
@@ -326,6 +328,40 @@ export namespace Agent {
           user,
         ),
       },
+    }
+
+    // Conductor agent — gated behind OPENCODE_SWARM flag
+    if (Flag.OPENCODE_SWARM) {
+      result.conductor = {
+        name: "conductor",
+        description:
+          "Orchestration agent for multi-agent Swarm collaboration. Decomposes goals, assigns tasks to Workers, monitors progress, and resolves conflicts.",
+        mode: "primary",
+        native: true,
+        hidden: false,
+        temperature: 0.1,
+        prompt_level: "full",
+        prompt: PROMPT_CONDUCTOR,
+        options: {},
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            board_read: "allow",
+            board_write: "allow",
+            board_status: "allow",
+            task: "allow",
+            persistent_task: "allow",
+            question: "allow",
+            read: "allow",
+            grep: "allow",
+            glob: "allow",
+            bash: "allow",
+            edit: "deny",
+            write: "deny",
+          }),
+          user,
+        ),
+      }
     }
 
     // Resolve optional (opt-in) agents — enabled via config

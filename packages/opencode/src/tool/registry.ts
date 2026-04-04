@@ -32,12 +32,7 @@ import {
   LspHoverTool,
   LspImplementationTool,
 } from "./lsp-tools"
-import {
-  LspDiagnosticsTool,
-  LspPrepareRenameTool,
-  LspRenameTool,
-  LspCallHierarchyTool,
-} from "./lsp-tools-extended"
+import { LspDiagnosticsTool, LspPrepareRenameTool, LspRenameTool, LspCallHierarchyTool } from "./lsp-tools-extended"
 import { Truncate } from "./truncation"
 
 import { ApplyPatchTool } from "./apply_patch"
@@ -52,6 +47,15 @@ import { PersistentTaskTool } from "./persistent-task-tool"
 import { MemoryRememberTool } from "../memory/tool/remember"
 import { MemoryForgetTool } from "../memory/tool/forget"
 import { MemoryListTool } from "../memory/tool/memory-list"
+import { BoardReadTool, BoardWriteTool, BoardStatusTool } from "./board"
+import {
+  SwarmLaunchTool,
+  SwarmStatusTool,
+  SwarmInterveneTool,
+  SwarmStopTool,
+  SwarmListTool,
+  SwarmDiscussTool,
+} from "./swarm"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -145,7 +149,18 @@ export namespace ToolRegistry {
       PersistentTaskTool,
       ApplyPatchTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL
-        ? [LspTool, LspGotoDefinitionTool, LspFindReferencesTool, LspSymbolsTool, LspHoverTool, LspImplementationTool, LspDiagnosticsTool, LspPrepareRenameTool, LspRenameTool, LspCallHierarchyTool]
+        ? [
+            LspTool,
+            LspGotoDefinitionTool,
+            LspFindReferencesTool,
+            LspSymbolsTool,
+            LspHoverTool,
+            LspImplementationTool,
+            LspDiagnosticsTool,
+            LspPrepareRenameTool,
+            LspRenameTool,
+            LspCallHierarchyTool,
+          ]
         : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_AST_GREP ? [AstGrepSearchTool, AstGrepReplaceTool] : []),
@@ -155,6 +170,19 @@ export namespace ToolRegistry {
       MemoryRememberTool,
       MemoryForgetTool,
       MemoryListTool,
+      ...(Flag.OPENCODE_SWARM
+        ? [
+            BoardReadTool,
+            BoardWriteTool,
+            BoardStatusTool,
+            SwarmLaunchTool,
+            SwarmStatusTool,
+            SwarmInterveneTool,
+            SwarmStopTool,
+            SwarmListTool,
+            SwarmDiscussTool,
+          ]
+        : []),
       ...custom,
     ]
   }

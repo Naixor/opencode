@@ -23,6 +23,7 @@ import { Plugin } from "@/plugin"
 import { HookChain } from "@/session/hooks"
 import { SystemPrompt } from "./system"
 import { Flag } from "@/flag/flag"
+import { SessionMetadata } from "./session-metadata"
 import { PermissionNext } from "@/permission/next"
 import { Auth } from "@/auth"
 import { SecurityConfig } from "@/security/config"
@@ -117,6 +118,7 @@ export namespace LLM {
       variant: input.user.variant,
       messages: input.messages,
       providerOptions: options,
+      metadata: SessionMetadata.get(input.sessionID),
     }
     await HookChain.executePreLLM(
       "experimental.chat.system.transform",
@@ -351,7 +353,7 @@ export namespace LLM {
       model: input.model.id,
       messages: input.messages,
       providerOptions: options,
-      metadata: {},
+      metadata: SessionMetadata.get(input.sessionID) ?? {},
     }
     await HookChain.executePreLLM(
       "experimental.chat.system.transform",

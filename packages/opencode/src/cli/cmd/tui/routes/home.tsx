@@ -1,5 +1,5 @@
 import { Prompt, type PromptRef } from "@tui/component/prompt"
-import { createMemo, Match, onMount, Show, Switch } from "solid-js"
+import { createMemo, createResource, Match, onMount, Show, Switch } from "solid-js"
 import { useTheme } from "@tui/context/theme"
 import { useKeybind } from "@tui/context/keybind"
 import { Logo } from "../component/logo"
@@ -14,6 +14,8 @@ import { usePromptRef } from "../context/prompt"
 import { Installation } from "@/installation"
 import { useKV } from "../context/kv"
 import { useCommandDialog } from "../component/dialog-command"
+import { Flag } from "@/flag/flag"
+import { useSDK } from "@tui/context/sdk"
 
 // TODO: what is the best way to do this?
 let once = false
@@ -32,6 +34,24 @@ export function Home() {
 
   const connectedMcpCount = createMemo(() => {
     return Object.values(sync.data.mcp).filter((x) => x.status === "connected").length
+  })
+
+  const sdk = useSDK()
+  const [swarms] = createResource(
+    () => Flag.OPENCODE_SWARM,
+    async (enabled) => {
+      if (!enabled) return []
+      const base = sdk.fetch ?? globalThis.fetch
+      return base(`${sdk.url}/swarm`)
+        .then((r) => r.json())
+        .catch(() => [])
+    },
+  )
+  const activeWorkers = createMemo(() => {
+    const list = swarms() ?? []
+    return list
+      .filter((s: any) => s.status === "running")
+      .reduce((sum: number, s: any) => sum + (s.workers?.filter((w: any) => w.status === "active").length ?? 0), 0)
   })
 
   const isFirstTimeUser = createMemo(() => sync.data.session.length === 0)
@@ -133,6 +153,12 @@ export function Home() {
               {connectedMcpCount()} MCP
             </text>
             <text fg={theme.textMuted}>/status</text>
+          </Show>
+          <Show when={Flag.OPENCODE_SWARM && activeWorkers() > 0}>
+            <text fg={theme.text}>
+              <span style={{ fg: theme.success }}>🐝 </span>
+              Swarm: {activeWorkers()} workers active
+            </text>
           </Show>
         </box>
         <box flexGrow={1} />

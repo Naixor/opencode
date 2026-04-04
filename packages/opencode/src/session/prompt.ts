@@ -51,6 +51,7 @@ import { SecurityAudit } from "@/security/audit"
 import { LLMScanner } from "@/security/llm-scanner"
 import { SecurityRedact } from "@/security/redact"
 import { HookChain } from "@/session/hooks"
+import { SessionMetadata } from "./session-metadata"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -917,7 +918,7 @@ export namespace SessionPrompt {
               toolName: item.id,
               args: preToolPluginOutput.args as Record<string, unknown>,
               agent: input.agent.name,
-              metadata: { callID: ctx.callID },
+              metadata: { callID: ctx.callID, ...SessionMetadata.get(ctx.sessionID) },
             },
           )
           const result = await item.execute(preToolPluginOutput.args as any, ctx)
@@ -948,7 +949,7 @@ export namespace SessionPrompt {
                 metadata: output.metadata,
               },
               agent: input.agent.name,
-              metadata: { callID: ctx.callID },
+              metadata: { callID: ctx.callID, ...SessionMetadata.get(ctx.sessionID) },
             },
           )
           return output
@@ -1003,7 +1004,7 @@ export namespace SessionPrompt {
             toolName: key,
             args: mcpPreToolPluginOutput.args as Record<string, unknown>,
             agent: input.agent.name,
-            metadata: { callID: opts.toolCallId },
+            metadata: { callID: opts.toolCallId, ...SessionMetadata.get(ctx.sessionID) },
           },
         )
 
@@ -1123,7 +1124,7 @@ export namespace SessionPrompt {
               metadata: mcpOutput.metadata,
             },
             agent: input.agent.name,
-            metadata: { callID: opts.toolCallId },
+            metadata: { callID: opts.toolCallId, ...SessionMetadata.get(ctx.sessionID) },
           },
         )
 

@@ -17,6 +17,7 @@ import { Categories } from "../agent/background/categories"
 import { BackgroundManager } from "../agent/background/manager"
 import { Skill } from "../skill/skill"
 import { Log } from "../util/log"
+import { SessionMetadata } from "../session/session-metadata"
 
 const log = Log.create({ service: "delegate-task" })
 
@@ -36,6 +37,13 @@ const delegateParameters = z.object({
   subagent_type: z.string().optional().describe("The type of specialized agent to use. Cannot be used with category"),
   session_id: z.string().optional().describe("Existing session ID to continue"),
   load_skills: z.array(z.string()).optional().describe("Skill names to inject into sub-agent context"),
+  swarm_id: z
+    .string()
+    .optional()
+    .describe("Swarm ID — when set from a Conductor, creates independent Primary Session workers"),
+  task_id: z.string().optional().describe("Board task ID to associate with this worker"),
+  discussion_channel: z.string().optional().describe("Discussion channel name for discussion-mode workers"),
+  role_name: z.string().optional().describe("Role name for discussion mode (e.g., PM, RD, QA)"),
 })
 
 type DelegateMetadata = {
@@ -88,8 +96,11 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
 
       const config = await Config.get()
 
+      // For Swarm workers, allow conductor to specify agent; default to sisyphus
+      const isSwarm = !!params.swarm_id && caller?.name === "conductor"
+
       // Resolve agent
-      const agentName = params.subagent_type ?? "explore"
+      const agentName = isSwarm ? (params.subagent_type ?? "sisyphus") : (params.subagent_type ?? "explore")
       const agent = await Agent.get(agentName)
       if (!agent) {
         return {
@@ -156,6 +167,30 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
           if (found) return found
         }
 
+        // Swarm workers: independent Primary Session (no parentID), with board access but no swarm nesting
+        if (isSwarm) {
+          return await Session.create({
+            title: params.description + ` (Swarm worker @${agent.name})`,
+            permission: [
+              {
+                permission: "board_read" as const,
+                pattern: "*" as const,
+                action: "allow" as const,
+              },
+              {
+                permission: "board_write" as const,
+                pattern: "*" as const,
+                action: "allow" as const,
+              },
+              {
+                permission: "swarm_launch" as const,
+                pattern: "*" as const,
+                action: "deny" as const,
+              },
+            ],
+          })
+        }
+
         return await Session.create({
           parentID: ctx.sessionID,
           title: params.description + ` (@${agent.name} delegate)`,
@@ -193,6 +228,40 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
           ],
         })
       })
+
+      // Set session metadata for swarm workers (used by hooks)
+      if (isSwarm && params.swarm_id) {
+        SessionMetadata.set(session.id, "swarm_id", params.swarm_id)
+        if (params.task_id) SessionMetadata.set(session.id, "task_id", params.task_id)
+        if (params.discussion_channel) SessionMetadata.set(session.id, "discussion_channel", params.discussion_channel)
+      }
+
+      // Register worker in Swarm if applicable
+      if (isSwarm && params.swarm_id) {
+        import("../session/swarm")
+          .then(({ Swarm }) =>
+            Swarm.load(params.swarm_id!).then(async (info) => {
+              if (!info) return
+              info.workers.push({
+                session_id: session.id,
+                agent: agent.name,
+                task_id: params.task_id ?? "",
+                status: "active",
+              })
+              info.status = "running"
+              info.time.updated = Date.now()
+              await Swarm.save(info)
+            }),
+          )
+          .catch((e) => log.warn("failed to register swarm worker", { error: e }))
+
+        // Register participant in Discussion tracker
+        if (params.discussion_channel && params.role_name) {
+          import("../board/discussion")
+            .then(({ Discussion }) => Discussion.join(params.swarm_id!, params.discussion_channel!, params.role_name!))
+            .catch((e) => log.warn("failed to join discussion", { error: e }))
+        }
+      }
 
       const msg = await MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID })
       if (msg.info.role !== "assistant") throw new Error("Not an assistant message")
