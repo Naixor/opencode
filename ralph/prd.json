@@ -1,197 +1,206 @@
 {
   "project": "OpenCode",
-  "branchName": "ralph/swarm-discussion",
-  "description": "Swarm Discussion Mode — structured multi-role debate with code-enforced round protocol, session reuse, consensus voting, and human-readable discussion tracking UI.",
+  "branchName": "ralph/session-rotation",
+  "description": "Session Rotation for Swarm — on second compaction or task boundary, rotate to a fresh session with structured checkpoint + board + memory bootstrap instead of degraded re-summarization.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Discussion.Round schema adds max_rounds + internal lock refactor",
-      "description": "As a developer, I need the Discussion tracker to store max_rounds and use atomic write locks to prevent race conditions.",
+      "title": "Add rotation config group to config schema",
+      "description": "As a developer, I need a rotation config section so that all rotation behavior can be toggled and tuned.",
       "acceptanceCriteria": [
-        "In src/board/discussion.ts, add max_rounds: z.number() to the Round schema",
-        "Change Discussion.start() signature to start(swarm, channel, workers, max_rounds) and store max_rounds in the Round object",
-        "Refactor load/save into internal loadRaw/saveRaw functions that do NOT acquire locks",
-        "Change record() to use a single write lock for the entire load-modify-save cycle: using _ = await Lock.write(key(swarm, channel)), then loadRaw, modify, saveRaw",
-        "Change join(), advance(), and any other mutating functions to also use write lock wrapping loadRaw/saveRaw",
-        "Existing read-only functions (status, tally) keep read locks unchanged",
+        "In src/config/config.ts, add a `rotation` group to the config schema with fields: enabled (boolean, default true), checkpoint_llm (boolean, default true), max_bootstrap_tokens (number, default 6000), conductor_defer (boolean, default true)",
+        "When rotation.enabled is false, the system falls back to compaction-only behavior (consumed by later stories)",
+        "Config supports project-level and global-level override (same as existing config groups)",
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "Two changes in one story because they both touch the same internal lock structure. loadRaw/saveRaw are private helpers; public API unchanged except start() gains max_rounds param."
+      "passes": false,
+      "notes": "Small config-only change. No runtime logic yet — just schema definition. Later stories read these values."
     },
     {
       "id": "US-002",
-      "title": "Discussion.join() — dynamic participant registration",
-      "description": "As a developer, I need a function to register a Worker's role_name into Discussion.expected[] after the discussion has started.",
+      "title": "Session.archive() function",
+      "description": "As a developer, I need to archive a session so that rotation can cleanly end old sessions while preserving them.",
       "acceptanceCriteria": [
-        "Add async function join(swarm: string, channel: string, role: string): Promise<Round> to Discussion namespace in src/board/discussion.ts",
-        "join() acquires write lock, calls loadRaw, adds role to expected[] if not already present, calls saveRaw, returns updated Round",
-        "If no discussion exists for the channel, throw an error with message including channel name",
-        "Duplicate role names are silently ignored (idempotent)",
+        "In src/session/index.ts, add an archive(sessionID) function to the Session namespace",
+        "archive() sets session.time.archived = Date.now() and persists to DB. Session schema already has time.archived as optional number",
+        "Define and publish a session.archived Bus event (add to Session.Event)",
+        "Archived sessions are still readable via Session.get() — no data is deleted",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "This fixes the critical bug where expected[] is always empty. Called from delegate_task when discussion_channel is present."
+      "passes": false,
+      "notes": "time.archived field already exists in the schema. This story only adds the archive() function and event."
     },
     {
       "id": "US-003",
-      "title": "delegate_task passes role_name and calls Discussion.join()",
-      "description": "As a developer, I need delegate_task to accept a role_name parameter and register the Worker in the Discussion tracker.",
+      "title": "Block prompt injection into archived sessions",
+      "description": "As a developer, I need SessionPrompt.prompt() to skip archived sessions so that no new messages enter a rotated-away session.",
       "acceptanceCriteria": [
-        "Add role_name: z.string().optional() to the delegateParameters schema in src/tool/delegate-task.ts, with description 'Role name for discussion mode (e.g., PM, RD, QA)'",
-        "In the Swarm worker registration block (after info.workers.push and Swarm.save), add: if discussion_channel AND role_name are both set, import Discussion and call Discussion.join(swarm_id, discussion_channel, role_name)",
-        "The join call is fire-and-forget with .catch(e => log.warn('discussion join failed', { error: e }))",
+        "In src/session/prompt.ts, at the start of the prompt() function, fetch the session and check session.time.archived. If set, log a warning and return early without injecting any message",
+        "Existing callers (monitor relay, delegate_task, intervene) are unaffected when session is not archived",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "role_name is the Discussion system's unique key. Conductor passes it when creating each Worker."
+      "passes": false,
+      "notes": "Depends on US-002 (archive function). Simple guard clause addition."
     },
     {
       "id": "US-004",
-      "title": "Swarm.discuss() uses { name, perspective } roles schema",
-      "description": "As a developer, I need Swarm.discuss() to accept roles with name and perspective fields, and pass max_rounds to Discussion.start().",
+      "title": "Swarm.replaceWorkerSession() function",
+      "description": "As a developer, I need to atomically replace a worker or conductor session reference in Swarm.Info when rotation occurs.",
       "acceptanceCriteria": [
-        "Change Swarm.discuss() input.roles type from Array<{ agent: string; perspective: string }> to Array<{ name: string; perspective: string }>",
-        "Update the goal message construction: list roles as '{i}. Role: \"{name}\" — Perspective: {perspective}'",
-        "Include explicit instructions in the goal for Conductor: 'When calling delegate_task for each role, set role_name=\"{name}\" and discussion_channel=\"{channel}\". All Workers use the default sisyphus agent.'",
-        "Change Discussion.start() call from start(id, channel, []) to start(id, channel, [], max_rounds) where max_rounds is input.max_rounds ?? 3",
-        "Update SwarmDiscussTool in src/tool/swarm.ts parameters to match: roles as z.array(z.object({ name: z.string(), perspective: z.string() }))",
+        "In src/session/swarm.ts, add replaceWorkerSession(swarmID, oldSessionID, newSessionID) to the Swarm namespace",
+        "Function loads Swarm.Info, finds the worker entry where session_id === oldSessionID and replaces it with newSessionID",
+        "If oldSessionID === Swarm.Info.conductor, update Swarm.Info.conductor to newSessionID instead",
+        "Copy SessionMetadata from old session to new session for keys: swarm_id, task_id, discussion_channel",
+        "Update Swarm.Info.time.updated and call Swarm.save()",
+        "Publish Swarm.Event.Updated event",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Removes the agent field from roles. Every Worker is sisyphus; the only difference is the perspective prompt and role_name."
+      "passes": false,
+      "notes": "Signal watch routes by swarm_id not session_id, so monitor continues working without changes."
     },
     {
       "id": "US-005",
-      "title": "Monitor round complete message includes structured round info",
-      "description": "As a developer, I need the Monitor's round complete message to include round/max_rounds/is_final so Conductor has deterministic information.",
+      "title": "Checkpoint template generation (no LLM)",
+      "description": "As a developer, I need the template-based part of checkpoint generation that extracts goal, task, progress, and files from Board state without any LLM call.",
       "acceptanceCriteria": [
-        "In src/session/swarm.ts monitor(), when roundState.complete is true, include roundState.max_rounds in the formatted message",
-        "Format: '[Discussion Round {round} Complete — round {round}/{max_rounds}{, FINAL if round >= max_rounds}]'",
-        "After the opinions list, append actionable guidance: if not final → 'Next action: call board_write advance_round, then prompt each role for round {round+1}.', if final → 'All rounds exhausted. Make final decision and post decision artifact.'",
-        "For consensus signals in the final round, also include tally results in the message",
+        "Create src/board/checkpoint.ts with a Checkpoint namespace",
+        "Define Checkpoint schema with zod: goal (string), task (string, task ID + subject), progress (array of { item: string, done: boolean }), decisions (array of string, default []), state (string, default empty), files (array of string), session_chain (array of string)",
+        "Implement generate(input: { sessionID, swarmID, taskID? }) that returns a Checkpoint content string in markdown format",
+        "Template fills goal from Swarm.Info.goal, task from current BoardTask (by taskID or first in_progress task), progress from BoardTask.list() mapping status to done/not-done, files from BoardArtifact.list() aggregating all artifact.files arrays",
+        "session_chain is built from SessionMetadata: walk prev_session chain backwards collecting IDs",
+        "If checkpoint_llm config is false, decisions and state remain empty (template-only mode)",
+        "Generated content is written as a Board artifact with type 'checkpoint' via BoardArtifact.post()",
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "This removes the need for Conductor to remember which round it's on. The Monitor tells it explicitly."
+      "passes": false,
+      "notes": "This is the zero-LLM-cost part. The LLM extraction for decisions/state is added in the next story."
     },
     {
       "id": "US-006",
-      "title": "board_write advance_round and board_read discussion operations",
-      "description": "As a developer, I need Conductor to advance rounds and read discussion state through board tools.",
+      "title": "Checkpoint LLM extraction for decisions and state",
+      "description": "As a developer, I need the LLM part of checkpoint generation that extracts key decisions and current working state from session history.",
       "acceptanceCriteria": [
-        "In src/tool/board.ts, import Discussion from '../board/discussion'",
-        "Update BoardWriteTool operation enum to: z.enum(['create_task', 'update_task', 'post_artifact', 'signal', 'advance_round'])",
-        "Add advance_round handler: extract channel from params.data.channel, call Discussion.advance(swarm_id, channel), return Round as JSON with title 'Advanced to round {N}'",
-        "Update BoardReadTool operation enum to: z.enum(['tasks', 'artifacts', 'signals', 'snapshot', 'discussion'])",
-        "Add discussion handler: extract channel from params.filter.channel, call BoardSignal.thread(swarm_id, channel) and Discussion.status(swarm_id, channel) in parallel, return { round, thread } as JSON",
+        "In src/board/checkpoint.ts, extend generate() to optionally run an LLM extraction step when config rotation.checkpoint_llm is true",
+        "LLM extraction reuses Compaction's message preparation: call MessageV2.toModelMessages(messages, model, { stripMedia: true, stripSynthetic: true }) to get the input",
+        "Use the existing compaction agent (Agent.get('compaction')) with a custom prompt that asks to extract: (1) key decisions made and their rationale, (2) current working state description",
+        "Parse the LLM response and fill the decisions[] and state fields in the checkpoint",
+        "If LLM extraction fails (timeout, error, etc.), gracefully degrade: keep decisions=[] and state='' from the template step, log a warning",
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Two operations in one story because they share the Discussion import and are both small additions to existing tool handlers."
+      "passes": false,
+      "notes": "Depends on US-005. Adds the LLM layer on top of template generation. Failure is non-fatal."
     },
     {
       "id": "US-007",
-      "title": "Rewrite conductor-discussion.txt with session reuse protocol",
-      "description": "As a developer, I need the Conductor discussion prompt to teach the precise multi-round protocol using session_id reuse, run_in_background, role_name, and Monitor-driven advancement.",
+      "title": "Conductor checkpoint coordination extension",
+      "description": "As a developer, I need Conductor checkpoints to include worker assignments, escalations, and progress stats.",
       "acceptanceCriteria": [
-        "Rewrite src/agent/prompt/conductor-discussion.txt",
-        "Round 1 section: (1) create discuss task with channel, (2) for each role call delegate_task with role_name=<name>, discussion_channel=<channel>, run_in_background=true, prompt includes: 'Your role name is <name>. Your perspective: <perspective>. Read channel <channel> via board_read. Then post a proposal signal via board_write. The signal from field MUST be <name>, payload must contain { round: 1, summary: your proposal }.', (3) record each returned session_id, (4) STOP AND WAIT for system message '[Discussion Round 1 Complete]'",
-        "Round 2+ section: (1) on receiving Round Complete message, call board_write advance_round with channel, (2) for each role call delegate_task with session_id=<saved>, run_in_background=true, prompt references specific points from round summary, instructs to post opinion/objection signal with correct from and round, (3) WAIT for Round Complete",
-        "Final round section: (1) on receiving 'FINAL ROUND NEXT', advance round, (2) prompt each role to post consensus signal with { position: agree/disagree/modify, summary: reasoning }, (3) wait for Complete + tally, (4) unanimous → decision artifact + complete, (5) not unanimous → Conductor decides, documenting dissent",
-        "Prompt under 1200 tokens",
+        "In src/board/checkpoint.ts generate(), detect if session is Conductor by checking Swarm.Info.conductor === sessionID",
+        "When Conductor, append a <coordination> block to checkpoint content with: worker list and their task assignments (from Swarm.Info.workers), unresolved escalations (Board signals with type blocked/conflict that have no subsequent done/completed signal for the same task), overall progress (Board stats completed/total)",
+        "The <coordination> block is appended after the main checkpoint markdown, before artifact write",
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "The key behavioral guarantees: (a) Workers always use role_name in from field, (b) Conductor WAITS for Monitor, never advances on its own, (c) session_id reuse for continuity."
+      "passes": false,
+      "notes": "Depends on US-005. Conductor-specific data is only relevant when the session being rotated is the Conductor."
     },
     {
       "id": "US-008",
-      "title": "User entry points: REST route and TUI command for discuss",
-      "description": "As a developer, I want HTTP and TUI entry points for launching discussions.",
+      "title": "Bootstrap prompt generation",
+      "description": "As a developer, I need a function that assembles a concise bootstrap prompt from checkpoint, board state, and memories for a newly rotated session.",
       "acceptanceCriteria": [
-        "Add POST /swarm/discuss route to src/server/routes/swarm.ts BEFORE the GET /:id route",
-        "Body schema: { topic: z.string(), roles: z.array(z.object({ name: z.string(), perspective: z.string() })), max_rounds: z.number().optional(), config: SwarmConfig.optional() }",
-        "Handler calls Swarm.discuss(body) and returns Swarm.Info",
-        "Use describeRoute with operationId 'swarm.discuss'",
-        "Update src/command/template/swarm.txt: add 'discuss' subcommand that uses swarm_discuss tool with topic text, defaults to roles [{ name: 'PM', perspective: 'Focus on user value, scope control, and product-market fit' }, { name: 'RD', perspective: 'Focus on implementation feasibility, performance, and technical debt' }, { name: 'QA', perspective: 'Focus on edge cases, error handling, testing strategy, and security' }]",
+        "In src/session/rotation.ts, create a SessionRotation namespace and implement bootstrap(input: { checkpoint: string, swarmID: string, taskID?: string }) function",
+        "Bootstrap prompt assembles three XML blocks: <checkpoint> with the checkpoint content, <board_state> with Board snapshot summary (task stats, current task details, last 5 signals), <memories> with relevant memory entries recalled using keywords from checkpoint goal + task subject",
+        "Total prompt size is capped at max_bootstrap_tokens config value (default 6000) by truncating each block proportionally if over budget. Use Token.estimate() for measurement",
+        "Returns the assembled prompt string",
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "POST /swarm/discuss must be before /:id to avoid Hono treating 'discuss' as an id parameter."
+      "passes": false,
+      "notes": "Does not inject the prompt — that is done by the rotate() function in a later story."
     },
     {
       "id": "US-009",
-      "title": "GET /swarm/:id/discussion REST endpoint",
-      "description": "As a developer, I want a REST endpoint that returns a structured, human-readable discussion summary so the Web UI and intervene workflows have context.",
+      "title": "SessionRotation.rotate() core flow",
+      "description": "As a developer, I need the core rotation function that orchestrates the full sequence: memory extraction, checkpoint, archive, create, bootstrap, replace.",
       "acceptanceCriteria": [
-        "Add GET /swarm/:id/discussion route to src/server/routes/swarm.ts",
-        "Find the discuss task for this swarm: BoardTask.list(id).then(tasks => tasks.find(t => t.type === 'discuss')). If none found, return { topic: null }",
-        "Extract channel from the discuss task metadata (task.metadata.channel or task.scope[0] — use whatever Conductor stores when creating the discuss task)",
-        "Call Discussion.status(id, channel) for round info and BoardSignal.thread(id, channel) for the thread",
-        "Build response: { topic: task.subject, channel, round: { current: round.round, max: round.max_rounds, complete: round.complete }, participants: round.expected.map(name => ({ name, spoken: round.received.includes(name) })), thread: signals.map(s => ({ round: s.payload.round, from: s.from, type: s.type, summary: s.payload.summary })), decision: find last artifact of type 'decision' for this swarm and return its content, or null }",
+        "In src/session/rotation.ts, implement rotate(input: { sessionID, swarmID, trigger: 'overflow' | 'boundary' | 'manual' }) returning the new Session.Info",
+        "Execute steps in strict order: (1) run memory extraction via existing MemoryExtractor hooks (publish session.compacting event), (2) generate checkpoint via Checkpoint.generate(), (3) archive old session via Session.archive(), (4) create new session with same permission config copied from old session, (5) set SessionMetadata on new session: prev_session, rotation_seq (old seq + 1, default 0), plus copy swarm_id/task_id/discussion_channel from old session, (6) generate and inject bootstrap prompt via SessionPrompt.prompt() with the appropriate agent, (7) call Swarm.replaceWorkerSession()",
+        "Publish Bus events: session.rotation.started at step 1 and session.rotation.completed after step 7",
+        "If any step fails, log the error and return undefined to signal failure to caller",
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "This endpoint powers the Discussion Thread UI component and gives users context when they want to intervene."
+      "passes": false,
+      "notes": "Depends on US-002 (archive), US-004 (replace), US-005 (checkpoint), US-008 (bootstrap). This is the orchestrator."
     },
     {
       "id": "US-010",
-      "title": "Web Dashboard — Discussion Thread panel",
-      "description": "As a user, I want a dedicated discussion thread view on the Swarm Dashboard when the Swarm is in discussion mode.",
+      "title": "shouldRotate() with Worker and Conductor logic",
+      "description": "As a developer, I need a single function that decides whether a session should rotate, with different rules for Worker and Conductor roles.",
       "acceptanceCriteria": [
-        "Create packages/app/src/pages/swarm/discussion-thread.tsx component",
-        "Fetch discussion data from GET /swarm/:id/discussion on mount, refetch on SSE events",
-        "Display header: topic text, round progress 'Round {current}/{max}', participant status chips (name + ✓ if spoken, ⏳ if not)",
-        "Display thread grouped by round: each round has a heading 'Round {N}: {Proposals|Responses|Consensus}', under which each signal shows as a card with role name badge (colored by type: proposal=blue, opinion=gray, objection=orange, consensus=green), signal type label, and full summary text",
-        "For participants who have not spoken in the current round, show a placeholder card with ⏳ and role name",
-        "At the bottom, if decision is not null, show a highlighted decision card with ✅ icon, decision text, and tally (agree/disagree/modify counts)",
+        "In src/session/rotation.ts, implement shouldRotate(input: { sessionID }) returning Promise<boolean>",
+        "Return false immediately if rotation.enabled config is false",
+        "Return false if session has no swarm_id in SessionMetadata (not a Swarm session)",
+        "Count summary messages: scan session message history for assistant messages with summary === true",
+        "If summary count is 0 (never compacted), return false",
+        "For Worker sessions (not Conductor): return true when summary count >= 1",
+        "For Conductor sessions (Swarm.Info.conductor === sessionID): if conductor_defer config is true AND Board snapshot stats.running > 0 AND summary count < 2, return false (defer); otherwise return true",
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "Replaces the generic ActivityFeed + TaskGraph layout when the Swarm has a discuss task. The ActivityFeed still shows non-discussion events below."
+      "passes": false,
+      "notes": "This is the decision function. Calling it has no side effects. Board snapshot read is cached (5s TTL)."
     },
     {
       "id": "US-011",
-      "title": "Swarm Dashboard integrates Discussion Thread panel",
-      "description": "As a user, I want the Swarm Dashboard to show the Discussion Thread panel when the Swarm contains a discuss task.",
+      "title": "Overflow trigger — integrate shouldRotate into prompt.ts",
+      "description": "As a developer, I need the session loop to check shouldRotate when overflow is detected and route to rotation instead of compaction.",
       "acceptanceCriteria": [
-        "In packages/app/src/pages/swarm/swarm-dashboard.tsx, detect discussion mode: check if swarm data has any task with type 'discuss' (fetch tasks from /swarm/:id or include in swarm response)",
-        "When discussion mode is detected: replace the main content grid (TaskGraph + AttentionQueue + ActivityFeed) with the DiscussionThread component as the primary panel",
-        "Keep the Worker cards row above the Discussion Thread (Workers still show their status)",
-        "Keep Pause/Resume/Stop controls and message input (intervene) in the header — intervene lets users influence the Conductor during discussion",
-        "When NOT in discussion mode: keep existing layout unchanged (TaskGraph + ActivityFeed)",
+        "In src/session/prompt.ts, in the session loop where isOverflow is checked and compaction is triggered, add a shouldRotate check before creating the compaction task",
+        "When isOverflow is true AND shouldRotate returns true: call SessionRotation.rotate({ sessionID, swarmID from metadata, trigger: 'overflow' }). If rotate succeeds (returns Session.Info), break the session loop. If rotate fails (returns undefined), fall through to normal compaction",
+        "When isOverflow is true AND shouldRotate returns false: proceed with existing compaction logic unchanged",
+        "Non-Swarm sessions are unaffected because shouldRotate returns false for them",
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": true,
-      "notes": "Conditional rendering based on task type. The Discussion Thread component handles its own data fetching and SSE updates."
+      "passes": false,
+      "notes": "Depends on US-009 (rotate) and US-010 (shouldRotate). This is the main integration point."
     },
     {
       "id": "US-012",
-      "title": "ActivityFeed discussion signal formatting",
-      "description": "As a user, I want the ActivityFeed to format discussion signals with role labels and colors when they appear alongside other events.",
+      "title": "Boundary trigger — rotate on task completion",
+      "description": "As a developer, I need Worker sessions to set a rotation flag when their assigned task completes, so the processor exits cleanly and rotation runs.",
       "acceptanceCriteria": [
-        "In packages/app/src/pages/swarm/activity-feed.tsx, in the onmessage handler, detect discussion signal types: proposal, opinion, objection, consensus",
-        "For discussion signals, format as: 'R{round}: [{from}] {type}: {summary}'",
-        "Color code: proposal → text-blue-400, opinion → text-gray-300, objection → text-orange-400, consensus → text-green-400",
-        "For consensus signals, append position: '(agree)', '(disagree)', or '(modify)'",
-        "Non-discussion signals keep existing formatting unchanged",
+        "In the board_write tool handler, after a task status is updated to completed/failed/cancelled: check if session has swarm_id and task_id in SessionMetadata",
+        "When conditions are met, set a needsRotation flag on the processor context (similar to existing needsCompaction mechanism)",
+        "In src/session/processor.ts, handle the needsRotation flag: when set at finish-step, return 'rotate' as the process result (new enum value alongside 'continue', 'stop', 'compact')",
+        "In src/session/prompt.ts, handle the 'rotate' result from processor: call SessionRotation.rotate({ trigger: 'boundary' }) and break the loop. If rotation fails, log warning and continue (session can still be reused)",
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": true,
-      "notes": "Even with the Discussion Thread panel, ActivityFeed may still show discussion signals in non-discussion layouts or when scrolling past."
+      "passes": false,
+      "notes": "Depends on US-009 (rotate). The needsRotation flag ensures the current step completes before rotation runs."
+    },
+    {
+      "id": "US-013",
+      "title": "Rotation Bus events and structured logging",
+      "description": "As a developer, I need rotation events and logging for observability and debugging.",
+      "acceptanceCriteria": [
+        "In src/session/rotation.ts, define Bus events: session.rotation.started (payload: sessionID, swarmID, trigger, rotation_seq) and session.rotation.completed (payload: oldSessionID, newSessionID, checkpointArtifactID, bootstrap_tokens)",
+        "Add structured logging using Log.create({ service: 'session.rotation' }) for each rotation step: memory extraction, checkpoint generation (with duration), archive, session creation, bootstrap injection (with token count), reference replacement",
+        "On rotation failure, log the error at error level with step name and session context",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Events are published by rotate() in US-009. This story defines the event schemas and ensures logging is in place."
     }
   ]
 }

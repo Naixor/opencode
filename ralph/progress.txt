@@ -1,50 +1,12 @@
-# Swarm Discussion Mode v2 — Ralph Progress
+# Session Rotation for Swarm — Ralph Progress
 
-## Status: COMPLETE
+## Status: NOT STARTED
 
 ## Context
 
-v1 implemented basic infrastructure (schemas, Discussion module, hooks, monitor).
-v2 fixes critical gaps: Discussion.join(), advance_round/discussion board operations,
-Conductor prompt rewrite for session reuse protocol, user-facing entry points.
-v3 adds lock refactoring, role_name parameter, {name,perspective} schema, max_rounds,
-structured monitor messages, REST discussion endpoint, Discussion Thread UI panel.
+Replace degraded double-compaction with session rotation: on second overflow or task
+boundary, generate structured checkpoint → archive old session → create fresh session
+→ bootstrap with checkpoint + board state + memory recall.
 
 ## Stories
 
-- US-001: Discussion.Round schema adds max_rounds + internal lock refactor ✅
-  - Added max_rounds to Round schema with z.number().default(3)
-  - Refactored load/save into loadRaw/saveRaw (no locks)
-  - All mutating functions (join, record, advance, start) use write lock wrapping loadRaw/saveRaw
-  - Read-only functions (status, tally) keep read locks
-- US-002: Discussion.join() — dynamic participant registration ✅
-- US-003: delegate_task passes role_name and calls Discussion.join() ✅
-  - Added role_name parameter to delegateParameters schema
-  - join() call uses role_name (not agent.name) when both discussion_channel and role_name are set
-- US-004: Swarm.discuss() uses { name, perspective } roles schema ✅
-  - Changed roles from {agent, perspective} to {name, perspective} across swarm.ts, tool/swarm.ts, server/routes/swarm.ts, command/template/swarm.txt
-  - Discussion.start() now passes max_rounds
-- US-005: Monitor round complete message includes structured round info ✅
-  - Format: [Discussion Round {round} Complete — round {round}/{max}{, FINAL}]
-  - Includes actionable guidance (next action or final decision)
-  - Final round includes tally results
-- US-006: advance_round board_write + discussion board_read ✅
-- US-007: Conductor prompt rewrite with session reuse protocol ✅
-- US-008: POST /swarm/discuss + TUI discuss subcommand ✅
-- US-009: GET /swarm/:id/discussion REST endpoint ✅
-  - Returns topic, channel, round info, participants with spoken status, thread, decision
-- US-010: Discussion Thread panel (discussion-thread.tsx) ✅
-  - Created packages/app/src/pages/swarm/discussion-thread.tsx
-  - Fetches from /discussion endpoint, refetches on SSE events
-  - Grouped by round, color-coded signal cards, participant chips, decision card
-- US-011: Swarm Dashboard integrates Discussion Thread ✅
-  - Discussion mode detection via /discussion endpoint
-  - Conditional rendering: DiscussionThread replaces TaskGraph+AttentionQueue+ActivityFeed
-  - Workers and controls preserved above
-- US-012: ActivityFeed discussion signal formatting ✅
-
-## Verification
-
-- Typecheck: PASS (both packages/opencode and packages/app)
-- Build: PASS
-- Tests: 175 files, 2659 pass, 0 fail
