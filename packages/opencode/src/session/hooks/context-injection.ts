@@ -67,10 +67,7 @@ export namespace ContextInjectionHooks {
 
   async function findAgentsMd(): Promise<{ path: string; content: string } | null> {
     const dir = Instance.directory
-    const candidates = [
-      path.join(dir, "AGENTS.md"),
-      path.join(dir, ".opencode", "AGENTS.md"),
-    ]
+    const candidates = [path.join(dir, "AGENTS.md"), path.join(dir, ".opencode", "AGENTS.md")]
 
     for (const candidate of candidates) {
       const exists = await Bun.file(candidate).exists()
@@ -84,25 +81,31 @@ export namespace ContextInjectionHooks {
   }
 
   function registerDirectoryAgentsInjector(): void {
-    HookChain.register("directory-agents-injector", "pre-llm", 100, async (ctx) => {
-      const cached = agentsCache.get(ctx.sessionID)
-      if (cached !== undefined) {
-        if (cached) ctx.system.push(cached)
-        return
-      }
+    HookChain.register(
+      "directory-agents-injector",
+      "pre-llm",
+      100,
+      async (ctx) => {
+        const cached = agentsCache.get(ctx.sessionID)
+        if (cached !== undefined) {
+          if (cached) ctx.system.push(cached)
+          return
+        }
 
-      const result = await findAgentsMd()
-      if (!result) {
-        agentsCache.set(ctx.sessionID, null)
-        return
-      }
+        const result = await findAgentsMd()
+        if (!result) {
+          agentsCache.set(ctx.sessionID, null)
+          return
+        }
 
-      const redacted = redactProtectedSegments(result.content)
-      const injection = `Instructions from AGENTS.md (${result.path}):\n${redacted}`
-      agentsCache.set(ctx.sessionID, injection)
-      ctx.system.push(injection)
-      log.info("injected AGENTS.md", { sessionID: ctx.sessionID, path: result.path })
-    })
+        const redacted = redactProtectedSegments(result.content)
+        const injection = `Instructions from AGENTS.md (${result.path}):\n${redacted}`
+        agentsCache.set(ctx.sessionID, injection)
+        ctx.system.push(injection)
+        log.info("injected AGENTS.md", { sessionID: ctx.sessionID, path: result.path })
+      },
+      { injector: true },
+    )
   }
 
   // --- directory-readme-injector (PreLLMChain, priority 110) ---
@@ -120,25 +123,31 @@ export namespace ContextInjectionHooks {
   }
 
   function registerDirectoryReadmeInjector(): void {
-    HookChain.register("directory-readme-injector", "pre-llm", 110, async (ctx) => {
-      const currentDir = Instance.directory
-      const cached = readmeCache.get(ctx.sessionID)
+    HookChain.register(
+      "directory-readme-injector",
+      "pre-llm",
+      110,
+      async (ctx) => {
+        const currentDir = Instance.directory
+        const cached = readmeCache.get(ctx.sessionID)
 
-      // Skip if same directory as last injection
-      if (cached && cached.dir === currentDir) return
+        // Skip if same directory as last injection
+        if (cached && cached.dir === currentDir) return
 
-      const result = await findReadmeMd(currentDir)
-      if (!result) {
-        readmeCache.set(ctx.sessionID, { dir: currentDir, content: null })
-        return
-      }
+        const result = await findReadmeMd(currentDir)
+        if (!result) {
+          readmeCache.set(ctx.sessionID, { dir: currentDir, content: null })
+          return
+        }
 
-      const redacted = redactProtectedSegments(result.content)
-      const injection = `Project README.md (${result.path}):\n${redacted}`
-      readmeCache.set(ctx.sessionID, { dir: currentDir, content: injection })
-      ctx.system.push(injection)
-      log.info("injected README.md", { sessionID: ctx.sessionID, path: result.path })
-    })
+        const redacted = redactProtectedSegments(result.content)
+        const injection = `Project README.md (${result.path}):\n${redacted}`
+        readmeCache.set(ctx.sessionID, { dir: currentDir, content: injection })
+        ctx.system.push(injection)
+        log.info("injected README.md", { sessionID: ctx.sessionID, path: result.path })
+      },
+      { injector: true },
+    )
   }
 
   // --- rules-injector (PreLLMChain, priority 120) ---
@@ -146,10 +155,7 @@ export namespace ContextInjectionHooks {
 
   async function findRuleFiles(): Promise<Array<{ path: string; content: string }>> {
     const dir = Instance.directory
-    const rulesDirs = [
-      path.join(dir, ".opencode", "rules"),
-      path.join(dir, ".claude", "rules"),
-    ]
+    const rulesDirs = [path.join(dir, ".opencode", "rules"), path.join(dir, ".claude", "rules")]
 
     const results: Array<{ path: string; content: string }> = []
 
@@ -188,32 +194,38 @@ export namespace ContextInjectionHooks {
   }
 
   function registerRulesInjector(): void {
-    HookChain.register("rules-injector", "pre-llm", 120, async (ctx) => {
-      const cached = rulesCache.get(ctx.sessionID)
-      if (cached !== undefined) {
-        if (cached) cached.forEach((r) => ctx.system.push(r))
-        return
-      }
+    HookChain.register(
+      "rules-injector",
+      "pre-llm",
+      120,
+      async (ctx) => {
+        const cached = rulesCache.get(ctx.sessionID)
+        if (cached !== undefined) {
+          if (cached) cached.forEach((r) => ctx.system.push(r))
+          return
+        }
 
-      const ruleFiles = await findRuleFiles()
-      if (ruleFiles.length === 0) {
-        rulesCache.set(ctx.sessionID, null)
-        return
-      }
+        const ruleFiles = await findRuleFiles()
+        if (ruleFiles.length === 0) {
+          rulesCache.set(ctx.sessionID, null)
+          return
+        }
 
-      const injections = ruleFiles.map((f) => {
-        const redacted = redactProtectedSegments(f.content)
-        return `Custom rules from ${f.path}:\n${redacted}`
-      })
+        const injections = ruleFiles.map((f) => {
+          const redacted = redactProtectedSegments(f.content)
+          return `Custom rules from ${f.path}:\n${redacted}`
+        })
 
-      rulesCache.set(ctx.sessionID, injections)
-      injections.forEach((r) => ctx.system.push(r))
-      log.info("injected rules", {
-        sessionID: ctx.sessionID,
-        count: ruleFiles.length,
-        paths: ruleFiles.map((f) => f.path),
-      })
-    })
+        rulesCache.set(ctx.sessionID, injections)
+        injections.forEach((r) => ctx.system.push(r))
+        log.info("injected rules", {
+          sessionID: ctx.sessionID,
+          count: ruleFiles.length,
+          paths: ruleFiles.map((f) => f.path),
+        })
+      },
+      { injector: true },
+    )
   }
 
   // --- compaction-context-injector (SessionLifecycleChain, priority 100) ---
@@ -227,7 +239,9 @@ export namespace ContextInjectionHooks {
       const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content)
 
       // Extract file paths being worked on
-      const filePathMatches = content.match(/(?:working on|editing|modified|created|changed)\s+[`"]?([^\s`"]+\.\w+)[`"]?/gi)
+      const filePathMatches = content.match(
+        /(?:working on|editing|modified|created|changed)\s+[`"]?([^\s`"]+\.\w+)[`"]?/gi,
+      )
       if (filePathMatches) {
         context.push(...filePathMatches.map((m) => `File reference: ${m}`))
       }
@@ -246,10 +260,12 @@ export namespace ContextInjectionHooks {
   function registerCompactionContextInjector(): void {
     HookChain.register("compaction-context-injector", "session-lifecycle", 100, async (ctx) => {
       if (ctx.event === "session.compacting") {
-        const data = ctx.data as {
-          messages?: Array<{ role: string; content: string }>
-          context?: string[]
-        } | undefined
+        const data = ctx.data as
+          | {
+              messages?: Array<{ role: string; content: string }>
+              context?: string[]
+            }
+          | undefined
 
         const messages = data?.messages ?? []
         const critical = extractCriticalContext(messages)
@@ -323,10 +339,12 @@ export namespace ContextInjectionHooks {
   function registerCompactionTodoPreserver(): void {
     HookChain.register("compaction-todo-preserver", "session-lifecycle", 110, async (ctx) => {
       if (ctx.event === "session.compacting") {
-        const data = ctx.data as {
-          messages?: Array<{ role: string; content: string }>
-          context?: string[]
-        } | undefined
+        const data = ctx.data as
+          | {
+              messages?: Array<{ role: string; content: string }>
+              context?: string[]
+            }
+          | undefined
 
         const messages = data?.messages ?? []
         const todos = extractIncompleteTodos(messages)

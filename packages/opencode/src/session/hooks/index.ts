@@ -19,6 +19,7 @@ export namespace HookChain {
     sessionID: z.string(),
     system: z.array(z.string()),
     agent: z.string(),
+    injectors: z.array(z.string()).optional(),
     model: z.string(),
     variant: z.string().optional(),
     messages: z.array(z.any()),
@@ -103,6 +104,7 @@ export namespace HookChain {
     chainType: T
     priority: number
     enabled: boolean
+    injector?: boolean
     handler: Handler<T>
   }
 
@@ -154,6 +156,7 @@ export namespace HookChain {
     chainType: T,
     priority: number,
     handler: Handler<T>,
+    opts?: { injector?: boolean },
   ): void {
     const s = state()
     const hooks = s.registered.get(chainType) ?? []
@@ -167,6 +170,7 @@ export namespace HookChain {
       chainType,
       priority,
       enabled,
+      injector: opts?.injector,
       handler: handler as Handler<ChainType>,
     }
     if (idx >= 0) {
@@ -217,6 +221,7 @@ export namespace HookChain {
 
   export async function execute<T extends ChainType>(chainType: T, ctx: ContextMap[T]): Promise<void> {
     const chain = getCompiledChain(chainType)
+    const injectors = chainType === "pre-llm" ? ((ctx as PreLLMContext).injectors ?? undefined) : undefined
 
     // Check if instrumentation is needed
     let instrumenting = false
@@ -235,6 +240,8 @@ export namespace HookChain {
     }
 
     for (const hook of chain.hooks) {
+      if (hook.injector && injectors && !injectors.includes(hook.name)) continue
+
       let snapshot: Map<string, unknown> | undefined
       let startTime: number | undefined
 

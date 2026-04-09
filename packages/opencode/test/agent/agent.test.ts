@@ -179,6 +179,38 @@ test("custom agent config overrides native agent properties", async () => {
   })
 })
 
+test("memory agents disable pre-llm injectors by default", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const extract = await Agent.get("memory-extractor")
+      const recall = await Agent.get("memory-recall")
+      expect(extract?.pre_llm_injectors).toEqual([])
+      expect(recall?.pre_llm_injectors).toEqual([])
+    },
+  })
+})
+
+test("custom agent config overrides pre-llm injectors", async () => {
+  await using tmp = await tmpdir({
+    config: {
+      agent: {
+        build: {
+          pre_llm_injectors: ["directory-agents-injector"],
+        },
+      },
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const build = await Agent.get("build")
+      expect(build?.pre_llm_injectors).toEqual(["directory-agents-injector"])
+    },
+  })
+})
+
 test("agent disable removes agent from list", async () => {
   await using tmp = await tmpdir({
     config: {

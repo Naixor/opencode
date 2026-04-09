@@ -53,6 +53,7 @@ export namespace Agent {
       lite: z.boolean().optional(),
       prompt_level: z.enum(["full", "medium", "lite"]).optional(),
       tools_include: z.array(z.string()).optional(),
+      pre_llm_injectors: z.array(z.string()).optional(),
     })
     .meta({
       ref: "Agent",
@@ -302,6 +303,7 @@ export namespace Agent {
         native: true,
         hidden: true,
         lite: true,
+        pre_llm_injectors: [],
         temperature: 0,
         permission: PermissionNext.merge(
           defaults,
@@ -319,6 +321,7 @@ export namespace Agent {
         native: true,
         hidden: true,
         lite: true,
+        pre_llm_injectors: [],
         temperature: 0,
         permission: PermissionNext.merge(
           defaults,
@@ -400,6 +403,7 @@ export namespace Agent {
       item.tools_include = value.tools_include ?? item.tools_include
       item.prompt_level =
         ((value as Record<string, unknown>).prompt_level as Agent.Info["prompt_level"]) ?? item.prompt_level
+      item.pre_llm_injectors = value.pre_llm_injectors ?? item.pre_llm_injectors
       item.options = mergeDeep(item.options, value.options ?? {})
       item.permission = PermissionNext.merge(item.permission, PermissionNext.fromConfig(value.permission ?? {}))
     }

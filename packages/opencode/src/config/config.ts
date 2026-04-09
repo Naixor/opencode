@@ -726,6 +726,7 @@ export namespace Config {
       permission: Permission.optional(),
       tools_include: z.array(z.string()).optional(),
       prompt_level: z.enum(["full", "medium", "lite"]).optional(),
+      pre_llm_injectors: z.array(z.string()).optional(),
     })
     .catchall(z.any())
     .transform((agent, ctx) => {
@@ -748,6 +749,7 @@ export namespace Config {
         "tools",
         "tools_include",
         "prompt_level",
+        "pre_llm_injectors",
       ])
 
       // Extract unknown properties into options

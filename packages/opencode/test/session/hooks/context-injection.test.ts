@@ -8,10 +8,7 @@ import { ContextInjectionHooks } from "../../../src/session/hooks/context-inject
 import { SecurityConfig } from "../../../src/security/config"
 
 describe("ContextInjectionHooks", () => {
-  async function withInstance(
-    fn: () => Promise<void>,
-    setup?: (dir: string) => Promise<void>,
-  ) {
+  async function withInstance(fn: () => Promise<void>, setup?: (dir: string) => Promise<void>) {
     await using tmp = await tmpdir({
       git: true,
       config: {},
@@ -207,6 +204,72 @@ describe("ContextInjectionHooks", () => {
           await Bun.write(path.join(dir, "AGENTS.md"), "# Agents\nCached content.")
         },
       )
+    })
+
+    test("empty injector config skips AGENTS.md, README.md, and rules injection", async () => {
+      await withInstance(
+        async () => {
+          const a: HookChain.PreLLMContext = {
+            sessionID: "s1",
+            system: ["base"],
+            agent: "build",
+            injectors: [],
+            model: "claude-sonnet-4-5-20250929",
+            messages: [],
+          }
+          const b: HookChain.PreLLMContext = {
+            sessionID: "s2",
+            system: ["base"],
+            agent: "build",
+            injectors: [],
+            model: "claude-sonnet-4-5-20250929",
+            messages: [],
+          }
+
+          await HookChain.execute("pre-llm", a)
+          await HookChain.execute("pre-llm", b)
+
+          expect(a.system).toEqual(["base"])
+          expect(b.system).toEqual(["base"])
+        },
+        async (dir) => {
+          await Bun.write(path.join(dir, "AGENTS.md"), "# Agents\nDo not inject.")
+          await Bun.write(path.join(dir, "README.md"), "# Readme\nDo not inject.")
+          await fs.mkdir(path.join(dir, ".opencode", "rules"), { recursive: true })
+          await Bun.write(path.join(dir, ".opencode", "rules", "memory.md"), "# Rules\nDo not inject.")
+        },
+      )
+    })
+
+    test("empty injector config still runs non-injector pre-llm hooks", async () => {
+      await withInstance(async () => {
+        HookChain.register("test-normal", "pre-llm", 1, async (ctx) => {
+          ctx.system.push("normal")
+        })
+        HookChain.register(
+          "test-injector",
+          "pre-llm",
+          2,
+          async (ctx) => {
+            ctx.system.push("injector")
+          },
+          { injector: true },
+        )
+
+        const ctx: HookChain.PreLLMContext = {
+          sessionID: "s1",
+          system: ["base"],
+          agent: "build",
+          injectors: [],
+          model: "claude-sonnet-4-5-20250929",
+          messages: [],
+        }
+
+        await HookChain.execute("pre-llm", ctx)
+
+        expect(ctx.system).toContain("normal")
+        expect(ctx.system).not.toContain("injector")
+      })
     })
   })
 
@@ -476,7 +539,11 @@ describe("ContextInjectionHooks", () => {
     test("messages with incomplete todos -> todos extracted and re-injected", async () => {
       await withInstance(async () => {
         const messages = [
-          { role: "assistant", content: "Here are the tasks:\n- [ ] Fix the login bug\n- [x] Update README\n- [ ] Add tests for auth module" },
+          {
+            role: "assistant",
+            content:
+              "Here are the tasks:\n- [ ] Fix the login bug\n- [x] Update README\n- [ ] Add tests for auth module",
+          },
           { role: "assistant", content: "Also TODO: refactor the database layer" },
         ]
 
@@ -500,9 +567,7 @@ describe("ContextInjectionHooks", () => {
 
     test("no incomplete todos -> no injection", async () => {
       await withInstance(async () => {
-        const messages = [
-          { role: "assistant", content: "All tasks completed:\n- [x] Fix bug\n- [x] Update docs" },
-        ]
+        const messages = [{ role: "assistant", content: "All tasks completed:\n- [x] Fix bug\n- [x] Update docs" }]
 
         const ctx: HookChain.SessionLifecycleContext = {
           sessionID: "s1",
@@ -522,9 +587,7 @@ describe("ContextInjectionHooks", () => {
     test("todos re-injected on session.created", async () => {
       await withInstance(async () => {
         // First, simulate compaction to store todos
-        const messages = [
-          { role: "assistant", content: "- [ ] Fix the login bug\n- [ ] Add tests" },
-        ]
+        const messages = [{ role: "assistant", content: "- [ ] Fix the login bug\n- [ ] Add tests" }]
 
         const compactCtx: HookChain.SessionLifecycleContext = {
           sessionID: "s1",
@@ -620,9 +683,7 @@ describe("ContextInjectionHooks", () => {
     })
 
     test("extractCriticalContext extracts decisions", () => {
-      const messages = [
-        { role: "assistant", content: "decision: Use React hooks instead of class components" },
-      ]
+      const messages = [{ role: "assistant", content: "decision: Use React hooks instead of class components" }]
       const result = ContextInjectionHooks.extractCriticalContext(messages)
       expect(result.length).toBeGreaterThan(0)
       expect(result.some((r) => r.includes("decision:"))).toBe(true)
@@ -638,9 +699,7 @@ describe("ContextInjectionHooks", () => {
     })
 
     test("extractIncompleteTodos finds markdown checkboxes", () => {
-      const messages = [
-        { role: "assistant", content: "- [ ] Task 1\n- [x] Task 2\n- [ ] Task 3" },
-      ]
+      const messages = [{ role: "assistant", content: "- [ ] Task 1\n- [x] Task 2\n- [ ] Task 3" }]
       const result = ContextInjectionHooks.extractIncompleteTodos(messages)
       expect(result).toContain("Task 1")
       expect(result).toContain("Task 3")
@@ -648,26 +707,20 @@ describe("ContextInjectionHooks", () => {
     })
 
     test("extractIncompleteTodos finds TODO comments", () => {
-      const messages = [
-        { role: "assistant", content: "TODO: implement error handling\nFIXME: fix race condition" },
-      ]
+      const messages = [{ role: "assistant", content: "TODO: implement error handling\nFIXME: fix race condition" }]
       const result = ContextInjectionHooks.extractIncompleteTodos(messages)
       expect(result).toContain("implement error handling")
       expect(result).toContain("fix race condition")
     })
 
     test("extractIncompleteTodos deduplicates", () => {
-      const messages = [
-        { role: "assistant", content: "TODO: fix bug\nTODO: fix bug" },
-      ]
+      const messages = [{ role: "assistant", content: "TODO: fix bug\nTODO: fix bug" }]
       const result = ContextInjectionHooks.extractIncompleteTodos(messages)
       expect(result.filter((t) => t === "fix bug").length).toBe(1)
     })
 
     test("extractIncompleteTodos returns empty for no todos", () => {
-      const messages = [
-        { role: "assistant", content: "Everything is done!" },
-      ]
+      const messages = [{ role: "assistant", content: "Everything is done!" }]
       const result = ContextInjectionHooks.extractIncompleteTodos(messages)
       expect(result.length).toBe(0)
     })

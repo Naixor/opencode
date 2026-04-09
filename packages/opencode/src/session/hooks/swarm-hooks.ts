@@ -75,55 +75,61 @@ export namespace SwarmHooks {
   // Loads conductor-strategy.md from config dirs (project → global), scaffolds on first use
 
   function registerStrategyInjector(): void {
-    HookChain.register("conductor-strategy-injector", "pre-llm", 150, async (ctx) => {
-      if (ctx.agent !== "conductor") return
+    HookChain.register(
+      "conductor-strategy-injector",
+      "pre-llm",
+      150,
+      async (ctx) => {
+        if (ctx.agent !== "conductor") return
 
-      const cached = cache.get(ctx.sessionID)
-      if (cached !== undefined) {
-        if (cached) ctx.system.push(cached)
-        return
-      }
+        const cached = cache.get(ctx.sessionID)
+        if (cached !== undefined) {
+          if (cached) ctx.system.push(cached)
+          return
+        }
 
-      let content = await readStrategy()
-      if (!content) content = await scaffold()
-      if (!content) {
-        cache.set(ctx.sessionID, null)
-        return
-      }
-      const injection = `\n## Strategy\n\n${content}`
-      cache.set(ctx.sessionID, injection)
-      ctx.system.push(injection)
-      log.info("injected conductor strategy", { sessionID: ctx.sessionID })
+        let content = await readStrategy()
+        if (!content) content = await scaffold()
+        if (!content) {
+          cache.set(ctx.sessionID, null)
+          return
+        }
+        const injection = `\n## Strategy\n\n${content}`
+        cache.set(ctx.sessionID, injection)
+        ctx.system.push(injection)
+        log.info("injected conductor strategy", { sessionID: ctx.sessionID })
 
-      // Check for discussion tasks and inject discussion protocol
-      const dcached = discussionCache.get(ctx.sessionID)
-      if (dcached !== undefined) {
-        if (dcached) ctx.system.push(dcached)
-        return
-      }
-      const swarm = ctx.metadata?.swarm_id as string | undefined
-      if (!swarm) {
-        discussionCache.set(ctx.sessionID, null)
-        return
-      }
-      const tasks = await BoardTask.list(swarm)
-      const hasDiscuss = tasks.some((t) => t.type === "discuss")
-      if (!hasDiscuss) {
-        discussionCache.set(ctx.sessionID, null)
-        return
-      }
-      const dp = path.join(import.meta.dir, "../../agent/prompt/conductor-discussion.txt")
-      const dcontent = await Bun.file(dp)
-        .text()
-        .catch(() => "")
-      if (!dcontent) {
-        discussionCache.set(ctx.sessionID, null)
-        return
-      }
-      discussionCache.set(ctx.sessionID, dcontent)
-      ctx.system.push(dcontent)
-      log.info("injected discussion protocol", { sessionID: ctx.sessionID })
-    })
+        // Check for discussion tasks and inject discussion protocol
+        const dcached = discussionCache.get(ctx.sessionID)
+        if (dcached !== undefined) {
+          if (dcached) ctx.system.push(dcached)
+          return
+        }
+        const swarm = ctx.metadata?.swarm_id as string | undefined
+        if (!swarm) {
+          discussionCache.set(ctx.sessionID, null)
+          return
+        }
+        const tasks = await BoardTask.list(swarm)
+        const hasDiscuss = tasks.some((t) => t.type === "discuss")
+        if (!hasDiscuss) {
+          discussionCache.set(ctx.sessionID, null)
+          return
+        }
+        const dp = path.join(import.meta.dir, "../../agent/prompt/conductor-discussion.txt")
+        const dcontent = await Bun.file(dp)
+          .text()
+          .catch(() => "")
+        if (!dcontent) {
+          discussionCache.set(ctx.sessionID, null)
+          return
+        }
+        discussionCache.set(ctx.sessionID, dcontent)
+        ctx.system.push(dcontent)
+        log.info("injected discussion protocol", { sessionID: ctx.sessionID })
+      },
+      { injector: true },
+    )
   }
 
   // --- scope-lock-checker (PreToolChain, priority 50) ---
@@ -184,38 +190,44 @@ export namespace SwarmHooks {
   // Injects the full discussion thread into Worker context so they see all opinions
 
   function registerThreadInjector(): void {
-    HookChain.register("discussion-thread-injector", "pre-llm", 160, async (ctx) => {
-      if (!Flag.OPENCODE_SWARM) return
-      const swarm = ctx.metadata?.swarm_id as string | undefined
-      const channel = ctx.metadata?.discussion_channel as string | undefined
-      if (!swarm || !channel) return
+    HookChain.register(
+      "discussion-thread-injector",
+      "pre-llm",
+      160,
+      async (ctx) => {
+        if (!Flag.OPENCODE_SWARM) return
+        const swarm = ctx.metadata?.swarm_id as string | undefined
+        const channel = ctx.metadata?.discussion_channel as string | undefined
+        if (!swarm || !channel) return
 
-      const signals = await BoardSignal.thread(swarm, channel)
-      if (signals.length === 0) return
+        const signals = await BoardSignal.thread(swarm, channel)
+        if (signals.length === 0) return
 
-      const round = await Discussion.status(swarm, channel)
-      const header = round ? `Current round: ${round.round}` : ""
+        const round = await Discussion.status(swarm, channel)
+        const header = round ? `Current round: ${round.round}` : ""
 
-      const grouped = new Map<number, BoardSignal.Info[]>()
-      for (const s of signals) {
-        const r = (s.payload.round as number) ?? 1
-        if (!grouped.has(r)) grouped.set(r, [])
-        grouped.get(r)!.push(s)
-      }
-
-      const lines: string[] = ["## Discussion Thread (read before responding)", ""]
-      if (header) lines.push(header, "")
-      for (const [r, sigs] of [...grouped.entries()].sort((a, b) => a[0] - b[0])) {
-        lines.push(`### Round ${r}`)
-        for (const s of sigs) {
-          const summary = (s.payload.summary as string) ?? JSON.stringify(s.payload).slice(0, 200)
-          lines.push(`  [${s.from}] ${s.type}: ${summary}`)
+        const grouped = new Map<number, BoardSignal.Info[]>()
+        for (const s of signals) {
+          const r = (s.payload.round as number) ?? 1
+          if (!grouped.has(r)) grouped.set(r, [])
+          grouped.get(r)!.push(s)
         }
-        lines.push("")
-      }
 
-      ctx.system.push(lines.join("\n"))
-    })
+        const lines: string[] = ["## Discussion Thread (read before responding)", ""]
+        if (header) lines.push(header, "")
+        for (const [r, sigs] of [...grouped.entries()].sort((a, b) => a[0] - b[0])) {
+          lines.push(`### Round ${r}`)
+          for (const s of sigs) {
+            const summary = (s.payload.summary as string) ?? JSON.stringify(s.payload).slice(0, 200)
+            lines.push(`  [${s.from}] ${s.type}: ${summary}`)
+          }
+          lines.push("")
+        }
+
+        ctx.system.push(lines.join("\n"))
+      },
+      { injector: true },
+    )
   }
 
   // --- swarm-onboarding (eager, runs once at registration) ---
