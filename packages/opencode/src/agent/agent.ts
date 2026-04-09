@@ -338,7 +338,7 @@ export namespace Agent {
           "Orchestration agent for multi-agent Swarm collaboration. Decomposes goals, assigns tasks to Workers, monitors progress, and resolves conflicts.",
         mode: "primary",
         native: true,
-        hidden: false,
+        hidden: true,
         temperature: 0.1,
         prompt_level: "full",
         prompt: PROMPT_CONDUCTOR,
