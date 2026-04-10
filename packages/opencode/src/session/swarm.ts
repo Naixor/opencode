@@ -22,6 +22,7 @@ export namespace Swarm {
   export const Worker = z.object({
     session_id: z.string(),
     agent: z.string(),
+    role: z.string().optional(),
     task_id: z.string(),
     status: WorkerStatus,
   })
@@ -45,6 +46,8 @@ export namespace Swarm {
       created: z.number(),
       updated: z.number(),
       completed: z.number().optional(),
+      stopped: z.number().optional(),
+      deleted: z.number().optional(),
     }),
   })
   export type Info = z.infer<typeof Info>
@@ -89,13 +92,20 @@ export namespace Swarm {
     await saveAll(all)
   }
 
-  export async function load(id: string): Promise<Info | undefined> {
-    const all = await loadAll()
-    return all.find((s) => s.id === id)
+  function visible(info: Info, include_deleted?: boolean) {
+    if (include_deleted) return true
+    return info.time.deleted === undefined
   }
 
-  export async function list(): Promise<Info[]> {
-    return loadAll()
+  export async function load(id: string, input?: { include_deleted?: boolean }): Promise<Info | undefined> {
+    const all = await loadAll()
+    const info = all.find((s) => s.id === id)
+    if (!info || !visible(info, input?.include_deleted)) return undefined
+    return info
+  }
+
+  export async function list(input?: { include_deleted?: boolean }): Promise<Info[]> {
+    return (await loadAll()).filter((info) => visible(info, input?.include_deleted))
   }
 
   export async function replaceWorkerSession(swarmID: string, old: string, next: string): Promise<void> {
@@ -162,8 +172,8 @@ export namespace Swarm {
     return info
   }
 
-  export async function status(id: string): Promise<Info> {
-    const info = await load(id)
+  export async function status(id: string, input?: { include_deleted?: boolean }): Promise<Info> {
+    const info = await load(id, input)
     if (!info) throw new Error(`Swarm not found: ${id}`)
     // Merge live session status for workers
     for (const w of info.workers) {
@@ -205,12 +215,28 @@ export namespace Swarm {
       SessionPrompt.cancel(w.session_id)
     }
     SessionPrompt.cancel(info.conductor)
+    const now = Date.now()
     info.status = "failed"
-    info.time.updated = Date.now()
-    info.time.completed = Date.now()
+    info.time.updated = now
+    info.time.completed = now
+    info.time.stopped = now
     await save(info)
     Bus.publish(Event.Failed, { swarm: info })
     cleanup(id)
+    return info
+  }
+
+  export async function remove(id: string): Promise<Info> {
+    const info = await load(id, { include_deleted: true })
+    if (!info) throw new Error(`Swarm not found: ${id}`)
+    if (info.status === "planning" || info.status === "running" || info.status === "paused") {
+      throw new Error(`Cannot delete running swarm: ${id}`)
+    }
+    if (info.time.deleted) return info
+    info.time.deleted = Date.now()
+    info.time.updated = info.time.deleted
+    await save(info)
+    Bus.publish(Event.Updated, { swarm: info })
     return info
   }
 

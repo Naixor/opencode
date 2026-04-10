@@ -1,4 +1,5 @@
 import "@/index.css"
+import type { Project } from "@opencode-ai/sdk/v2/client"
 import { File } from "@opencode-ai/ui/file"
 import { I18nProvider } from "@opencode-ai/ui/context"
 import { DialogProvider } from "@opencode-ai/ui/context/dialog"
@@ -6,6 +7,7 @@ import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { Font } from "@opencode-ai/ui/font"
 import { ThemeProvider } from "@opencode-ai/ui/theme"
+import { base64Encode } from "@opencode-ai/util/encode"
 import { MetaProvider } from "@solidjs/meta"
 import { Navigate, Route, Router } from "@solidjs/router"
 import { ErrorBoundary, type JSX, lazy, type ParentProps, Show, Suspense } from "solid-js"
@@ -13,7 +15,7 @@ import { CommandProvider } from "@/context/command"
 import { CommentsProvider } from "@/context/comments"
 import { FileProvider } from "@/context/file"
 import { GlobalSDKProvider } from "@/context/global-sdk"
-import { GlobalSyncProvider } from "@/context/global-sync"
+import { GlobalSyncProvider, useGlobalSync } from "@/context/global-sync"
 import { HighlightsProvider } from "@/context/highlights"
 import { LanguageProvider, useLanguage } from "@/context/language"
 import { LayoutProvider } from "@/context/layout"
@@ -32,6 +34,7 @@ import { ErrorPage } from "./pages/error"
 const Home = lazy(() => import("@/pages/home"))
 const Session = lazy(() => import("@/pages/session"))
 const SwarmDashboard = lazy(() => import("@/pages/swarm/swarm-dashboard"))
+const SwarmOverview = lazy(() => import("@/pages/swarm/swarm-overview"))
 const Loading = () => <div class="size-full" />
 
 const HomeRoute = () => (
@@ -55,6 +58,22 @@ const SwarmRoute = () => (
     <SwarmDashboard />
   </Suspense>
 )
+
+const SwarmOverviewRoute = () => (
+  <Suspense fallback={<Loading />}>
+    <SwarmOverview />
+  </Suspense>
+)
+
+const SwarmEntryRoute = () => {
+  const sync = useGlobalSync()
+  const dir = sync.data.project
+    .slice()
+    .sort(
+      (a: Project, b: Project) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created),
+    )[0]?.worktree
+  return <Navigate href={dir ? `/${base64Encode(dir)}/swarm` : "/"} />
+}
 
 function UiI18nBridge(props: ParentProps) {
   const language = useLanguage()
@@ -161,9 +180,11 @@ export function AppInterface(props: {
               root={(routerProps) => <RouterRoot appChildren={props.children}>{routerProps.children}</RouterRoot>}
             >
               <Route path="/" component={HomeRoute} />
+              <Route path="/swarm" component={SwarmEntryRoute} />
               <Route path="/:dir" component={DirectoryLayout}>
                 <Route path="/" component={SessionIndexRoute} />
                 <Route path="/session/:id?" component={SessionRoute} />
+                <Route path="/swarm" component={SwarmOverviewRoute} />
                 <Route path="/swarm/:id" component={SwarmRoute} />
               </Route>
             </Router>

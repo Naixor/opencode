@@ -162,6 +162,28 @@ import type {
   SessionUpdateErrors,
   SessionUpdateResponses,
   SubtaskPartInput,
+  SwarmAdminDetailErrors,
+  SwarmAdminDetailResponses,
+  SwarmAdminListResponses,
+  SwarmDeleteErrors,
+  SwarmDeleteResponses,
+  SwarmDiscussErrors,
+  SwarmDiscussionResponses,
+  SwarmDiscussResponses,
+  SwarmEventsResponses,
+  SwarmInterveneErrors,
+  SwarmInterveneResponses,
+  SwarmLaunchErrors,
+  SwarmLaunchResponses,
+  SwarmListResponses,
+  SwarmPauseErrors,
+  SwarmPauseResponses,
+  SwarmResumeErrors,
+  SwarmResumeResponses,
+  SwarmStatusErrors,
+  SwarmStatusResponses,
+  SwarmStopErrors,
+  SwarmStopResponses,
   TextPartInput,
   ToolIdsErrors,
   ToolIdsResponses,
@@ -3817,7 +3839,7 @@ export class Memory extends HeyApiClient {
       directory?: string
       workspace?: string
       content?: string
-      category?: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      categories?: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
       tags?: Array<string>
       status?: "pending" | "confirmed"
       inject?: boolean
@@ -3833,7 +3855,7 @@ export class Memory extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "content" },
-            { in: "body", key: "category" },
+            { in: "body", key: "categories" },
             { in: "body", key: "tags" },
             { in: "body", key: "status" },
             { in: "body", key: "inject" },
@@ -3913,6 +3935,481 @@ export class Manager extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+}
+
+export class Admin extends HeyApiClient {
+  /**
+   * List Swarm admin overview rows
+   *
+   * Get aggregated Swarm overview rows for the admin UI.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      status?: string
+      include_deleted?: string
+      needs_attention?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "status" },
+            { in: "query", key: "include_deleted" },
+            { in: "query", key: "needs_attention" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmAdminListResponses, unknown, ThrowOnError>({
+      url: "/swarm/admin",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Swarm admin detail
+   *
+   * Get an aggregated Swarm detail read model for the admin UI.
+   */
+  public detail<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+      include_deleted?: string
+      assignee?: string
+      status?: string
+      type?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "include_deleted" },
+            { in: "query", key: "assignee" },
+            { in: "query", key: "status" },
+            { in: "query", key: "type" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmAdminDetailResponses, SwarmAdminDetailErrors, ThrowOnError>({
+      url: "/swarm/{id}/admin",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Swarm extends HeyApiClient {
+  /**
+   * List Swarms
+   *
+   * Get a list of all Swarms.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      include_deleted?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "include_deleted" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmListResponses, unknown, ThrowOnError>({
+      url: "/swarm",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Launch a Swarm
+   *
+   * Launch a new multi-agent Swarm to accomplish a goal.
+   */
+  public launch<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      goal?: string
+      config?: {
+        max_workers?: number
+        auto_escalate?: boolean
+        verify_on_complete?: boolean
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "goal" },
+            { in: "body", key: "config" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmLaunchResponses, SwarmLaunchErrors, ThrowOnError>({
+      url: "/swarm",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Launch a discussion Swarm
+   *
+   * Launch a discussion-focused Swarm where role-specific agents debate a topic.
+   */
+  public discuss<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      topic?: string
+      roles?: Array<{
+        name: string
+        perspective: string
+      }>
+      max_rounds?: number
+      config?: {
+        max_workers?: number
+        auto_escalate?: boolean
+        verify_on_complete?: boolean
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "topic" },
+            { in: "body", key: "roles" },
+            { in: "body", key: "max_rounds" },
+            { in: "body", key: "config" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmDiscussResponses, SwarmDiscussErrors, ThrowOnError>({
+      url: "/swarm/discuss",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Swarm status
+   *
+   * Get the current status of a Swarm.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+      include_deleted?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "include_deleted" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmStatusResponses, SwarmStatusErrors, ThrowOnError>({
+      url: "/swarm/{id}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Send message to Swarm
+   *
+   * Send a message to the Conductor of a running Swarm.
+   */
+  public intervene<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+      message?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "message" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmInterveneResponses, SwarmInterveneErrors, ThrowOnError>({
+      url: "/swarm/{id}/intervene",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Pause Swarm
+   *
+   * Pause all workers in a Swarm.
+   */
+  public pause<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmPauseResponses, SwarmPauseErrors, ThrowOnError>({
+      url: "/swarm/{id}/pause",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Resume Swarm
+   *
+   * Resume a paused Swarm.
+   */
+  public resume<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmResumeResponses, SwarmResumeErrors, ThrowOnError>({
+      url: "/swarm/{id}/resume",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Stop Swarm
+   *
+   * Stop a Swarm and cancel all workers.
+   */
+  public stop<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmStopResponses, SwarmStopErrors, ThrowOnError>({
+      url: "/swarm/{id}/stop",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Safely delete Swarm
+   *
+   * Hide a finished Swarm from default lists without deleting board data.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmDeleteResponses, SwarmDeleteErrors, ThrowOnError>({
+      url: "/swarm/{id}/delete",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get discussion state
+   *
+   * Get the structured discussion state for a Swarm in discussion mode.
+   */
+  public discussion<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmDiscussionResponses, unknown, ThrowOnError>({
+      url: "/swarm/{id}/discussion",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Swarm event stream
+   *
+   * SSE stream of real-time Swarm events.
+   */
+  public events<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).sse.get<SwarmEventsResponses, unknown, ThrowOnError>({
+      url: "/swarm/{id}/events",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _admin?: Admin
+  get admin(): Admin {
+    return (this._admin ??= new Admin({ client: this.client }))
   }
 }
 
@@ -4518,6 +5015,11 @@ export class OpencodeClient extends HeyApiClient {
   private _manager?: Manager
   get manager(): Manager {
     return (this._manager ??= new Manager({ client: this.client }))
+  }
+
+  private _swarm?: Swarm
+  get swarm(): Swarm {
+    return (this._swarm ??= new Swarm({ client: this.client }))
   }
 
   private _instance?: Instance

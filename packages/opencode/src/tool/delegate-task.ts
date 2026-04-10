@@ -245,6 +245,7 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
               info.workers.push({
                 session_id: session.id,
                 agent: agent.name,
+                role: params.role_name,
                 task_id: params.task_id ?? "",
                 status: "active",
               })

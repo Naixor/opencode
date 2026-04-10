@@ -49,7 +49,12 @@ export function SidebarSwarm() {
   return (
     <div class="flex flex-col gap-1 px-2 py-2 border-b border-border-weak-base">
       <div class="flex items-center justify-between px-2">
-        <span class="text-12-medium text-text-base uppercase tracking-wider">Swarms</span>
+        <A
+          href={`/${params.dir}/swarm`}
+          class="text-12-medium text-text-base uppercase tracking-wider hover:text-text-strong"
+        >
+          Swarms
+        </A>
         <button
           class="text-icon-base hover:text-text-strong text-xs"
           onClick={() => setOpen(!open())}

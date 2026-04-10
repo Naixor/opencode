@@ -1,0 +1,18 @@
+## Codebase Patterns
+- Board artifacts live in `src/board/artifact.ts` — `BoardArtifact.Type` already includes `"checkpoint"`
+- Board tasks in `src/board/task.ts` — `BoardTask.Info` has status, assignee, metadata
+- `SharedBoard.snapshot()` returns tasks, artifacts, recentSignals, stats (including running count)
+- Session namespace in `src/session/index.ts` — `Session.Info.time.archived` already exists as optional number
+- `Session.setArchived()` already exists — sets `time_archived` in DB
+- `SessionMetadata` in `src/session/session-metadata.ts` — in-memory Map with `set(sessionID, key, value)` and `get(sessionID)`
+- Swarm in `src/session/swarm.ts` — `Swarm.Info` has `conductor` (session_id) and `workers[]` with `session_id` field
+- Compaction logic in `src/session/compaction.ts` — `isOverflow()` checks token count vs model limit
+- `MessageV2.toModelMessages()` in `src/session/message-v2.ts` — converts messages for model consumption
+- `compaction` agent defined in `src/agent/agent.ts` — lightweight agent for summarization
+- Prompt loop in `src/session/prompt.ts` — checks `isOverflow` after each assistant response, calls `SessionCompaction.create()` if true
+- Config schema in `src/config/config.ts` — uses nested `z.object()` groups (see `compaction` group pattern)
+- Bus events defined via `BusEvent.define(type, zod_schema)`, published via `Bus.publish(def, properties)`
+- Typecheck: `bun turbo typecheck`
+- Tests: `bun run --cwd packages/opencode/test/ test:parallel`
+
+---

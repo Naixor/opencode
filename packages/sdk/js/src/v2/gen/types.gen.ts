@@ -955,7 +955,7 @@ export type EventMemoryCreated = {
     info: {
       id: string
       content: string
-      category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
       scope: "personal" | "team"
       status?: "pending" | "confirmed"
       tags?: Array<string>
@@ -998,7 +998,7 @@ export type EventMemoryUpdated = {
     info: {
       id: string
       content: string
-      category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
       scope: "personal" | "team"
       status?: "pending" | "confirmed"
       tags?: Array<string>
@@ -1048,7 +1048,7 @@ export type EventMemoryConfirmed = {
     info: {
       id: string
       content: string
-      category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
       scope: "personal" | "team"
       status?: "pending" | "confirmed"
       tags?: Array<string>
@@ -1121,7 +1121,7 @@ export type EventMemoryTeamCandidates = {
     candidates: Array<{
       id: string
       content: string
-      category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+      categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
       scope: "personal" | "team"
       status?: "pending" | "confirmed"
       tags?: Array<string>
@@ -1164,6 +1164,240 @@ export type EventMemoryWarning = {
     type: string
     agent: string
     model: string
+  }
+}
+
+export type EventBoardTaskCreated = {
+  type: "board.task.created"
+  properties: {
+    task: {
+      id: string
+      subject: string
+      description?: string
+      status: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+      blockedBy?: Array<string>
+      blocks?: Array<string>
+      assignee?: string
+      type: "implement" | "review" | "test" | "investigate" | "fix" | "refactor" | "discuss"
+      scope?: Array<string>
+      artifacts?: Array<string>
+      swarm_id: string
+      metadata?: {
+        [key: string]: unknown
+      }
+      createdAt: number
+      updatedAt: number
+    }
+  }
+}
+
+export type EventBoardTaskUpdated = {
+  type: "board.task.updated"
+  properties: {
+    task: {
+      id: string
+      subject: string
+      description?: string
+      status: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+      blockedBy?: Array<string>
+      blocks?: Array<string>
+      assignee?: string
+      type: "implement" | "review" | "test" | "investigate" | "fix" | "refactor" | "discuss"
+      scope?: Array<string>
+      artifacts?: Array<string>
+      swarm_id: string
+      metadata?: {
+        [key: string]: unknown
+      }
+      createdAt: number
+      updatedAt: number
+    }
+  }
+}
+
+export type EventBoardTaskDeleted = {
+  type: "board.task.deleted"
+  properties: {
+    id: string
+    swarm_id: string
+  }
+}
+
+export type EventBoardArtifactCreated = {
+  type: "board.artifact.created"
+  properties: {
+    artifact: {
+      id: string
+      type:
+        | "analysis"
+        | "code_change"
+        | "test_result"
+        | "decision"
+        | "finding"
+        | "checkpoint"
+        | "proposal"
+        | "review_comment"
+        | "summary"
+      task_id: string
+      swarm_id: string
+      author: string
+      content: string
+      files?: Array<string>
+      created_at: number
+      supersedes?: string
+    }
+  }
+}
+
+export type EventBoardSignal = {
+  type: "board.signal"
+  properties: {
+    signal: {
+      id: string
+      channel: string
+      type:
+        | "progress"
+        | "conflict"
+        | "question"
+        | "done"
+        | "blocked"
+        | "need_review"
+        | "failed"
+        | "proposal"
+        | "opinion"
+        | "objection"
+        | "consensus"
+      from: string
+      payload: {
+        [key: string]: unknown
+      }
+      timestamp: number
+      swarm_id: string
+    }
+  }
+}
+
+export type EventSwarmCreated = {
+  type: "swarm.created"
+  properties: {
+    swarm: {
+      id: string
+      goal: string
+      conductor: string
+      workers?: Array<{
+        session_id: string
+        agent: string
+        role?: string
+        task_id: string
+        status: "active" | "idle" | "done" | "failed"
+      }>
+      config: {
+        max_workers?: number
+        auto_escalate?: boolean
+        verify_on_complete?: boolean
+      }
+      status: "planning" | "running" | "paused" | "completed" | "failed"
+      time: {
+        created: number
+        updated: number
+        completed?: number
+        stopped?: number
+        deleted?: number
+      }
+    }
+  }
+}
+
+export type EventSwarmUpdated = {
+  type: "swarm.updated"
+  properties: {
+    swarm: {
+      id: string
+      goal: string
+      conductor: string
+      workers?: Array<{
+        session_id: string
+        agent: string
+        role?: string
+        task_id: string
+        status: "active" | "idle" | "done" | "failed"
+      }>
+      config: {
+        max_workers?: number
+        auto_escalate?: boolean
+        verify_on_complete?: boolean
+      }
+      status: "planning" | "running" | "paused" | "completed" | "failed"
+      time: {
+        created: number
+        updated: number
+        completed?: number
+        stopped?: number
+        deleted?: number
+      }
+    }
+  }
+}
+
+export type EventSwarmCompleted = {
+  type: "swarm.completed"
+  properties: {
+    swarm: {
+      id: string
+      goal: string
+      conductor: string
+      workers?: Array<{
+        session_id: string
+        agent: string
+        role?: string
+        task_id: string
+        status: "active" | "idle" | "done" | "failed"
+      }>
+      config: {
+        max_workers?: number
+        auto_escalate?: boolean
+        verify_on_complete?: boolean
+      }
+      status: "planning" | "running" | "paused" | "completed" | "failed"
+      time: {
+        created: number
+        updated: number
+        completed?: number
+        stopped?: number
+        deleted?: number
+      }
+    }
+  }
+}
+
+export type EventSwarmFailed = {
+  type: "swarm.failed"
+  properties: {
+    swarm: {
+      id: string
+      goal: string
+      conductor: string
+      workers?: Array<{
+        session_id: string
+        agent: string
+        role?: string
+        task_id: string
+        status: "active" | "idle" | "done" | "failed"
+      }>
+      config: {
+        max_workers?: number
+        auto_escalate?: boolean
+        verify_on_complete?: boolean
+      }
+      status: "planning" | "running" | "paused" | "completed" | "failed"
+      time: {
+        created: number
+        updated: number
+        completed?: number
+        stopped?: number
+        deleted?: number
+      }
+    }
   }
 }
 
@@ -1242,6 +1476,13 @@ export type EventSessionDeleted = {
   }
 }
 
+export type EventSessionArchived = {
+  type: "session.archived"
+  properties: {
+    info: Session
+  }
+}
+
 export type EventSessionDiff = {
   type: "session.diff"
   properties: {
@@ -1262,6 +1503,26 @@ export type EventSessionError = {
       | StructuredOutputError
       | ContextOverflowError
       | ApiError
+  }
+}
+
+export type EventSessionRotationStarted = {
+  type: "session.rotation.started"
+  properties: {
+    sessionID: string
+    swarmID: string
+    trigger: "overflow" | "boundary" | "manual"
+    seq: number
+  }
+}
+
+export type EventSessionRotationCompleted = {
+  type: "session.rotation.completed"
+  properties: {
+    oldSessionID: string
+    newSessionID: string
+    checkpointID?: string
+    tokens: number
   }
 }
 
@@ -1427,12 +1688,24 @@ export type Event =
   | EventMemoryCapacityWarning
   | EventMemoryTeamCandidates
   | EventMemoryWarning
+  | EventBoardTaskCreated
+  | EventBoardTaskUpdated
+  | EventBoardTaskDeleted
+  | EventBoardArtifactCreated
+  | EventBoardSignal
+  | EventSwarmCreated
+  | EventSwarmUpdated
+  | EventSwarmCompleted
+  | EventSwarmFailed
   | EventCommandExecuted
   | EventSessionCreated
   | EventSessionUpdated
   | EventSessionDeleted
+  | EventSessionArchived
   | EventSessionDiff
   | EventSessionError
+  | EventSessionRotationStarted
+  | EventSessionRotationCompleted
   | EventVcsBranchUpdated
   | EventWorkspaceReady
   | EventWorkspaceFailed
@@ -1559,6 +1832,7 @@ export type AgentConfig = {
   permission?: PermissionConfig
   tools_include?: Array<string>
   prompt_level?: "full" | "medium" | "lite"
+  pre_llm_injectors?: Array<string>
   [key: string]:
     | unknown
     | string
@@ -1587,6 +1861,7 @@ export type AgentConfig = {
     | "full"
     | "medium"
     | "lite"
+    | Array<string>
     | undefined
 }
 
@@ -2031,6 +2306,61 @@ export type Config = {
    * List of built-in MCP server names to disable even when their API key is available
    */
   disabled_mcps?: Array<string>
+  /**
+   * Swarm multi-agent collaboration configuration
+   */
+  swarm?: {
+    /**
+     * Maximum concurrent worker agents in a Swarm (default: 4)
+     */
+    max_workers?: number
+    /**
+     * Automatically escalate failures per escalation policy (default: true)
+     */
+    auto_escalate?: boolean
+    /**
+     * Run verification after all tasks complete (default: true)
+     */
+    verify_on_complete?: boolean
+    /**
+     * Custom escalation rules merged with defaults
+     */
+    escalation?: Array<{
+      /**
+       * Condition to match
+       */
+      condition: string
+      /**
+       * Action to take when condition matches
+       */
+      action: "retry" | "arbitrate" | "reassign" | "ask_human"
+      /**
+       * Max retries (default: 3)
+       */
+      max_retries?: number
+    }>
+  }
+  /**
+   * Session rotation configuration for Swarm sessions
+   */
+  rotation?: {
+    /**
+     * Enable session rotation for Swarm sessions (default: true)
+     */
+    enabled?: boolean
+    /**
+     * Use LLM to extract decisions/state in checkpoint (default: true)
+     */
+    checkpoint_llm?: boolean
+    /**
+     * Maximum tokens for bootstrap prompt (default: 6000)
+     */
+    max_bootstrap_tokens?: number
+    /**
+     * Defer Conductor rotation when workers are still running (default: true)
+     */
+    conductor_defer?: boolean
+  }
   /**
    * OS-native sandbox configuration for kernel-level file system isolation
    */
@@ -2613,6 +2943,7 @@ export type Agent = {
   lite?: boolean
   prompt_level?: "full" | "medium" | "lite"
   tools_include?: Array<string>
+  pre_llm_injectors?: Array<string>
 }
 
 export type LspStatus = {
@@ -5559,7 +5890,7 @@ export type MemoryListResponses = {
   200: Array<{
     id: string
     content: string
-    category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+    categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
     scope: "personal" | "team"
     status?: "pending" | "confirmed"
     tags?: Array<string>
@@ -5628,7 +5959,7 @@ export type MemoryGetResponses = {
   200: {
     id: string
     content: string
-    category: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+    categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
     scope: "personal" | "team"
     status?: "pending" | "confirmed"
     tags?: Array<string>
@@ -5669,7 +6000,7 @@ export type MemoryGetResponse = MemoryGetResponses[keyof MemoryGetResponses]
 export type MemoryUpdateData = {
   body?: {
     content?: string
-    category?: "style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context"
+    categories?: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
     tags?: Array<string>
     status?: "pending" | "confirmed"
     inject?: boolean
@@ -5718,6 +6049,745 @@ export type ManagerServicesResponses = {
 }
 
 export type ManagerServicesResponse = ManagerServicesResponses[keyof ManagerServicesResponses]
+
+export type SwarmListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    include_deleted?: string
+  }
+  url: "/swarm"
+}
+
+export type SwarmListResponses = {
+  /**
+   * List of swarms
+   */
+  200: Array<{
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status: "active" | "idle" | "done" | "failed"
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+    status: "planning" | "running" | "paused" | "completed" | "failed"
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }>
+}
+
+export type SwarmListResponse = SwarmListResponses[keyof SwarmListResponses]
+
+export type SwarmLaunchData = {
+  body?: {
+    goal: string
+    config?: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm"
+}
+
+export type SwarmLaunchErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmLaunchError = SwarmLaunchErrors[keyof SwarmLaunchErrors]
+
+export type SwarmLaunchResponses = {
+  /**
+   * Swarm launched
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status: "active" | "idle" | "done" | "failed"
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+    status: "planning" | "running" | "paused" | "completed" | "failed"
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmLaunchResponse = SwarmLaunchResponses[keyof SwarmLaunchResponses]
+
+export type SwarmDiscussData = {
+  body?: {
+    topic: string
+    roles: Array<{
+      name: string
+      perspective: string
+    }>
+    max_rounds?: number
+    config?: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/discuss"
+}
+
+export type SwarmDiscussErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmDiscussError = SwarmDiscussErrors[keyof SwarmDiscussErrors]
+
+export type SwarmDiscussResponses = {
+  /**
+   * Discussion Swarm launched
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status: "active" | "idle" | "done" | "failed"
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+    status: "planning" | "running" | "paused" | "completed" | "failed"
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmDiscussResponse = SwarmDiscussResponses[keyof SwarmDiscussResponses]
+
+export type SwarmAdminListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    status?: string
+    include_deleted?: string
+    needs_attention?: string
+  }
+  url: "/swarm/admin"
+}
+
+export type SwarmAdminListResponses = {
+  /**
+   * Overview rows
+   */
+  200: Array<{
+    swarm_id: string
+    goal: string
+    goal_summary: string
+    conductor_label: string
+    conductor_session: string
+    status: "planning" | "running" | "blocked" | "paused" | "completed" | "failed" | "stopped" | "deleted"
+    current_phase: string
+    updated_at: number
+    deleted_at?: number
+    task_counts: {
+      total: number
+      pending: number
+      running: number
+      blocked: number
+      failed: number
+      completed: number
+    }
+    discussion_counts: {
+      active: number
+      consensus: number
+      no_consensus: number
+    }
+    needs_attention: boolean
+    attention: Array<"blocked_task" | "failed_task" | "stale_worker" | "no_consensus">
+  }>
+}
+
+export type SwarmAdminListResponse = SwarmAdminListResponses[keyof SwarmAdminListResponses]
+
+export type SwarmStatusData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    include_deleted?: string
+  }
+  url: "/swarm/{id}"
+}
+
+export type SwarmStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmStatusError = SwarmStatusErrors[keyof SwarmStatusErrors]
+
+export type SwarmStatusResponses = {
+  /**
+   * Swarm status
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status: "active" | "idle" | "done" | "failed"
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+    status: "planning" | "running" | "paused" | "completed" | "failed"
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmStatusResponse = SwarmStatusResponses[keyof SwarmStatusResponses]
+
+export type SwarmAdminDetailData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    include_deleted?: string
+    assignee?: string
+    status?: string
+    type?: string
+  }
+  url: "/swarm/{id}/admin"
+}
+
+export type SwarmAdminDetailErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmAdminDetailError = SwarmAdminDetailErrors[keyof SwarmAdminDetailErrors]
+
+export type SwarmAdminDetailResponses = {
+  /**
+   * Swarm admin detail
+   */
+  200: {
+    overview: {
+      swarm_id: string
+      goal: string
+      goal_summary: string
+      conductor_label: string
+      conductor_session: string
+      status: "planning" | "running" | "blocked" | "paused" | "completed" | "failed" | "stopped" | "deleted"
+      current_phase: string
+      updated_at: number
+      deleted_at?: number
+      task_counts: {
+        total: number
+        pending: number
+        running: number
+        blocked: number
+        failed: number
+        completed: number
+      }
+      discussion_counts: {
+        active: number
+        consensus: number
+        no_consensus: number
+      }
+      needs_attention: boolean
+      attention: Array<"blocked_task" | "failed_task" | "stale_worker" | "no_consensus">
+    }
+    goal: string
+    current_phase: string
+    plan_summary: string
+    risk_summary: string
+    plan_empty: boolean
+    plan_empty_copy: string
+    last_decision_at: number | null
+    actions: Array<{
+      id: string
+      time: number
+      kind: string
+      summary: string
+      ref?: string
+    }>
+    tasks: Array<{
+      id: string
+      summary: string
+      type: "implement" | "review" | "test" | "investigate" | "fix" | "refactor" | "discuss"
+      status: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+      blocked_by: Array<string>
+      assignee: string | null
+      created_at: number
+      updated_at: number
+      blocked_reason: string | null
+      task_link: string
+      assignee_link: string | null
+    }>
+    task_filters: {
+      assignees: Array<string>
+      statuses: Array<string>
+      types: Array<string>
+    }
+    agents: Array<{
+      id: string
+      label: string
+      session_id: string
+      status: "active" | "idle" | "blocked" | "failed" | "done"
+      task_count: number
+      recent_activity_at: number | null
+      current_task: string | null
+      recent_progress: string | null
+      reason: string | null
+      task_ids: Array<string>
+      discussion_channels: Array<string>
+    }>
+    discussions: Array<{
+      id: string
+      channel: string
+      topic: string
+      current_round: number
+      max_rounds: number
+      participants: Array<string>
+      tally: {
+        agree: number
+        disagree: number
+        modify: number
+        total: number
+      }
+      consensus_state: "active" | "consensus" | "partial_consensus" | "no_consensus"
+      conflict_summary: {
+        supporters: Array<{
+          id: string
+          from: string
+          round: number
+        }>
+        objectors: Array<{
+          id: string
+          from: string
+          round: number
+        }>
+        modify: Array<{
+          id: string
+          from: string
+          round: number
+        }>
+        points: Array<{
+          text: string
+          refs: Array<{
+            id: string
+            from: string
+            round: number
+          }>
+        }>
+      }
+      refs: Array<{
+        id: string
+        from: string
+        round: number
+      }>
+      raw: Array<{
+        round: number
+        entries: Array<{
+          id: string
+          round: number
+          from: string
+          source: "signal" | "artifact" | "summary" | "decision"
+          label: string
+          summary: string
+          content: string
+          timestamp: number
+        }>
+      }>
+    }>
+    recent_signals: Array<{
+      id: string
+      channel: string
+      type:
+        | "progress"
+        | "conflict"
+        | "question"
+        | "done"
+        | "blocked"
+        | "need_review"
+        | "failed"
+        | "proposal"
+        | "opinion"
+        | "objection"
+        | "consensus"
+      from: string
+      payload: {
+        [key: string]: unknown
+      }
+      timestamp: number
+      swarm_id: string
+    }>
+  }
+}
+
+export type SwarmAdminDetailResponse = SwarmAdminDetailResponses[keyof SwarmAdminDetailResponses]
+
+export type SwarmInterveneData = {
+  body?: {
+    message: string
+  }
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/intervene"
+}
+
+export type SwarmInterveneErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmInterveneError = SwarmInterveneErrors[keyof SwarmInterveneErrors]
+
+export type SwarmInterveneResponses = {
+  /**
+   * Message sent
+   */
+  200: unknown
+}
+
+export type SwarmPauseData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/pause"
+}
+
+export type SwarmPauseErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmPauseError = SwarmPauseErrors[keyof SwarmPauseErrors]
+
+export type SwarmPauseResponses = {
+  /**
+   * Swarm paused
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status: "active" | "idle" | "done" | "failed"
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+    status: "planning" | "running" | "paused" | "completed" | "failed"
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmPauseResponse = SwarmPauseResponses[keyof SwarmPauseResponses]
+
+export type SwarmResumeData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/resume"
+}
+
+export type SwarmResumeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmResumeError = SwarmResumeErrors[keyof SwarmResumeErrors]
+
+export type SwarmResumeResponses = {
+  /**
+   * Swarm resumed
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status: "active" | "idle" | "done" | "failed"
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+    status: "planning" | "running" | "paused" | "completed" | "failed"
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmResumeResponse = SwarmResumeResponses[keyof SwarmResumeResponses]
+
+export type SwarmStopData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/stop"
+}
+
+export type SwarmStopErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmStopError = SwarmStopErrors[keyof SwarmStopErrors]
+
+export type SwarmStopResponses = {
+  /**
+   * Swarm stopped
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status: "active" | "idle" | "done" | "failed"
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+    status: "planning" | "running" | "paused" | "completed" | "failed"
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmStopResponse = SwarmStopResponses[keyof SwarmStopResponses]
+
+export type SwarmDeleteData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/delete"
+}
+
+export type SwarmDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmDeleteError = SwarmDeleteErrors[keyof SwarmDeleteErrors]
+
+export type SwarmDeleteResponses = {
+  /**
+   * Swarm deleted
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status: "active" | "idle" | "done" | "failed"
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+    }
+    status: "planning" | "running" | "paused" | "completed" | "failed"
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmDeleteResponse = SwarmDeleteResponses[keyof SwarmDeleteResponses]
+
+export type SwarmDiscussionData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/discussion"
+}
+
+export type SwarmDiscussionResponses = {
+  /**
+   * Discussion state
+   */
+  200: unknown
+}
+
+export type SwarmEventsData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/events"
+}
+
+export type SwarmEventsResponses = {
+  /**
+   * Event stream
+   */
+  200: unknown
+}
 
 export type SessionTypingData = {
   body?: never

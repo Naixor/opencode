@@ -42,8 +42,8 @@ export const ManagerCommand = cmd({
     withNetworkOptions(yargs)
       .positional("service", {
         type: "string",
-        describe: "service to open directly (log-viewer, memory, web)",
-        choices: ["log-viewer", "memory", "web"],
+        describe: "service to open directly (log-viewer, memory, swarm, web)",
+        choices: ["log-viewer", "memory", "swarm", "web"],
       })
       .option("skip-open", {
         type: "boolean",
@@ -57,7 +57,8 @@ export const ManagerCommand = cmd({
       })
       .example("$0 manager", "start all services and open dashboard")
       .example("$0 manager log-viewer", "start all services and open log-viewer")
-      .example("$0 manager memory", "start all services and open memory manager"),
+      .example("$0 manager memory", "start all services and open memory manager")
+      .example("$0 manager swarm", "start all services and open swarm admin"),
   handler: async (args: Record<string, unknown>) => {
     if (args.resetLogs) {
       const result = LlmLog.reset()
@@ -78,7 +79,7 @@ export const ManagerCommand = cmd({
 
     const opts = await resolveNetworkOptions(args as any)
 
-    // Start main server (includes memory at /memory/app, log-viewer at /log-viewer/app)
+    // Start main server (includes memory at /memory/app, log-viewer at /log-viewer/app, swarm at /swarm/app)
     const server = Server.listen(opts)
     const mainPort = server.port!
     const mainHost = opts.hostname === "0.0.0.0" ? "localhost" : opts.hostname
@@ -108,6 +109,13 @@ export const ManagerCommand = cmd({
         url: `${mainBaseUrl}/log-viewer/app`,
         icon: "📊",
       },
+      {
+        id: "swarm",
+        name: "Swarms",
+        description: "Open the Swarm admin overview for your most recent project",
+        url: `${mainBaseUrl}/swarm/app`,
+        icon: "🐝",
+      },
     ])
 
     // Build service list for terminal output
@@ -135,6 +143,12 @@ export const ManagerCommand = cmd({
         description: "Browse and analyze LLM interaction logs",
         path: "/log-viewer/app",
         url: `${mainBaseUrl}/log-viewer/app`,
+      },
+      {
+        name: "Swarms",
+        description: "Open the Swarm admin overview for your most recent project",
+        path: "/swarm/app",
+        url: `${mainBaseUrl}/swarm/app`,
       },
     ]
 
@@ -181,6 +195,9 @@ export const ManagerCommand = cmd({
           break
         case "web":
           openUrl = mainBaseUrl
+          break
+        case "swarm":
+          openUrl = `${mainBaseUrl}/swarm/app`
           break
         default:
           openUrl = `${mainBaseUrl}/manager/app`

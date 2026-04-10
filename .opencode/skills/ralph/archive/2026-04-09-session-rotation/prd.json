@@ -1,0 +1,200 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/session-rotation",
+  "description": "Session Rotation for Swarm Conductor & Workers — rotate to fresh sessions on second compaction overflow or task boundary, using structured checkpoints instead of lossy double-summarization",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add rotation config group to config schema",
+      "description": "As a developer, I need the rotation configuration schema so that all downstream rotation logic can read settings.",
+      "acceptanceCriteria": [
+        "Add `rotation` group to `Config.Info` in `src/config/config.ts` with fields: `enabled` (boolean, optional, default true), `checkpoint_llm` (boolean, optional, default true), `max_bootstrap_tokens` (number, optional, default 6000), `conductor_defer` (boolean, optional, default true)",
+        "Config supports project-level and global-level override (follows existing pattern for `compaction` group)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Implement Session.archive() function",
+      "description": "As a developer, I need to archive sessions so that rotation can cleanly end old sessions while preserving them.",
+      "acceptanceCriteria": [
+        "Add `archive(sessionID)` function in Session namespace in `src/session/index.ts`",
+        "Function sets `session.time.archived = Date.now()` using existing `Session.setArchived()` or the SessionTable update pattern",
+        "Archived sessions are excluded from accepting new `SessionPrompt.prompt()` calls — add guard check at start of prompt function that returns early if session is archived",
+        "Archived sessions remain readable via `Session.get()`",
+        "Define and publish `Session.Event.Archived` bus event (type: `session.archived`, properties: `{ info: Info }`)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add Swarm.replaceWorkerSession() function",
+      "description": "As a Swarm system, I need to replace a worker's session reference when rotation occurs.",
+      "acceptanceCriteria": [
+        "Add `replaceWorkerSession(swarmID, oldSessionID, newSessionID)` function in `Swarm` namespace in `src/session/swarm.ts`",
+        "Function finds `session_id === oldSessionID` in `Swarm.Info.workers` array and replaces with `newSessionID`",
+        "If `Swarm.Info.conductor === oldSessionID`, updates `conductor` to `newSessionID`",
+        "Updates `Swarm.Info.time.updated` to `Date.now()`",
+        "Publishes `Swarm.Event.Updated` event",
+        "Copy old session's `swarm_id`, `task_id`, `discussion_channel` from `SessionMetadata` to new session's metadata",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Implement Checkpoint schema and template generation",
+      "description": "As a developer, I need the Checkpoint namespace with template-based generation so that rotation can produce structured handoff documents from Board state.",
+      "acceptanceCriteria": [
+        "Create `src/board/checkpoint.ts` with `Checkpoint` namespace",
+        "Define Checkpoint content structure with fields: `goal`, `task` (ID + subject), `progress` (completed items + pending items), `decisions` (list), `state` (description), `files` (key file paths), `session_chain` (previous session IDs array)",
+        "Implement `Checkpoint.generate(sessionID, options)` function that returns checkpoint content as string",
+        "Template-based fields (`goal`, `task`, `progress`, `files`) extracted directly from `BoardTask.list()` and `BoardArtifact.list()` — no LLM call for these",
+        "If `options.llm === false` or config `rotation.checkpoint_llm === false`, skip LLM extraction and leave `decisions` and `state` empty",
+        "Export the namespace from `src/board/index.ts`",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Add LLM extraction to Checkpoint.generate()",
+      "description": "As a developer, I need the checkpoint to use LLM to extract decisions and working state from conversation history.",
+      "acceptanceCriteria": [
+        "When `options.llm !== false` and config `rotation.checkpoint_llm !== false`, invoke LLM to extract `decisions` and `state`",
+        "Reuse Compaction's message preparation: call `MessageV2.toModelMessages(messages, model, { stripMedia: true, stripSynthetic: true })` to get input",
+        "Use the `compaction` agent with a modified prompt: 'Extract key decisions made and current working state from this conversation' (not 'summarize the conversation')",
+        "If the first compaction summary message exists in session history (message with `summary === true`), include it as additional context input for more efficient extraction",
+        "If LLM extraction fails, gracefully degrade: generate checkpoint without `decisions`/`state` fields (template-only fallback)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add Conductor-specific checkpoint content",
+      "description": "As a Conductor, I need my checkpoint to include coordination context so that a rotated Conductor can resume orchestration.",
+      "acceptanceCriteria": [
+        "In `Checkpoint.generate()`, detect if session is Conductor by checking `Swarm.Info.conductor === sessionID`",
+        "When Conductor, add `<coordination>` block containing: current worker list with task assignments, unresolved escalation signals (filter Board signals for type=blocked/conflict), overall progress (completed/total from Board stats)",
+        "Coordination block appended to checkpoint content string",
+        "Bootstrap prompt naturally includes coordination info via the `<checkpoint>` block",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Implement Bootstrap prompt generation",
+      "description": "As a newly rotated session, I need a bootstrap prompt containing checkpoint, board state, and memories.",
+      "acceptanceCriteria": [
+        "Add `bootstrap(input)` function in `SessionRotation` namespace (create `src/session/rotation.ts`)",
+        "Input accepts: `checkpoint` (string), `swarmID`, `taskID?`, `memories?` (array of memory entries)",
+        "Bootstrap prompt has three XML blocks: `<checkpoint>` (checkpoint content), `<board_state>` (board snapshot summary: task stats, current task details, recent 5 signals), `<memories>` (relevant memory entries)",
+        "Total bootstrap prompt size capped at `config.rotation.max_bootstrap_tokens` (default 6000) by truncating each block proportionally if over limit",
+        "Returns the assembled prompt string",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Implement SessionRotation.rotate() core flow",
+      "description": "As a Swarm Worker/Conductor, I need the core rotation function that orchestrates the full rotation sequence.",
+      "acceptanceCriteria": [
+        "Add `rotate(input: { sessionID, swarmID, trigger })` function in `SessionRotation` namespace in `src/session/rotation.ts`",
+        "Trigger type is `'overflow' | 'boundary' | 'manual'`",
+        "Flow executes in order: (1) Generate checkpoint via `Checkpoint.generate()` (2) Write checkpoint as Board artifact (type: 'checkpoint') (3) Archive old session via `Session.archive()` (4) Create new session with same `permission` field from old session (5) Set SessionMetadata on new session: `prev_session`, `rotation_seq` (incrementing from old session's seq or 0) (6) Generate and inject bootstrap prompt into new session (7) Call `Swarm.replaceWorkerSession()` to update references",
+        "Return new Session.Info on success",
+        "If rotation fails at any step, throw error (caller handles fallback to compaction)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Implement shouldRotate() decision logic",
+      "description": "As a session processor, I need centralized rotation decision logic that determines when to rotate vs compact.",
+      "acceptanceCriteria": [
+        "Add `shouldRotate(input: { sessionID })` function in `SessionRotation` namespace",
+        "Returns false if `config.rotation.enabled === false`",
+        "Returns false if session is not a Swarm session (no `swarm_id` in SessionMetadata)",
+        "Returns false if session has never been compacted (no message with `summary === true` in history)",
+        "For Worker sessions: returns true if already compacted at least once",
+        "For Conductor sessions: if `config.rotation.conductor_defer === true` and Board stats `running > 0` and compaction count < 2 → returns false (defer); if compaction count >= 2 → returns true (hard limit)",
+        "Compaction count determined by counting messages with `summary === true` in session history",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Integrate rotation into prompt.ts overflow path",
+      "description": "As a session processor, I need the prompt loop to check shouldRotate on overflow and execute rotation instead of second compaction.",
+      "acceptanceCriteria": [
+        "In `src/session/prompt.ts`, in the isOverflow branch, before calling `SessionCompaction.create()`, call `SessionRotation.shouldRotate({ sessionID })`",
+        "If shouldRotate returns true, call `SessionRotation.rotate({ sessionID, swarmID, trigger: 'overflow' })` and break the session loop (new session will be driven by Swarm monitor)",
+        "If rotation fails (throws), log warning and fall back to normal `SessionCompaction.create()` — system must not interrupt",
+        "If shouldRotate returns false, proceed with normal compaction as before",
+        "Existing non-Swarm session compaction behavior unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Add task boundary rotation trigger",
+      "description": "As a Swarm Worker, I need automatic rotation when my assigned task completes.",
+      "acceptanceCriteria": [
+        "In `board_write` tool handler (or processor), when a Worker sets task status to `completed`, `failed`, or `cancelled`, check rotation trigger conditions",
+        "Trigger conditions: session has `swarm_id` metadata AND session has `task_id` metadata AND task status changed to terminal state",
+        "When conditions met, set `needsRotation = true` flag on the session (similar to existing `needsCompaction` pattern)",
+        "In processor's finish-step logic, check `needsRotation` flag and return `'rotate'` result to prompt loop",
+        "In `prompt.ts`, handle `'rotate'` result by calling `SessionRotation.rotate({ trigger: 'boundary' })` and breaking the loop",
+        "If rotation fails, log warning and continue (Worker session continues with same session)",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Add rotation events and structured logging",
+      "description": "As a system operator, I need rotation events and logging to monitor behavior and debug issues.",
+      "acceptanceCriteria": [
+        "Define Bus events in SessionRotation namespace: `Event.Started` (type: `session.rotation.started`, properties: sessionID, swarmID, trigger, rotation_seq) and `Event.Completed` (type: `session.rotation.completed`, properties: oldSessionID, newSessionID, checkpointID, bootstrap_tokens)",
+        "Publish `Event.Started` at beginning of `rotate()` and `Event.Completed` at end",
+        "Add structured logging using `Log.create({ service: 'session.rotation' })` at each rotation step: checkpoint generation, session archive, session creation, bootstrap injection",
+        "Log rotation metrics: checkpoint generation duration, LLM extraction duration (if enabled), bootstrap prompt token count, total rotation duration",
+        "If rotation fails, log error with step that failed and the error message",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
