@@ -404,6 +404,66 @@ describe("SwarmState", () => {
     ])
   })
 
+  test("evaluates deterministic gates with the documented precedence", () => {
+    const sensitive = SwarmState.decide({
+      action_sensitive: true,
+      material_role_delta: true,
+      ambiguous: true,
+      valid_options: 3,
+      trade_offs: true,
+      confidence: "low",
+      routine: false,
+    })
+    expect(sensitive.value).toBe("G3")
+
+    const delta = SwarmState.decide({
+      action_sensitive: false,
+      material_role_delta: true,
+      ambiguous: true,
+      valid_options: 2,
+      trade_offs: true,
+      confidence: "high",
+      routine: true,
+    })
+    expect(delta.value).toBe("G2")
+
+    const debate = SwarmState.decide({
+      action_sensitive: false,
+      material_role_delta: false,
+      ambiguous: true,
+      valid_options: 2,
+      trade_offs: true,
+      confidence: "high",
+      routine: true,
+    })
+    expect(debate.value).toBe("G1")
+
+    const uncertain = SwarmState.decide({
+      action_sensitive: false,
+      material_role_delta: false,
+      ambiguous: false,
+      valid_options: 1,
+      trade_offs: false,
+      confidence: "low",
+      routine: true,
+    })
+    expect(uncertain.value).toBe("G1")
+
+    const routine = SwarmState.decide({
+      action_sensitive: false,
+      material_role_delta: false,
+      ambiguous: false,
+      valid_options: 1,
+      trade_offs: false,
+      confidence: "high",
+      routine: true,
+    })
+    expect(routine.value).toBe("G0")
+    expect(routine.input.confidence).toBe("high")
+    expect(typeof routine.evaluated_at).toBe("number")
+    expect(routine.reason).toContain("Routine")
+  })
+
   test("restores the stored stage on paused to active", async () => {
     await using tmp = await tmpdir({ git: true, config: {} })
     await Instance.provide({

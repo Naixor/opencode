@@ -867,6 +867,65 @@ export namespace SwarmState {
     } satisfies RunContract
   }
 
+  export function decide(input: GateInput) {
+    const option = (input.valid_options ?? 0) > 1
+    const debate = Boolean(input.ambiguous || option || input.trade_offs)
+    if (input.action_sensitive) {
+      return {
+        value: "G3",
+        reason: "Sensitive action requires explicit confirmation",
+        input,
+        evaluated_at: Date.now(),
+      } satisfies GateState
+    }
+    if (input.material_role_delta) {
+      return {
+        value: "G2",
+        reason: "Material role delta requires user review",
+        input,
+        evaluated_at: Date.now(),
+      } satisfies GateState
+    }
+    if (debate && (input.confidence === "low" || input.routine === false)) {
+      return {
+        value: "G2",
+        reason: "Ambiguity plus low confidence or novel scope requires confirmation",
+        input,
+        evaluated_at: Date.now(),
+      } satisfies GateState
+    }
+    if (debate) {
+      return {
+        value: "G1",
+        reason: "Ambiguity or trade-offs should stay visible during auto-run",
+        input,
+        evaluated_at: Date.now(),
+      } satisfies GateState
+    }
+    if (input.confidence === "low") {
+      return {
+        value: "G1",
+        reason: "Low confidence keeps the run visible without blocking",
+        input,
+        evaluated_at: Date.now(),
+      } satisfies GateState
+    }
+    if (input.routine === false) {
+      return {
+        value: "G1",
+        reason: "Novel scope keeps the run visible without blocking",
+        input,
+        evaluated_at: Date.now(),
+      } satisfies GateState
+    }
+    return {
+      value: "G0",
+      reason: "Routine low-risk run can auto-run",
+      input,
+      evaluated_at: Date.now(),
+    } satisfies GateState
+  }
+
   export async function illegal(id: string, input: { actor: string; reason: string }) {
     using _ = await Lock.write(key(id))
     const state = await read(id)

@@ -176,9 +176,24 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
               catalog: align.catalog.roles,
               current: state.alignment.contract,
             })
+            state.alignment.gate = SwarmState.decide({
+              action_sensitive: false,
+              material_role_delta: state.alignment.role_delta.material,
+              ambiguous: Boolean(params.discussion_channel),
+              valid_options: params.discussion_channel ? 2 : 1,
+              trade_offs: Boolean(params.discussion_channel),
+              confidence: "high",
+              routine: !params.discussion_channel,
+            })
             const now = Date.now()
             state.alignment.audit.contract = {
               created_at: state.alignment.audit.contract.created_at ?? now,
+              updated_at: now,
+              actor: "coordinator",
+              run_id: params.swarm_id ?? null,
+            }
+            state.alignment.audit.gate = {
+              created_at: state.alignment.audit.gate.created_at ?? now,
               updated_at: now,
               actor: "coordinator",
               run_id: params.swarm_id ?? null,

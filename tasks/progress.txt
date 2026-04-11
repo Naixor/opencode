@@ -3,6 +3,7 @@
 - Shared swarm alignment persistence lives in `board/alignment.json`; keep `alignment.catalog.roles` project-scoped and `alignment.confirmations.users` user-scoped inside that file.
 - `SwarmState.classify()` only treats `purpose`, `perspective`, and `default_when` as material role changes, and it normalizes whitespace before comparing requested roles to the catalog.
 - `delegate_task` is the first guaranteed pre-worker checkpoint for swarm runs, so run-contract persistence belongs there before worker sessions are created or registered.
+- `SwarmState.decide()` owns deterministic gate mapping, and the caller should pass the explicit input object through unchanged so stored gate state explains why the run auto-ran or paused.
 
 ## 2026-04-11 19:15:48 CST - US-001
 - Added canonical alignment state to `packages/opencode/src/session/swarm-state.ts` for project-scoped role catalog data, user-scoped confirmations, run contract, gate state, role delta state, pending confirmations, and alignment audit metadata.
@@ -38,4 +39,13 @@
   - The first `delegate_task` call is the safest place to create a run contract because it is the last guaranteed checkpoint before worker launch.
   - Keep run-contract drafting pure in `SwarmState.draft()` so later gate and confirmation logic can reuse the same contract builder without depending on tool context.
   - When a delegated role already exists in the catalog, store the catalog reference in the contract and leave overlay fields `null` until a real per-run delta is known.
+---
+
+## 2026-04-11 19:33:49 CST - US-005
+- Added `SwarmState.decide()` in `packages/opencode/src/session/swarm-state.ts` for deterministic `G0`/`G1`/`G2`/`G3` evaluation, and wired `packages/opencode/src/tool/delegate-task.ts` to persist gate inputs, reason text, and gate audit metadata alongside the run contract before worker launch.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/tool/delegate-task.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Gate evaluation should stay pure in `SwarmState.decide()` and return the original input object so later API and UI readers can explain the exact decision inputs.
+  - Sensitivity and material role delta should short-circuit the rest of the decision tree, which keeps precedence easy to read and test.
+  - Persist gate audit metadata whenever the gate is refreshed so later escalation checks can compare both value changes and who updated the gate state.
 ---
