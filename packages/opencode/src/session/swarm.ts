@@ -73,79 +73,84 @@ export namespace Swarm {
     Failed: BusEvent.define("swarm.failed", z.object({ swarm: Info })),
   }
 
-  const KEY = "swarm-registry"
-
-  function filepath(): string {
-    return path.join(Global.Path.data, "projects", Instance.project.id, "board", "swarms.json")
+  function root() {
+    return path.join(Global.Path.data, "projects", Instance.project.id, "board")
   }
 
-  async function ensure() {
-    await fs.mkdir(path.dirname(filepath()), { recursive: true })
+  function fromState(state: SwarmState.Snapshot): Info {
+    return Info.parse({
+      id: state.swarm.id,
+      goal: state.swarm.goal,
+      conductor: state.swarm.conductor,
+      workers: Object.values(state.workers).map((worker) => ({
+        session_id: worker.session_id,
+        agent: worker.agent,
+        role: worker.role ?? undefined,
+        task_id: worker.task_id ?? "",
+        status: worker.status,
+        updated_at: worker.updated_at,
+        reason: worker.reason,
+        evidence: worker.evidence,
+      })),
+      config: state.swarm.config,
+      status: state.swarm.status,
+      stage: state.swarm.stage,
+      reason: state.swarm.reason,
+      resume: { stage: state.swarm.resume.stage },
+      visibility: { archived_at: state.swarm.visibility.archived_at },
+      time: {
+        created: state.swarm.time.created,
+        updated: state.swarm.time.updated,
+        completed: state.swarm.time.completed ?? undefined,
+        stopped: state.swarm.time.stopped ?? undefined,
+        deleted: state.swarm.time.deleted ?? undefined,
+      },
+    })
   }
 
-  async function loadAll(): Promise<Info[]> {
-    await ensure()
-    using _ = await Lock.read(KEY)
-    const file = Bun.file(filepath())
-    if (!(await file.exists())) return []
-    const data = await file.json().catch(() => [])
-    return z.array(Info).parse(data)
-  }
-
-  async function saveAll(swarms: Info[]) {
-    await ensure()
-    using _ = await Lock.write(KEY)
-    await Bun.write(filepath(), JSON.stringify(swarms, null, 2))
-  }
-
-  async function sync(info: Info) {
-    const state =
-      (await SwarmState.read(info.id)) ??
-      SwarmState.create({
+  export async function save(info: Info) {
+    const current = await SwarmState.read(info.id)
+    if (!current) {
+      const state = SwarmState.create({
         id: info.id,
         goal: info.goal,
         conductor: info.conductor,
         config: info.config,
         time: { created: info.time.created, updated: info.time.updated },
       })
-    const prev = structuredClone(state)
-    state.swarm.goal = info.goal
-    state.swarm.conductor = info.conductor
-    state.swarm.config = info.config
-    state.swarm.status = info.status
-    state.swarm.stage = info.stage
-    state.swarm.reason = info.reason
-    state.swarm.resume.stage = info.resume.stage
-    state.swarm.visibility.archived_at = info.visibility.archived_at
-    state.swarm.time.created = info.time.created
-    state.swarm.time.updated = info.time.updated
-    state.swarm.time.completed = info.time.completed ?? null
-    state.swarm.time.stopped = info.time.stopped ?? null
-    state.swarm.time.deleted = info.time.deleted ?? null
-    state.workers = Object.fromEntries(
-      info.workers.map((worker) => [
-        worker.session_id,
-        {
-          id: worker.session_id,
-          session_id: worker.session_id,
-          agent: worker.agent,
-          role: worker.role ?? null,
-          task_id: worker.task_id || null,
-          status: worker.status,
-          updated_at: worker.updated_at,
-          reason: worker.reason,
-          evidence: worker.evidence,
-        },
-      ]),
-    )
-    SwarmState.align(state)
-    if (prev.schema_version === state.schema_version) SwarmState.check(prev, state)
-    let transition: SwarmState.Transition | undefined
-    if (prev.schema_version === state.schema_version) {
-      state.rev = prev.rev + 1
-      state.seq = prev.seq + 1
+      const prev = structuredClone(state)
+      state.swarm.status = info.status
+      state.swarm.stage = info.stage
+      state.swarm.reason = info.reason
+      state.swarm.resume.stage = info.resume.stage
+      state.swarm.visibility.archived_at = info.visibility.archived_at
+      state.swarm.time.created = info.time.created
+      state.swarm.time.updated = info.time.updated
+      state.swarm.time.completed = info.time.completed ?? null
+      state.swarm.time.stopped = info.time.stopped ?? null
+      state.swarm.time.deleted = info.time.deleted ?? null
+      state.workers = Object.fromEntries(
+        info.workers.map((worker) => [
+          worker.session_id,
+          {
+            id: worker.session_id,
+            session_id: worker.session_id,
+            agent: worker.agent,
+            role: worker.role ?? null,
+            task_id: worker.task_id || null,
+            status: worker.status,
+            updated_at: worker.updated_at,
+            reason: worker.reason,
+            evidence: worker.evidence,
+          },
+        ]),
+      )
+      SwarmState.align(state)
+      SwarmState.check(prev, state)
+      state.rev = 1
+      state.seq = 1
       state.audit.last_txn = crypto.randomUUID()
-      transition = {
+      const transition: SwarmState.Transition = {
         txn: state.audit.last_txn,
         actor: "coordinator",
         reason: "sync swarm info",
@@ -154,22 +159,47 @@ export namespace Swarm {
         seq: state.seq,
       }
       state.audit.entries.push(transition)
-    }
-    const checked = SwarmState.Snapshot.parse(state)
-    await SwarmState.write(checked)
-    if (transition) {
+      const checked = SwarmState.Snapshot.parse(state)
+      await SwarmState.write(checked)
       Bus.publish(SwarmState.Event.Transition, { swarm_id: checked.swarm.id, snapshot: checked, transition })
       log.info("swarm transition", { swarmID: checked.swarm.id, ...transition })
+      return
     }
-  }
-
-  export async function save(info: Info) {
-    const all = await loadAll()
-    const idx = all.findIndex((s) => s.id === info.id)
-    if (idx >= 0) all[idx] = info
-    else all.push(info)
-    await sync(info)
-    await saveAll(all)
+    await SwarmState.mutate(info.id, {
+      actor: "coordinator",
+      reason: "sync swarm info",
+      fn: (state) => {
+        state.swarm.goal = info.goal
+        state.swarm.conductor = info.conductor
+        state.swarm.config = info.config
+        state.swarm.status = info.status
+        state.swarm.stage = info.stage
+        state.swarm.reason = info.reason
+        state.swarm.resume.stage = info.resume.stage
+        state.swarm.visibility.archived_at = info.visibility.archived_at
+        state.swarm.time.created = info.time.created
+        state.swarm.time.updated = info.time.updated
+        state.swarm.time.completed = info.time.completed ?? null
+        state.swarm.time.stopped = info.time.stopped ?? null
+        state.swarm.time.deleted = info.time.deleted ?? null
+        state.workers = Object.fromEntries(
+          info.workers.map((worker) => [
+            worker.session_id,
+            {
+              id: worker.session_id,
+              session_id: worker.session_id,
+              agent: worker.agent,
+              role: worker.role ?? null,
+              task_id: worker.task_id || null,
+              status: worker.status,
+              updated_at: worker.updated_at,
+              reason: worker.reason,
+              evidence: worker.evidence,
+            },
+          ]),
+        )
+      },
+    })
   }
 
   function visible(info: Info, include_deleted?: boolean) {
@@ -178,14 +208,20 @@ export namespace Swarm {
   }
 
   export async function load(id: string, input?: { include_deleted?: boolean }): Promise<Info | undefined> {
-    const all = await loadAll()
-    const info = all.find((s) => s.id === id)
+    const state = await SwarmState.read(id)
+    const info = state ? fromState(state) : undefined
     if (!info || !visible(info, input?.include_deleted)) return undefined
     return info
   }
 
   export async function list(input?: { include_deleted?: boolean }): Promise<Info[]> {
-    return (await loadAll()).filter((info) => visible(info, input?.include_deleted))
+    const ids = await fs.readdir(root()).catch(() => [] as string[])
+    const list = await Promise.all(
+      ids
+        .filter((id) => id.startsWith("SW-"))
+        .map(async (id) => SwarmState.read(id).then((state) => (state ? fromState(state) : undefined))),
+    )
+    return list.filter((info): info is Info => info !== undefined && visible(info, input?.include_deleted))
   }
 
   export async function replaceWorkerSession(swarmID: string, old: string, next: string): Promise<void> {
@@ -392,8 +428,6 @@ export namespace Swarm {
     ) {
       throw new Error(`Cannot purge swarm with active discussions: ${id}`)
     }
-    const all = await loadAll()
-    await saveAll(all.filter((item) => item.id !== id))
     await fs.rm(path.join(Global.Path.data, "projects", Instance.project.id, "board", id), {
       recursive: true,
       force: true,

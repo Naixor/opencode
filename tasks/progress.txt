@@ -122,3 +122,10 @@
   - A cleanup marker is simpler than heuristics; it makes the rollout gate explicit even in otherwise empty workspaces.
   - Regenerating the SDK after route/schema changes is an important final step once swarm API semantics settle.
 ---
+
+## 2026-04-11 13:24:35 CST - US-013 follow-up
+- Removed the last live legacy fallback reads from `packages/opencode/src/board/task.ts` and `packages/opencode/src/board/discussion.ts`, so v2 readers now require the canonical snapshot instead of silently reading legacy per-entity files.
+- **Learnings for future iterations:**
+  - Leaving a fallback reader in place is effectively a compatibility path, even when writes are already v2-only.
+  - Compatibility projection files can stay on disk for tooling or debugging, but production reads should hard-fail back to the snapshot if the canonical state is missing.
+---

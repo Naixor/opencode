@@ -4,15 +4,12 @@ import fs from "fs/promises"
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Lock } from "../util/lock"
-import { Log } from "../util/log"
 import { Global } from "../global"
 import { Instance } from "../project/instance"
 import { ScopeLock } from "./scope-lock"
 import { SwarmState } from "../session/swarm-state"
 
 export namespace BoardTask {
-  const log = Log.create({ service: "board.task" })
-
   export const Type = z.enum(["implement", "review", "test", "investigate", "fix", "refactor", "discuss"])
   export type Type = z.infer<typeof Type>
 
@@ -92,27 +89,6 @@ export namespace BoardTask {
     await Bun.write(filepath(task.swarm_id, task.id), JSON.stringify(task, null, 2))
   }
 
-  async function listRaw(swarm: string): Promise<Info[]> {
-    await ensure(swarm)
-    const files = await fs.readdir(dir(swarm)).catch(() => [] as string[])
-    const tasks = await Promise.all(
-      files
-        .filter((f) => f.endsWith(".json"))
-        .map(async (f) => {
-          const id = f.slice(0, -5)
-          using _ = await Lock.read(key(id))
-          return Bun.file(path.join(dir(swarm), f))
-            .json()
-            .then((data) => Info.parse(data))
-            .catch((e) => {
-              log.warn("failed to read board task", { file: f, error: e })
-              return undefined
-            })
-        }),
-    )
-    return tasks.filter((task): task is Info => task !== undefined)
-  }
-
   export async function create(input: {
     subject: string
     description?: string
@@ -174,17 +150,14 @@ export namespace BoardTask {
 
   export async function get(swarm: string, id: string): Promise<Info> {
     const state = await SwarmState.read(swarm)
-    if (state?.tasks[id]) return fromState(state.tasks[id]!, swarm)
-    using _ = await Lock.read(key(id))
-    const file = Bun.file(filepath(swarm, id))
-    if (!(await file.exists())) throw new Error(`Board task not found: ${id}`)
-    return Info.parse(await file.json())
+    if (!state?.tasks[id]) throw new Error(`Board task not found: ${id}`)
+    return fromState(state.tasks[id]!, swarm)
   }
 
   export async function list(swarm: string): Promise<Info[]> {
     const state = await SwarmState.read(swarm)
-    if (state) return Object.values(state.tasks).map((task) => fromState(task, swarm))
-    return listRaw(swarm)
+    if (!state) return []
+    return Object.values(state.tasks).map((task) => fromState(task, swarm))
   }
 
   export async function ready(swarm: string): Promise<Info[]> {

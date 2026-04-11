@@ -43,14 +43,6 @@ export namespace Discussion {
     return `discussion-${swarm}-${channel}`
   }
 
-  // Internal helpers that do NOT acquire locks — callers must hold write lock
-  async function loadRaw(swarm: string, channel: string): Promise<Round | undefined> {
-    const fp = filepath(swarm, channel)
-    const file = Bun.file(fp)
-    if (!(await file.exists())) return undefined
-    return Round.parse(await file.json())
-  }
-
   async function saveRaw(round: Round): Promise<void> {
     const fp = filepath(round.swarm_id, round.channel)
     await fs.mkdir(path.dirname(fp), { recursive: true })
@@ -139,9 +131,8 @@ export namespace Discussion {
 
   export async function status(swarm: string, channel: string): Promise<Round | undefined> {
     const state = await SwarmState.read(swarm)
-    if (state?.discussions[channel]) return fromState(swarm, channel, state.discussions[channel]!)
-    using _ = await Lock.read(key(swarm, channel))
-    return loadRaw(swarm, channel)
+    if (!state?.discussions[channel]) return undefined
+    return fromState(swarm, channel, state.discussions[channel]!)
   }
 
   export async function advance(swarm: string, channel: string, actor = "coordinator"): Promise<Round> {
