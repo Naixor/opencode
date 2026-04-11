@@ -39,6 +39,7 @@ import { ManagerCommand } from "./cli/cmd/manager"
 import { StopCommand } from "./cli/cmd/stop"
 import { FeishuAuthCommand } from "./cli/cmd/feishu-auth"
 import { registerAllHooks } from "./session/hooks/register"
+import { SwarmCleanupCommand } from "./cli/cmd/swarm-cleanup"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -155,6 +156,7 @@ let cli = yargs(hideBin(process.argv))
   .command(SandboxCommand)
   .command(ManagerCommand)
   .command(StopCommand)
+  .command(SwarmCleanupCommand)
   .command(FeishuAuthCommand)
 
 if (Installation.isLocal()) {

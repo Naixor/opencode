@@ -1167,6 +1167,145 @@ export type EventMemoryWarning = {
   }
 }
 
+export type EventSwarmTransition = {
+  type: "swarm.transition"
+  properties: {
+    swarm_id: string
+    snapshot: {
+      schema_version: 2
+      rev: number
+      seq: number
+      swarm: {
+        id: string
+        goal: string
+        conductor: string
+        status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+        stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+        reason?: string | null
+        visibility?: {
+          archived_at?: number | null
+        }
+        resume?: {
+          stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+        }
+        config: {
+          max_workers?: number
+          auto_escalate?: boolean
+          verify_on_complete?: boolean
+          wait_timeout_seconds?: number
+        }
+        time: {
+          created: number
+          updated: number
+          completed?: number | null
+          stopped?: number | null
+          archived?: number | null
+          deleted?: number | null
+        }
+      }
+      workers?: {
+        [key: string]: {
+          id: string
+          session_id: string
+          agent: string
+          role?: string | null
+          task_id?: string | null
+          status:
+            | "queued"
+            | "starting"
+            | "running"
+            | "waiting"
+            | "blocked"
+            | "completed"
+            | "failed"
+            | "cancelled"
+            | "stopped"
+          updated_at: number
+          reason?: string | null
+          evidence?: Array<string>
+        }
+      }
+      tasks?: {
+        [key: string]: {
+          id: string
+          subject: string
+          description?: string | null
+          status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+          blocked_by?: Array<string>
+          blocks?: Array<string>
+          assignee?: string | null
+          type: "implement" | "review" | "test" | "investigate" | "fix" | "refactor" | "discuss"
+          scope?: Array<string>
+          artifacts?: Array<string>
+          verify_required?: boolean
+          metadata?: {
+            [key: string]: unknown
+          }
+          created_at: number
+          updated_at: number
+          reason?: string | null
+        }
+      }
+      discussions?: {
+        [key: string]: {
+          id: string
+          channel: string
+          topic: string
+          status:
+            | "idle"
+            | "collecting"
+            | "round_complete"
+            | "consensus_ready"
+            | "decided"
+            | "exhausted"
+            | "failed"
+            | "cancelled"
+          current_round: number
+          max_rounds?: number
+          participants?: Array<string>
+          received?: Array<string>
+          updated_at: number
+        }
+      }
+      verify: {
+        status: "idle" | "pending" | "running" | "passed" | "failed" | "repair_required" | "skipped" | "cancelled"
+        result?: string | null
+        required?: boolean
+        waiver?: {
+          actor: string
+          reason: string
+          at: number
+        } | null
+        updated_at: number
+      }
+      audit: {
+        last_txn?: string | null
+        entries?: Array<{
+          txn: string
+          actor: string
+          reason: string
+          at: number
+          rev: number
+          seq: number
+        }>
+        illegal?: Array<{
+          actor: string
+          reason: string
+          at: number
+        }>
+      }
+    }
+    transition: {
+      seq: number
+      rev: number
+      txn: string
+      actor: string
+      reason: string
+      at: number
+    }
+  }
+}
+
 export type EventBoardTaskCreated = {
   type: "board.task.created"
   properties: {
@@ -1174,7 +1313,7 @@ export type EventBoardTaskCreated = {
       id: string
       subject: string
       description?: string
-      status: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+      status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
       blockedBy?: Array<string>
       blocks?: Array<string>
       assignee?: string
@@ -1198,7 +1337,7 @@ export type EventBoardTaskUpdated = {
       id: string
       subject: string
       description?: string
-      status: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+      status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
       blockedBy?: Array<string>
       blocks?: Array<string>
       assignee?: string
@@ -1289,14 +1428,35 @@ export type EventSwarmCreated = {
         agent: string
         role?: string
         task_id: string
-        status: "active" | "idle" | "done" | "failed"
+        status:
+          | "queued"
+          | "starting"
+          | "running"
+          | "waiting"
+          | "blocked"
+          | "completed"
+          | "failed"
+          | "cancelled"
+          | "stopped"
+        updated_at?: number
+        reason?: string | null
+        evidence?: Array<string>
       }>
       config: {
         max_workers?: number
         auto_escalate?: boolean
         verify_on_complete?: boolean
+        wait_timeout_seconds?: number
       }
-      status: "planning" | "running" | "paused" | "completed" | "failed"
+      status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+      stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+      reason?: string | null
+      resume?: {
+        stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+      }
+      visibility?: {
+        archived_at?: number | null
+      }
       time: {
         created: number
         updated: number
@@ -1320,14 +1480,35 @@ export type EventSwarmUpdated = {
         agent: string
         role?: string
         task_id: string
-        status: "active" | "idle" | "done" | "failed"
+        status:
+          | "queued"
+          | "starting"
+          | "running"
+          | "waiting"
+          | "blocked"
+          | "completed"
+          | "failed"
+          | "cancelled"
+          | "stopped"
+        updated_at?: number
+        reason?: string | null
+        evidence?: Array<string>
       }>
       config: {
         max_workers?: number
         auto_escalate?: boolean
         verify_on_complete?: boolean
+        wait_timeout_seconds?: number
       }
-      status: "planning" | "running" | "paused" | "completed" | "failed"
+      status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+      stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+      reason?: string | null
+      resume?: {
+        stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+      }
+      visibility?: {
+        archived_at?: number | null
+      }
       time: {
         created: number
         updated: number
@@ -1351,14 +1532,35 @@ export type EventSwarmCompleted = {
         agent: string
         role?: string
         task_id: string
-        status: "active" | "idle" | "done" | "failed"
+        status:
+          | "queued"
+          | "starting"
+          | "running"
+          | "waiting"
+          | "blocked"
+          | "completed"
+          | "failed"
+          | "cancelled"
+          | "stopped"
+        updated_at?: number
+        reason?: string | null
+        evidence?: Array<string>
       }>
       config: {
         max_workers?: number
         auto_escalate?: boolean
         verify_on_complete?: boolean
+        wait_timeout_seconds?: number
       }
-      status: "planning" | "running" | "paused" | "completed" | "failed"
+      status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+      stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+      reason?: string | null
+      resume?: {
+        stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+      }
+      visibility?: {
+        archived_at?: number | null
+      }
       time: {
         created: number
         updated: number
@@ -1382,14 +1584,35 @@ export type EventSwarmFailed = {
         agent: string
         role?: string
         task_id: string
-        status: "active" | "idle" | "done" | "failed"
+        status:
+          | "queued"
+          | "starting"
+          | "running"
+          | "waiting"
+          | "blocked"
+          | "completed"
+          | "failed"
+          | "cancelled"
+          | "stopped"
+        updated_at?: number
+        reason?: string | null
+        evidence?: Array<string>
       }>
       config: {
         max_workers?: number
         auto_escalate?: boolean
         verify_on_complete?: boolean
+        wait_timeout_seconds?: number
       }
-      status: "planning" | "running" | "paused" | "completed" | "failed"
+      status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+      stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+      reason?: string | null
+      resume?: {
+        stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+      }
+      visibility?: {
+        archived_at?: number | null
+      }
       time: {
         created: number
         updated: number
@@ -1688,6 +1911,7 @@ export type Event =
   | EventMemoryCapacityWarning
   | EventMemoryTeamCandidates
   | EventMemoryWarning
+  | EventSwarmTransition
   | EventBoardTaskCreated
   | EventBoardTaskUpdated
   | EventBoardTaskDeleted
@@ -2322,6 +2546,10 @@ export type Config = {
      * Run verification after all tasks complete (default: true)
      */
     verify_on_complete?: boolean
+    /**
+     * Seconds before a waiting worker is promoted to blocked (default: 600)
+     */
+    wait_timeout_seconds?: number
     /**
      * Custom escalation rules merged with defaults
      */
@@ -6050,6 +6278,16 @@ export type ManagerServicesResponses = {
 
 export type ManagerServicesResponse = ManagerServicesResponses[keyof ManagerServicesResponses]
 
+export type SwarmAppData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/app"
+}
+
 export type SwarmListData = {
   body?: never
   path?: never
@@ -6074,14 +6312,35 @@ export type SwarmListResponses = {
       agent: string
       role?: string
       task_id: string
-      status: "active" | "idle" | "done" | "failed"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
     }>
     config: {
       max_workers?: number
       auto_escalate?: boolean
       verify_on_complete?: boolean
+      wait_timeout_seconds?: number
     }
-    status: "planning" | "running" | "paused" | "completed" | "failed"
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
     time: {
       created: number
       updated: number
@@ -6133,14 +6392,35 @@ export type SwarmLaunchResponses = {
       agent: string
       role?: string
       task_id: string
-      status: "active" | "idle" | "done" | "failed"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
     }>
     config: {
       max_workers?: number
       auto_escalate?: boolean
       verify_on_complete?: boolean
+      wait_timeout_seconds?: number
     }
-    status: "planning" | "running" | "paused" | "completed" | "failed"
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
     time: {
       created: number
       updated: number
@@ -6197,14 +6477,35 @@ export type SwarmDiscussResponses = {
       agent: string
       role?: string
       task_id: string
-      status: "active" | "idle" | "done" | "failed"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
     }>
     config: {
       max_workers?: number
       auto_escalate?: boolean
       verify_on_complete?: boolean
+      wait_timeout_seconds?: number
     }
-    status: "planning" | "running" | "paused" | "completed" | "failed"
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
     time: {
       created: number
       updated: number
@@ -6240,10 +6541,11 @@ export type SwarmAdminListResponses = {
     goal_summary: string
     conductor_label: string
     conductor_session: string
-    status: "planning" | "running" | "blocked" | "paused" | "completed" | "failed" | "stopped" | "deleted"
+    status: "active" | "blocked" | "paused" | "completed" | "failed" | "stopped"
     current_phase: string
+    verify_status: string | null
     updated_at: number
-    deleted_at?: number
+    archived_at: number | null
     task_counts: {
       total: number
       pending: number
@@ -6299,14 +6601,35 @@ export type SwarmStatusResponses = {
       agent: string
       role?: string
       task_id: string
-      status: "active" | "idle" | "done" | "failed"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
     }>
     config: {
       max_workers?: number
       auto_escalate?: boolean
       verify_on_complete?: boolean
+      wait_timeout_seconds?: number
     }
-    status: "planning" | "running" | "paused" | "completed" | "failed"
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
     time: {
       created: number
       updated: number
@@ -6355,10 +6678,11 @@ export type SwarmAdminDetailResponses = {
       goal_summary: string
       conductor_label: string
       conductor_session: string
-      status: "planning" | "running" | "blocked" | "paused" | "completed" | "failed" | "stopped" | "deleted"
+      status: "active" | "blocked" | "paused" | "completed" | "failed" | "stopped"
       current_phase: string
+      verify_status: string | null
       updated_at: number
-      deleted_at?: number
+      archived_at: number | null
       task_counts: {
         total: number
         pending: number
@@ -6377,6 +6701,7 @@ export type SwarmAdminDetailResponses = {
     }
     goal: string
     current_phase: string
+    verify_status: string | null
     plan_summary: string
     risk_summary: string
     plan_empty: boolean
@@ -6393,7 +6718,7 @@ export type SwarmAdminDetailResponses = {
       id: string
       summary: string
       type: "implement" | "review" | "test" | "investigate" | "fix" | "refactor" | "discuss"
-      status: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+      status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
       blocked_by: Array<string>
       assignee: string | null
       created_at: number
@@ -6411,7 +6736,16 @@ export type SwarmAdminDetailResponses = {
       id: string
       label: string
       session_id: string
-      status: "active" | "idle" | "blocked" | "failed" | "done"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
       task_count: number
       recent_activity_at: number | null
       current_task: string | null
@@ -6569,14 +6903,35 @@ export type SwarmPauseResponses = {
       agent: string
       role?: string
       task_id: string
-      status: "active" | "idle" | "done" | "failed"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
     }>
     config: {
       max_workers?: number
       auto_escalate?: boolean
       verify_on_complete?: boolean
+      wait_timeout_seconds?: number
     }
-    status: "planning" | "running" | "paused" | "completed" | "failed"
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
     time: {
       created: number
       updated: number
@@ -6623,14 +6978,35 @@ export type SwarmResumeResponses = {
       agent: string
       role?: string
       task_id: string
-      status: "active" | "idle" | "done" | "failed"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
     }>
     config: {
       max_workers?: number
       auto_escalate?: boolean
       verify_on_complete?: boolean
+      wait_timeout_seconds?: number
     }
-    status: "planning" | "running" | "paused" | "completed" | "failed"
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
     time: {
       created: number
       updated: number
@@ -6677,14 +7053,35 @@ export type SwarmStopResponses = {
       agent: string
       role?: string
       task_id: string
-      status: "active" | "idle" | "done" | "failed"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
     }>
     config: {
       max_workers?: number
       auto_escalate?: boolean
       verify_on_complete?: boolean
+      wait_timeout_seconds?: number
     }
-    status: "planning" | "running" | "paused" | "completed" | "failed"
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
     time: {
       created: number
       updated: number
@@ -6696,6 +7093,81 @@ export type SwarmStopResponses = {
 }
 
 export type SwarmStopResponse = SwarmStopResponses[keyof SwarmStopResponses]
+
+export type SwarmArchiveData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/archive"
+}
+
+export type SwarmArchiveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmArchiveError = SwarmArchiveErrors[keyof SwarmArchiveErrors]
+
+export type SwarmArchiveResponses = {
+  /**
+   * Swarm archived
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+      wait_timeout_seconds?: number
+    }
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmArchiveResponse = SwarmArchiveResponses[keyof SwarmArchiveResponses]
 
 export type SwarmDeleteData = {
   body?: never
@@ -6731,14 +7203,35 @@ export type SwarmDeleteResponses = {
       agent: string
       role?: string
       task_id: string
-      status: "active" | "idle" | "done" | "failed"
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
     }>
     config: {
       max_workers?: number
       auto_escalate?: boolean
       verify_on_complete?: boolean
+      wait_timeout_seconds?: number
     }
-    status: "planning" | "running" | "paused" | "completed" | "failed"
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
     time: {
       created: number
       updated: number
@@ -6750,6 +7243,109 @@ export type SwarmDeleteResponses = {
 }
 
 export type SwarmDeleteResponse = SwarmDeleteResponses[keyof SwarmDeleteResponses]
+
+export type SwarmUnarchiveData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/unarchive"
+}
+
+export type SwarmUnarchiveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmUnarchiveError = SwarmUnarchiveErrors[keyof SwarmUnarchiveErrors]
+
+export type SwarmUnarchiveResponses = {
+  /**
+   * Swarm unarchived
+   */
+  200: {
+    id: string
+    goal: string
+    conductor: string
+    workers?: Array<{
+      session_id: string
+      agent: string
+      role?: string
+      task_id: string
+      status:
+        | "queued"
+        | "starting"
+        | "running"
+        | "waiting"
+        | "blocked"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "stopped"
+      updated_at?: number
+      reason?: string | null
+      evidence?: Array<string>
+    }>
+    config: {
+      max_workers?: number
+      auto_escalate?: boolean
+      verify_on_complete?: boolean
+      wait_timeout_seconds?: number
+    }
+    status: "active" | "paused" | "blocked" | "completed" | "failed" | "stopped"
+    stage: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle"
+    reason?: string | null
+    resume?: {
+      stage?: "planning" | "dispatching" | "executing" | "discussing" | "verifying" | "repairing" | "idle" | null
+    }
+    visibility?: {
+      archived_at?: number | null
+    }
+    time: {
+      created: number
+      updated: number
+      completed?: number
+      stopped?: number
+      deleted?: number
+    }
+  }
+}
+
+export type SwarmUnarchiveResponse = SwarmUnarchiveResponses[keyof SwarmUnarchiveResponses]
+
+export type SwarmPurgeData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/purge"
+}
+
+export type SwarmPurgeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmPurgeError = SwarmPurgeErrors[keyof SwarmPurgeErrors]
+
+export type SwarmPurgeResponses = {
+  /**
+   * Swarm purged
+   */
+  200: unknown
+}
 
 export type SwarmDiscussionData = {
   body?: never

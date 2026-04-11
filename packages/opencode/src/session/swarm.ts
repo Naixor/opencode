@@ -15,6 +15,7 @@ import { SessionStatus } from "./status"
 import { SessionMetadata } from "./session-metadata"
 import { SwarmState } from "./swarm-state"
 import { Config } from "../config/config"
+import { SwarmCleanup } from "./swarm-cleanup"
 
 export namespace Swarm {
   const log = Log.create({ service: "swarm" })
@@ -214,6 +215,7 @@ export namespace Swarm {
   }
 
   export async function launch(input: { goal: string; config?: Partial<Info["config"]> }): Promise<Info> {
+    await SwarmCleanup.assertReady()
     const id = `SW-${crypto.randomUUID()}`
     await SharedBoard.init(id)
     const cfg = await Config.get()

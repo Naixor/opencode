@@ -13,3 +13,4 @@
 
 - Use `SwarmState.mutate` for authoritative swarm, task, and discussion writes; the per-task and per-discussion JSON files are compatibility projections derived from `board/<swarm>/state.json`.
 - Worker timeout behavior comes from `swarm.wait_timeout_seconds` in config and is mirrored into each launched swarm's config; when testing wait behavior, use `Swarm.status()` to trigger the timeout promotion from `waiting` to `blocked`.
+- Before launching v2 swarms in a workspace, run `opencode swarm-cleanup --dry-run` and then `opencode swarm-cleanup --confirm purge-legacy-swarms`; `Swarm.launch()` is intentionally blocked until that cleanup marker exists.

@@ -165,6 +165,8 @@ import type {
   SwarmAdminDetailErrors,
   SwarmAdminDetailResponses,
   SwarmAdminListResponses,
+  SwarmArchiveErrors,
+  SwarmArchiveResponses,
   SwarmDeleteErrors,
   SwarmDeleteResponses,
   SwarmDiscussErrors,
@@ -178,12 +180,16 @@ import type {
   SwarmListResponses,
   SwarmPauseErrors,
   SwarmPauseResponses,
+  SwarmPurgeErrors,
+  SwarmPurgeResponses,
   SwarmResumeErrors,
   SwarmResumeResponses,
   SwarmStatusErrors,
   SwarmStatusResponses,
   SwarmStopErrors,
   SwarmStopResponses,
+  SwarmUnarchiveErrors,
+  SwarmUnarchiveResponses,
   TextPartInput,
   ToolIdsErrors,
   ToolIdsResponses,
@@ -4018,6 +4024,36 @@ export class Admin extends HeyApiClient {
 
 export class Swarm extends HeyApiClient {
   /**
+   * Swarm admin UI
+   *
+   * Serve the Swarm admin web interface.
+   */
+  public app<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<unknown, unknown, ThrowOnError>({
+      url: "/swarm/app",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * List Swarms
    *
    * Get a list of all Swarms.
@@ -4312,9 +4348,41 @@ export class Swarm extends HeyApiClient {
   }
 
   /**
-   * Safely delete Swarm
+   * Archive Swarm
    *
    * Hide a finished Swarm from default lists without deleting board data.
+   */
+  public archive<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmArchiveResponses, SwarmArchiveErrors, ThrowOnError>({
+      url: "/swarm/{id}/archive",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Archive Swarm (legacy alias)
+   *
+   * Legacy alias for archiving a finished Swarm without deleting board data.
    */
   public delete<ThrowOnError extends boolean = false>(
     parameters: {
@@ -4338,6 +4406,70 @@ export class Swarm extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<SwarmDeleteResponses, SwarmDeleteErrors, ThrowOnError>({
       url: "/swarm/{id}/delete",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Unarchive Swarm
+   *
+   * Restore an archived Swarm to the default lists.
+   */
+  public unarchive<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmUnarchiveResponses, SwarmUnarchiveErrors, ThrowOnError>({
+      url: "/swarm/{id}/unarchive",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Purge Swarm
+   *
+   * Permanently remove a terminal archived Swarm after all active work is gone.
+   */
+  public purge<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmPurgeResponses, SwarmPurgeErrors, ThrowOnError>({
+      url: "/swarm/{id}/purge",
       ...options,
       ...params,
     })

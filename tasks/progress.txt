@@ -3,6 +3,7 @@
 - Use `SwarmState.create/read/write` in `packages/opencode/src/session/swarm-state.ts` for canonical swarm snapshot setup instead of hand-rolling `state.json` payloads.
 - Route authoritative swarm/task/discussion changes through `SwarmState.mutate`; `BoardTask` and `Discussion` raw JSON files are compatibility mirrors, not the source of truth.
 - Worker timeout tests should call `Swarm.status()` after seeding a `waiting` worker, because the timeout promotion to `blocked` happens when swarm state is refreshed.
+- Run `opencode swarm-cleanup --dry-run` before enabling v2 swarms in any workspace, then finalize with `opencode swarm-cleanup --confirm purge-legacy-swarms` to write the rollout marker.
 
 ---
 
@@ -111,4 +112,13 @@
   - Archive is just visibility, so it should live on `visibility.archived_at` and never leak into the lifecycle `status` enum.
   - Purge should only be offered after archive; that keeps “hidden” and “deleted” as clearly separate operator actions.
   - Reusing the legacy `include_deleted` query flag as “include archived” keeps older callers working while the UI terminology moves to archive/purge.
+---
+
+## 2026-04-11 13:07:33 CST - US-013
+- Added cleanup/reset tooling in `packages/opencode/src/session/swarm-cleanup.ts` and `packages/opencode/src/cli/cmd/swarm-cleanup.ts`, blocked `Swarm.launch()` until cleanup succeeds, regenerated the JavaScript SDK, and verified the cleanup CLI dry-run/confirm flow in an isolated XDG data home.
+- Added cleanup coverage in `packages/opencode/test/session/swarm-cleanup.test.ts`, including the rollout gate that blocks launch before cleanup and allows schema_version 2 swarms after cleanup.
+- **Learnings for future iterations:**
+  - The safest rollout is destructive cleanup, not migration: delete legacy swarm data, write a marker, and let new v2 swarms recreate fresh state.
+  - A cleanup marker is simpler than heuristics; it makes the rollout gate explicit even in otherwise empty workspaces.
+  - Regenerating the SDK after route/schema changes is an important final step once swarm API semantics settle.
 ---
