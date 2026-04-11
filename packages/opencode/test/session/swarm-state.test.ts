@@ -7,11 +7,11 @@ import { BoardTask } from "../../src/board"
 import { Discussion } from "../../src/board/discussion"
 
 describe("SwarmState", () => {
-  test("requires schema version 2", () => {
+  test("requires schema version 3", () => {
     expect(() =>
       SwarmState.Snapshot.parse({
         ...SwarmState.Example,
-        schema_version: 1,
+        schema_version: 2,
       }),
     ).toThrow()
   })
@@ -23,14 +23,124 @@ describe("SwarmState", () => {
       fn: async () => {
         const state = SwarmState.create({
           id: "SW-v2",
-          goal: "Ship v2 state",
+          goal: "Ship v3 state",
           conductor: "SE-conductor",
         })
         await SwarmState.write(state)
         const next = await SwarmState.read("SW-v2")
-        expect(next?.schema_version).toBe(2)
+        expect(next?.schema_version).toBe(3)
         expect(next?.swarm.id).toBe("SW-v2")
         expect(next?.swarm.stage).toBe("planning")
+        expect(next?.alignment.catalog.scope).toBe("project")
+        expect(next?.alignment.catalog.roles).toEqual({})
+        expect(next?.alignment.confirmations.scope).toBe("user")
+        expect(next?.alignment.confirmations.users).toEqual({})
+        expect(next?.alignment.contract).toBeNull()
+        expect(next?.alignment.gate.value).toBeNull()
+        expect(next?.alignment.role_delta.roles).toEqual([])
+        expect(next?.alignment.pending_confirmation).toBeNull()
+      },
+    })
+  })
+
+  test("persists populated alignment state in the canonical snapshot", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const state = SwarmState.create({
+          id: "SW-align",
+          goal: "Store alignment state",
+          conductor: "SE-conductor",
+        })
+        state.alignment.catalog.roles.pm = {
+          id: "pm",
+          name: "PM",
+          purpose: "Own scope",
+          perspective: "User impact first",
+          default_when: "Trade-offs affect product direction",
+          version: 1,
+          created_at: 10,
+          updated_at: 10,
+        }
+        state.alignment.confirmations.users.user_1 = {
+          pm: {
+            role_id: "pm",
+            version: 1,
+            confirmed_at: 11,
+            run_id: "SW-align",
+          },
+        }
+        state.alignment.contract = {
+          goal: "Plan a risky swarm",
+          scope: "Swarm alignment rollout",
+          constraints: ["Do not add compatibility loaders"],
+          roles: [
+            {
+              role_id: "pm",
+              name: "PM",
+              purpose: "Own scope",
+              perspective: "User impact first",
+              default_when: "Trade-offs affect product direction",
+            },
+          ],
+          mode: "discussion",
+          assumptions: ["Catalog already exists"],
+          risks: ["Gate policy may pause the run"],
+          discussion_reason: "Direction changes are possible",
+          created_at: 12,
+        }
+        state.alignment.gate = {
+          value: "G2",
+          reason: "Material role delta requires review",
+          input: {
+            action_sensitive: false,
+            material_role_delta: true,
+            ambiguous: true,
+            valid_options: 2,
+            trade_offs: true,
+            confidence: "low",
+            routine: false,
+          },
+          evaluated_at: 13,
+        }
+        state.alignment.role_delta = {
+          material: true,
+          roles: [
+            {
+              role_id: "pm",
+              name: "PM",
+              state: "modified",
+              fields: ["purpose", "perspective"],
+            },
+          ],
+          updated_at: 14,
+        }
+        state.alignment.pending_confirmation = {
+          kind: "run",
+          gate: "G2",
+          requested_at: 15,
+          requested_by: "SE-conductor",
+          reason: "Confirm the updated contract",
+          roles: ["pm"],
+        }
+        state.alignment.audit.contract = {
+          created_at: 12,
+          updated_at: 15,
+          actor: "SE-conductor",
+          run_id: "SW-align",
+        }
+        await SwarmState.write(state)
+        const next = await SwarmState.read("SW-align")
+        expect(next?.alignment.catalog.scope).toBe("project")
+        expect(next?.alignment.confirmations.scope).toBe("user")
+        expect(next?.alignment.catalog.roles.pm?.purpose).toBe("Own scope")
+        expect(next?.alignment.confirmations.users.user_1?.pm?.confirmed_at).toBe(11)
+        expect(next?.alignment.contract?.mode).toBe("discussion")
+        expect(next?.alignment.gate.value).toBe("G2")
+        expect(next?.alignment.role_delta.roles[0]?.fields).toEqual(["purpose", "perspective"])
+        expect(next?.alignment.pending_confirmation?.roles).toEqual(["pm"])
+        expect(next?.alignment.audit.contract.actor).toBe("SE-conductor")
       },
     })
   })

@@ -31,16 +31,18 @@ describe("SwarmCleanup", () => {
     })
   })
 
-  test("blocks launch until cleanup completes and then creates schema version 2 swarms", async () => {
+  test("blocks launch until cleanup completes and then creates schema version 3 swarms", async () => {
     await using tmp = await tmpdir({ git: true, config: {} })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         await expect(Swarm.launch({ goal: "Should block" })).rejects.toThrow("cleanup completes")
         await SwarmCleanup.run({ dry_run: false, confirm: "purge-legacy-swarms" })
-        const info = await Swarm.launch({ goal: "Ready for v2" })
+        const info = await Swarm.launch({ goal: "Ready for v3" })
         const state = await SwarmState.read(info.id)
-        expect(state?.schema_version).toBe(2)
+        expect(state?.schema_version).toBe(3)
+        expect(state?.alignment.catalog.scope).toBe("project")
+        expect(state?.alignment.catalog.roles).toEqual({})
       },
     })
   })

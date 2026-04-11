@@ -190,6 +190,11 @@ export namespace SwarmState {
     "tasks[*].verify_required",
     "discussions[*].status",
     "discussions[*].current_round",
+    "alignment.gate.value",
+    "alignment.gate.input",
+    "alignment.role_delta.material",
+    "alignment.role_delta.roles",
+    "alignment.pending_confirmation",
     "verify.status",
     "verify.result",
     "audit.last_txn",
@@ -220,6 +225,13 @@ export namespace SwarmState {
     "discussions[*].participants",
     "discussions[*].received",
     "discussions[*].max_rounds",
+    "alignment.catalog.roles",
+    "alignment.confirmations.users",
+    "alignment.contract",
+    "alignment.gate.reason",
+    "alignment.gate.evaluated_at",
+    "alignment.role_delta.updated_at",
+    "alignment.audit",
     "verify.required",
     "verify.updated_at",
     "verify.waiver",
@@ -334,6 +346,144 @@ export namespace SwarmState {
   })
   export type Verify = z.infer<typeof Verify>
 
+  export const Role = z.object({
+    id: z.string(),
+    name: z.string(),
+    purpose: z.string(),
+    perspective: z.string(),
+    default_when: z.string(),
+    version: z.number().int().positive(),
+    created_at: z.number(),
+    updated_at: z.number(),
+  })
+  export type Role = z.infer<typeof Role>
+
+  export const Confirm = z.object({
+    role_id: z.string(),
+    version: z.number().int().positive(),
+    confirmed_at: z.number(),
+    run_id: z.string().nullable().default(null),
+  })
+  export type Confirm = z.infer<typeof Confirm>
+
+  export const RoleState = z.enum(["unchanged", "added", "removed", "modified"])
+  export type RoleState = z.infer<typeof RoleState>
+
+  export const RoleField = z.enum(["purpose", "perspective", "default_when"])
+  export type RoleField = z.infer<typeof RoleField>
+
+  export const Delta = z.object({
+    role_id: z.string().nullable().default(null),
+    name: z.string(),
+    state: RoleState,
+    fields: z.array(RoleField).default([]),
+  })
+  export type Delta = z.infer<typeof Delta>
+
+  export const Mode = z.enum(["execute", "discussion"])
+  export type Mode = z.infer<typeof Mode>
+
+  export const RunRole = z.object({
+    role_id: z.string().nullable().default(null),
+    name: z.string(),
+    purpose: z.string().nullable().default(null),
+    perspective: z.string().nullable().default(null),
+    default_when: z.string().nullable().default(null),
+  })
+  export type RunRole = z.infer<typeof RunRole>
+
+  export const RunContract = z.object({
+    goal: z.string(),
+    scope: z.string(),
+    constraints: z.array(z.string()).default([]),
+    roles: z.array(RunRole).default([]),
+    mode: Mode,
+    assumptions: z.array(z.string()).default([]),
+    risks: z.array(z.string()).default([]),
+    discussion_reason: z.string().nullable().default(null),
+    created_at: z.number(),
+  })
+  export type RunContract = z.infer<typeof RunContract>
+
+  export const Gate = z.enum(["G0", "G1", "G2", "G3"])
+  export type Gate = z.infer<typeof Gate>
+
+  export const GateInput = z.object({
+    action_sensitive: z.boolean().nullable().default(null),
+    material_role_delta: z.boolean().nullable().default(null),
+    ambiguous: z.boolean().nullable().default(null),
+    valid_options: z.number().int().nonnegative().nullable().default(null),
+    trade_offs: z.boolean().nullable().default(null),
+    confidence: z.enum(["low", "high"]).nullable().default(null),
+    routine: z.boolean().nullable().default(null),
+  })
+  export type GateInput = z.infer<typeof GateInput>
+
+  export const GateState = z.object({
+    value: Gate.nullable().default(null),
+    reason: z.string().nullable().default(null),
+    input: GateInput.nullable().default(null),
+    evaluated_at: z.number().nullable().default(null),
+  })
+  export type GateState = z.infer<typeof GateState>
+
+  export const DeltaState = z.object({
+    material: z.boolean().default(false),
+    roles: z.array(Delta).default([]),
+    updated_at: z.number().nullable().default(null),
+  })
+  export type DeltaState = z.infer<typeof DeltaState>
+
+  export const Pending = z.object({
+    kind: z.enum(["run", "role"]),
+    gate: Gate.nullable().default(null),
+    requested_at: z.number(),
+    requested_by: z.string().nullable().default(null),
+    reason: z.string().nullable().default(null),
+    roles: z.array(z.string()).default([]),
+  })
+  export type Pending = z.infer<typeof Pending>
+
+  export const Meta = z.object({
+    created_at: z.number().nullable().default(null),
+    updated_at: z.number().nullable().default(null),
+    actor: z.string().nullable().default(null),
+    run_id: z.string().nullable().default(null),
+  })
+  export type Meta = z.infer<typeof Meta>
+
+  export const Alignment = z.object({
+    catalog: z
+      .object({ scope: z.literal("project").default("project"), roles: z.record(z.string(), Role).default({}) })
+      .default({ scope: "project", roles: {} }),
+    confirmations: z
+      .object({
+        scope: z.literal("user").default("user"),
+        users: z.record(z.string(), z.record(z.string(), Confirm)).default({}),
+      })
+      .default({ scope: "user", users: {} }),
+    contract: RunContract.nullable().default(null),
+    gate: GateState.default({ value: null, reason: null, input: null, evaluated_at: null }),
+    role_delta: DeltaState.default({ material: false, roles: [], updated_at: null }),
+    pending_confirmation: Pending.nullable().default(null),
+    audit: z
+      .object({
+        catalog: Meta.default({ created_at: null, updated_at: null, actor: null, run_id: null }),
+        confirmations: Meta.default({ created_at: null, updated_at: null, actor: null, run_id: null }),
+        contract: Meta.default({ created_at: null, updated_at: null, actor: null, run_id: null }),
+        gate: Meta.default({ created_at: null, updated_at: null, actor: null, run_id: null }),
+        pending_confirmation: Meta.default({ created_at: null, updated_at: null, actor: null, run_id: null }),
+      })
+      .default({
+        catalog: { created_at: null, updated_at: null, actor: null, run_id: null },
+        confirmations: { created_at: null, updated_at: null, actor: null, run_id: null },
+        contract: { created_at: null, updated_at: null, actor: null, run_id: null },
+        gate: { created_at: null, updated_at: null, actor: null, run_id: null },
+        pending_confirmation: { created_at: null, updated_at: null, actor: null, run_id: null },
+      }),
+  })
+  export type Alignment = z.infer<typeof Alignment>
+
   export const AuditEntry = z.object({
     txn: z.string(),
     actor: z.string(),
@@ -359,13 +509,14 @@ export namespace SwarmState {
   export type Audit = z.infer<typeof Audit>
 
   export const Snapshot = z.object({
-    schema_version: z.literal(2),
+    schema_version: z.literal(3),
     rev: z.number().int().nonnegative(),
     seq: z.number().int().nonnegative(),
     swarm: Swarm,
     workers: z.record(z.string(), Worker).default({}),
     tasks: z.record(z.string(), Task).default({}),
     discussions: z.record(z.string(), Discussion).default({}),
+    alignment: Alignment,
     verify: Verify,
     audit: Audit,
   })
@@ -383,7 +534,7 @@ export namespace SwarmState {
   }
 
   export const Example = Snapshot.parse({
-    schema_version: 2,
+    schema_version: 3,
     rev: 3,
     seq: 42,
     swarm: {
@@ -431,6 +582,21 @@ export namespace SwarmState {
       },
     },
     discussions: {},
+    alignment: {
+      catalog: { scope: "project", roles: {} },
+      confirmations: { scope: "user", users: {} },
+      contract: null,
+      gate: { value: null, reason: null, input: null, evaluated_at: null },
+      role_delta: { material: false, roles: [], updated_at: null },
+      pending_confirmation: null,
+      audit: {
+        catalog: { created_at: null, updated_at: null, actor: null, run_id: null },
+        confirmations: { created_at: null, updated_at: null, actor: null, run_id: null },
+        contract: { created_at: null, updated_at: null, actor: null, run_id: null },
+        gate: { created_at: null, updated_at: null, actor: null, run_id: null },
+        pending_confirmation: { created_at: null, updated_at: null, actor: null, run_id: null },
+      },
+    },
     verify: {
       status: "running",
       result: null,
@@ -602,7 +768,7 @@ export namespace SwarmState {
   }): Snapshot {
     const now = input.time?.updated ?? input.time?.created ?? Date.now()
     return Snapshot.parse({
-      schema_version: 2,
+      schema_version: 3,
       rev: 0,
       seq: 0,
       swarm: {
@@ -632,6 +798,21 @@ export namespace SwarmState {
       workers: {},
       tasks: {},
       discussions: {},
+      alignment: {
+        catalog: { scope: "project", roles: {} },
+        confirmations: { scope: "user", users: {} },
+        contract: null,
+        gate: { value: null, reason: null, input: null, evaluated_at: null },
+        role_delta: { material: false, roles: [], updated_at: null },
+        pending_confirmation: null,
+        audit: {
+          catalog: { created_at: null, updated_at: null, actor: null, run_id: null },
+          confirmations: { created_at: null, updated_at: null, actor: null, run_id: null },
+          contract: { created_at: null, updated_at: null, actor: null, run_id: null },
+          gate: { created_at: null, updated_at: null, actor: null, run_id: null },
+          pending_confirmation: { created_at: null, updated_at: null, actor: null, run_id: null },
+        },
+      },
       verify: {
         status: "idle",
         result: null,
