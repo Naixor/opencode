@@ -277,4 +277,85 @@ describe("SwarmState", () => {
       },
     })
   })
+
+  test("moves dependent tasks to ready only after completed dependencies", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const now = Date.now()
+        await Swarm.save({
+          id: "SW-ready",
+          goal: "Keep task readiness explicit",
+          conductor: "SE-conductor",
+          workers: [],
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
+          status: "active",
+          stage: "executing",
+          reason: null,
+          resume: { stage: null },
+          visibility: { archived_at: null },
+          time: { created: now, updated: now },
+        })
+        const a = await BoardTask.create({ subject: "Upstream", type: "implement", swarm_id: "SW-ready" })
+        const b = await BoardTask.create({
+          subject: "Downstream",
+          type: "implement",
+          swarm_id: "SW-ready",
+          blockedBy: [a.id],
+        })
+        expect((await BoardTask.get("SW-ready", a.id)).status).toBe("ready")
+        expect((await BoardTask.get("SW-ready", b.id)).status).toBe("pending")
+        await BoardTask.update("SW-ready", a.id, { status: "completed" })
+        expect((await BoardTask.get("SW-ready", b.id)).status).toBe("ready")
+        await BoardTask.update("SW-ready", a.id, { status: "failed" })
+        expect((await BoardTask.get("SW-ready", b.id)).status).toBe("pending")
+      },
+    })
+  })
+
+  test("maps worker outcomes onto task state", () => {
+    const base = SwarmState.create({ id: "SW-link", goal: "Link workers to tasks", conductor: "SE-conductor" })
+    base.tasks.t_1 = {
+      id: "t_1",
+      subject: "Ship task",
+      description: null,
+      status: "ready",
+      blocked_by: [],
+      blocks: [],
+      assignee: "SE-worker-1",
+      type: "implement",
+      scope: [],
+      artifacts: [],
+      verify_required: true,
+      metadata: {},
+      created_at: 1,
+      updated_at: 1,
+      reason: null,
+    }
+    base.workers.w_1 = {
+      id: "w_1",
+      session_id: "SE-worker-1",
+      agent: "sisyphus",
+      role: null,
+      task_id: "t_1",
+      status: "running",
+      updated_at: 1,
+      reason: null,
+      evidence: [],
+    }
+    SwarmState.align(base)
+    expect(base.tasks.t_1?.status).toBe("in_progress")
+    base.workers.w_1.status = "blocked"
+    base.workers.w_1.reason = "waiting on dependency"
+    SwarmState.align(base)
+    expect(base.tasks.t_1?.status).toBe("blocked")
+    base.workers.w_1.status = "completed"
+    base.verify.status = "running"
+    SwarmState.align(base)
+    expect(base.tasks.t_1?.status).toBe("verifying")
+    base.verify.status = "passed"
+    SwarmState.align(base)
+    expect(base.tasks.t_1?.status).toBe("completed")
+  })
 })

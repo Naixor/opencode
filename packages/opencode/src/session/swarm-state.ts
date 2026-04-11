@@ -40,6 +40,41 @@ export namespace SwarmState {
     stopped: ["stopped"],
   }
 
+  export function align(snapshot: Snapshot) {
+    for (const task of Object.values(snapshot.tasks)) {
+      if (["pending", "ready"].includes(task.status)) {
+        const deps = task.blocked_by.map((id) => snapshot.tasks[id]?.status)
+        task.status = deps.length === 0 || deps.every((item) => item === "completed") ? "ready" : "pending"
+      }
+      task.reason = task.status === "blocked" || task.status === "failed" ? task.reason : null
+    }
+    for (const worker of Object.values(snapshot.workers)) {
+      if (!worker.task_id) continue
+      const task = snapshot.tasks[worker.task_id]
+      if (!task) continue
+      if (["queued", "starting", "running", "waiting"].includes(worker.status)) {
+        task.status = "in_progress"
+        task.reason = null
+        continue
+      }
+      if (worker.status === "blocked") {
+        task.status = "blocked"
+        task.reason = worker.reason
+        continue
+      }
+      if (worker.status === "failed") {
+        task.status = "failed"
+        task.reason = worker.reason
+        continue
+      }
+      if (worker.status === "completed") {
+        task.status =
+          snapshot.verify.status === "pending" || snapshot.verify.status === "running" ? "verifying" : "completed"
+        task.reason = null
+      }
+    }
+  }
+
   export const Status = z.enum(["active", "paused", "blocked", "completed", "failed", "stopped"])
   export type Status = z.infer<typeof Status>
 
@@ -434,6 +469,7 @@ export namespace SwarmState {
     }
     const next = structuredClone(state)
     input.fn(next)
+    align(next)
     check(state, next)
     const checked = Snapshot.parse(next)
     await write(checked)

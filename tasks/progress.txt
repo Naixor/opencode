@@ -50,3 +50,12 @@
   - The launched swarm snapshot should capture the resolved `wait_timeout_seconds` value so runtime checks do not have to keep rereading global config.
   - Worker unblock validation is currently evidence-based through `worker.evidence`, so any future resume path must populate that field before moving `blocked -> running`.
 ---
+
+## 2026-04-11 12:26:22 CST - US-006
+- Expanded `BoardTask.Status` to the full v2 task lifecycle, added dependency-based `ready` handling in `packages/opencode/src/board/task.ts`, and introduced `SwarmState.align()` in `packages/opencode/src/session/swarm-state.ts` to project worker and verify outcomes onto authoritative task state.
+- Updated shared board/admin aggregates so `ready` counts as pending work, `verifying` counts as running work, and explicit `blocked` task state is surfaced separately.
+- **Learnings for future iterations:**
+  - Dependency readiness is safest as a projection: `pending` and `ready` tasks can be recomputed, but downstream tasks should never auto-promote themselves to `blocked`.
+  - Worker-to-task linkage belongs in snapshot reconciliation, not scattered across board readers, so task state stays coherent after both worker and verify updates.
+  - UI aggregates need to treat `ready` as pending inventory and `verifying` as active work to stay compatible with the old overview layout.
+---

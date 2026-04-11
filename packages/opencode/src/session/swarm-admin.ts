@@ -214,7 +214,10 @@ export namespace SwarmAdmin {
     if (info.status === "paused") return "paused"
     if (disc.some((item) => item.consensus_state === "active")) return "discussing"
     if (tasks.length === 0 && info.stage === "planning") return "planning"
-    if (info.stage === "executing" && tasks.some((task) => task.status === "pending" && !task.assignee))
+    if (
+      info.stage === "executing" &&
+      tasks.some((task) => (task.status === "pending" || task.status === "ready") && !task.assignee)
+    )
       return "assigning"
     if (info.stage === "executing") return "running"
     return info.stage
@@ -344,9 +347,9 @@ export namespace SwarmAdmin {
   function counts(tasks: TaskInfo[]) {
     return TaskCount.parse({
       total: tasks.length,
-      pending: tasks.filter((task) => task.status === "pending").length,
-      running: tasks.filter((task) => task.status === "in_progress").length,
-      blocked: tasks.filter((task) => task.blocked_reason).length,
+      pending: tasks.filter((task) => task.status === "pending" || task.status === "ready").length,
+      running: tasks.filter((task) => task.status === "in_progress" || task.status === "verifying").length,
+      blocked: tasks.filter((task) => task.status === "blocked" || Boolean(task.blocked_reason)).length,
       failed: tasks.filter((task) => task.status === "failed").length,
       completed: tasks.filter((task) => task.status === "completed").length,
     })

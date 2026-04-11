@@ -60,15 +60,19 @@ export namespace SharedBoard {
       BoardArtifact.list({ swarm_id: swarm }),
       BoardSignal.recent(swarm, undefined, 50),
     ])
-    const workers = new Set(tasks.filter((t) => t.assignee && t.status === "in_progress").map((t) => t.assignee))
+    const workers = new Set(
+      tasks
+        .filter((task) => task.assignee && (task.status === "in_progress" || task.status === "verifying"))
+        .map((task) => task.assignee),
+    )
     const data: Snapshot = {
       tasks,
       artifacts,
       recentSignals: signals,
       stats: {
         total: tasks.length,
-        pending: tasks.filter((t) => t.status === "pending").length,
-        running: tasks.filter((t) => t.status === "in_progress").length,
+        pending: tasks.filter((task) => task.status === "pending" || task.status === "ready").length,
+        running: tasks.filter((task) => task.status === "in_progress" || task.status === "verifying").length,
         completed: tasks.filter((t) => t.status === "completed").length,
         failed: tasks.filter((t) => t.status === "failed").length,
         workers: workers.size,

@@ -16,7 +16,16 @@ export namespace BoardTask {
   export const Type = z.enum(["implement", "review", "test", "investigate", "fix", "refactor", "discuss"])
   export type Type = z.infer<typeof Type>
 
-  export const Status = z.enum(["pending", "in_progress", "completed", "failed", "cancelled"])
+  export const Status = z.enum([
+    "pending",
+    "ready",
+    "in_progress",
+    "verifying",
+    "completed",
+    "blocked",
+    "failed",
+    "cancelled",
+  ])
   export type Status = z.infer<typeof Status>
 
   export const Info = z.object({
@@ -123,7 +132,7 @@ export namespace BoardTask {
       id,
       subject: input.subject,
       description: input.description,
-      status: "pending",
+      status: (input.blockedBy ?? []).length > 0 ? "pending" : "ready",
       blockedBy: input.blockedBy ?? [],
       blocks: input.blocks ?? [],
       assignee: input.assignee,
@@ -179,12 +188,7 @@ export namespace BoardTask {
   }
 
   export async function ready(swarm: string): Promise<Info[]> {
-    const all = await list(swarm)
-    const map = new Map(all.map((t) => [t.id, t.status]))
-    return all.filter((t) => {
-      if (t.status !== "pending") return false
-      return t.blockedBy.every((dep) => map.get(dep) === "completed")
-    })
+    return (await list(swarm)).filter((task) => task.status === "ready")
   }
 
   export async function update(

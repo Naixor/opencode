@@ -137,6 +137,7 @@ export namespace Swarm {
         },
       ]),
     )
+    SwarmState.align(state)
     if (prev.schema_version === state.schema_version) SwarmState.check(prev, state)
     await SwarmState.write(SwarmState.Snapshot.parse(state))
   }
