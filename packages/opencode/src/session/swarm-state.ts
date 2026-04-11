@@ -442,7 +442,29 @@ export namespace SwarmState {
 
   export async function write(snapshot: Snapshot) {
     await ensure(snapshot.swarm.id)
-    await Bun.write(filepath(snapshot.swarm.id), JSON.stringify(snapshot, null, 2))
+    const file = filepath(snapshot.swarm.id)
+    const tmp = `${file}.tmp-${crypto.randomUUID()}`
+    const text = JSON.stringify(snapshot, null, 2)
+    const out = await fs.open(tmp, "w")
+    try {
+      await out.writeFile(text)
+      await out.sync()
+    } finally {
+      await out.close()
+    }
+    await fs.rename(tmp, file)
+    await fs
+      .open(path.dirname(file), "r")
+      .then(async (dir) => {
+        try {
+          await dir.sync()
+        } finally {
+          await dir.close()
+        }
+      })
+      .catch((err) => {
+        log.warn("state dir sync failed after rename", { swarm: snapshot.swarm.id, error: err })
+      })
   }
 
   export async function illegal(id: string, input: { actor: string; reason: string }) {
@@ -529,6 +551,17 @@ export namespace SwarmState {
     input.fn(next)
     align(next)
     check(state, next)
+    next.rev = state.rev + 1
+    next.seq = state.seq + 1
+    next.audit.last_txn = crypto.randomUUID()
+    next.audit.entries.push({
+      txn: next.audit.last_txn,
+      actor: input.actor,
+      reason: input.reason,
+      at: Date.now(),
+      rev: next.rev,
+      seq: next.seq,
+    })
     const checked = Snapshot.parse(next)
     await write(checked)
     return checked

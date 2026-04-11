@@ -77,3 +77,12 @@
   - `SwarmState.align()` should own the `pending/running -> stage=verifying` projection so every reader sees the same lifecycle semantics.
   - Completion tests need a valid verify transition path first; jumping directly from `idle` to `passed` bypasses the transition matrix.
 ---
+
+## 2026-04-11 12:33:27 CST - US-009
+- Switched canonical snapshot writes in `packages/opencode/src/session/swarm-state.ts` to a temp-file + `fsync` + `rename` flow, and made authoritative mutations stamp monotonic `rev`/`seq` values plus `audit.entries` metadata for each transaction.
+- Updated legacy `Swarm.save()` sync commits to use the same revision/audit bookkeeping and added commit-audit coverage in `packages/opencode/test/session/swarm-state.test.ts`.
+- **Learnings for future iterations:**
+  - The lock already gives single-writer semantics per swarm; layering atomic file replacement on top makes snapshot commits safe without changing callers.
+  - Treat directory `fsync` failures after `rename` as warnings, not rollbacks, because disk state is already authoritative once the rename succeeds.
+  - `rev` and `seq` are easiest to reason about when every successful authoritative write bumps both together, even for legacy sync commits.
+---

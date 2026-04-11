@@ -437,4 +437,41 @@ describe("SwarmState", () => {
     next.verify.status = "passed"
     expect(() => SwarmState.check(prev, next)).not.toThrow()
   })
+
+  test("records rev, seq, and audit info on successful commits", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const now = Date.now()
+        await Swarm.save({
+          id: "SW-audit",
+          goal: "Track authoritative commits",
+          conductor: "SE-conductor",
+          workers: [],
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
+          status: "active",
+          stage: "planning",
+          reason: null,
+          resume: { stage: null },
+          visibility: { archived_at: null },
+          time: { created: now, updated: now },
+        })
+        const first = await SwarmState.read("SW-audit")
+        expect(first?.rev).toBe(1)
+        expect(first?.seq).toBe(1)
+        expect(first?.audit.entries).toHaveLength(1)
+        await BoardTask.create({ subject: "Audit task", type: "implement", swarm_id: "SW-audit" })
+        const next = await SwarmState.read("SW-audit")
+        expect(next?.rev).toBe(2)
+        expect(next?.seq).toBe(2)
+        expect(next?.audit.entries.at(-1)).toMatchObject({
+          actor: "coordinator",
+          reason: expect.stringContaining("create task"),
+          rev: 2,
+          seq: 2,
+        })
+      },
+    })
+  })
 })

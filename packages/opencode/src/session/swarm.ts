@@ -139,6 +139,19 @@ export namespace Swarm {
     )
     SwarmState.align(state)
     if (prev.schema_version === state.schema_version) SwarmState.check(prev, state)
+    if (prev.schema_version === state.schema_version) {
+      state.rev = prev.rev + 1
+      state.seq = prev.seq + 1
+      state.audit.last_txn = crypto.randomUUID()
+      state.audit.entries.push({
+        txn: state.audit.last_txn,
+        actor: "coordinator",
+        reason: "sync swarm info",
+        at: Date.now(),
+        rev: state.rev,
+        seq: state.seq,
+      })
+    }
     await SwarmState.write(SwarmState.Snapshot.parse(state))
   }
 
