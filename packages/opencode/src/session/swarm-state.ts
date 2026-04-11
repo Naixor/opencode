@@ -51,6 +51,17 @@ export namespace SwarmState {
     cancelled: ["cancelled"],
   }
 
+  export const VerifyNext: Record<VerifyStatus, readonly VerifyStatus[]> = {
+    idle: ["idle", "pending", "running", "skipped", "cancelled"],
+    pending: ["pending", "running", "passed", "failed", "repair_required", "cancelled"],
+    running: ["running", "passed", "failed", "repair_required", "cancelled"],
+    passed: ["passed"],
+    failed: ["failed", "repair_required"],
+    repair_required: ["repair_required", "pending", "running", "failed", "cancelled"],
+    skipped: ["skipped"],
+    cancelled: ["cancelled"],
+  }
+
   export function align(snapshot: Snapshot) {
     for (const task of Object.values(snapshot.tasks)) {
       if (["pending", "ready"].includes(task.status)) {
@@ -83,6 +94,14 @@ export namespace SwarmState {
           snapshot.verify.status === "pending" || snapshot.verify.status === "running" ? "verifying" : "completed"
         task.reason = null
       }
+    }
+    if (snapshot.verify.status === "pending" || snapshot.verify.status === "running") {
+      snapshot.swarm.status = "active"
+      snapshot.swarm.stage = "verifying"
+    }
+    if (snapshot.verify.status === "failed" || snapshot.verify.status === "repair_required") {
+      snapshot.swarm.status = "active"
+      snapshot.swarm.stage = "repairing"
     }
   }
 
@@ -466,6 +485,26 @@ export namespace SwarmState {
       }
       if (item.current_round < 1) throw new Error(`Discussion ${id} must start at round 1`)
       if (item.current_round > item.max_rounds) throw new Error(`Discussion ${id} exceeded max rounds`)
+    }
+    if (!VerifyNext[prev.verify.status].includes(next.verify.status)) {
+      throw new Error(`Invalid verify status transition: ${prev.verify.status} -> ${next.verify.status}`)
+    }
+    if (next.verify.status === "skipped" && !next.verify.waiver) {
+      throw new Error("Verify.skipped requires explicit waiver evidence")
+    }
+    if ((next.verify.status === "pending" || next.verify.status === "running") && next.swarm.status !== "active") {
+      throw new Error("Verify pending/running requires swarm.status=active")
+    }
+    if ((next.verify.status === "pending" || next.verify.status === "running") && next.swarm.stage !== "verifying") {
+      throw new Error("Verify pending/running requires swarm.stage=verifying")
+    }
+    if (next.swarm.status === "completed") {
+      const needed = Object.values(next.tasks).filter((task) => task.verify_required)
+      if (needed.some((task) => task.status !== "completed")) {
+        throw new Error("Swarm completion requires all required tasks to be completed")
+      }
+      const okay = next.verify.status === "passed" || (next.verify.status === "skipped" && Boolean(next.verify.waiver))
+      if (!okay) throw new Error("Swarm completion requires verify passed or skipped with waiver")
     }
   }
 

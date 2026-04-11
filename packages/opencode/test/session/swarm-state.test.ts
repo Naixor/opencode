@@ -128,7 +128,7 @@ describe("SwarmState", () => {
           conductor: "SE-conductor",
           workers: [],
           config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
-          status: "completed",
+          status: "failed",
           stage: "idle",
           reason: null,
           resume: { stage: null },
@@ -392,5 +392,49 @@ describe("SwarmState", () => {
         await expect(Discussion.advance("SW-discuss", "design")).rejects.toThrow("max rounds")
       },
     })
+  })
+
+  test("requires waiver evidence before verify can be skipped", () => {
+    const prev = SwarmState.create({ id: "SW-verify", goal: "Verify state", conductor: "SE-conductor" })
+    const next = structuredClone(prev)
+    next.verify.status = "skipped"
+    expect(() => SwarmState.check(prev, next)).toThrow("Verify.skipped requires explicit waiver evidence")
+  })
+
+  test("keeps swarm active and verifying while verify is pending", () => {
+    const state = SwarmState.create({ id: "SW-verify-pending", goal: "Verify state", conductor: "SE-conductor" })
+    state.swarm.stage = "executing"
+    state.verify.status = "pending"
+    SwarmState.align(state)
+    expect(state.swarm.status).toBe("active")
+    expect(String(state.swarm.stage)).toBe("verifying")
+  })
+
+  test("requires verify success before swarm completion", () => {
+    const prev = SwarmState.create({ id: "SW-complete", goal: "Complete safely", conductor: "SE-conductor" })
+    prev.tasks.t_1 = {
+      id: "t_1",
+      subject: "Required task",
+      description: null,
+      status: "completed",
+      blocked_by: [],
+      blocks: [],
+      assignee: null,
+      type: "implement",
+      scope: [],
+      artifacts: [],
+      verify_required: true,
+      metadata: {},
+      created_at: 1,
+      updated_at: 1,
+      reason: null,
+    }
+    const next = structuredClone(prev)
+    next.swarm.status = "completed"
+    next.swarm.stage = "idle"
+    expect(() => SwarmState.check(prev, next)).toThrow("Swarm completion requires verify passed or skipped with waiver")
+    prev.verify.status = "running"
+    next.verify.status = "passed"
+    expect(() => SwarmState.check(prev, next)).not.toThrow()
   })
 })

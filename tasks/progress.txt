@@ -68,3 +68,12 @@
   - `Discussion.advance()` is the right choke point for max-round enforcement because both tools and tests already funnel through it.
   - The admin read model only needs the simplified `Round` projection, so the richer snapshot discussion status can evolve without breaking the current UI contract.
 ---
+
+## 2026-04-11 12:31:32 CST - US-008
+- Added verify transition guards in `packages/opencode/src/session/swarm-state.ts`, required waiver evidence for `Verify.skipped`, kept swarms in `active/verifying` while verify is pending or running, and blocked swarm completion unless required tasks are completed and verify is passed or waived.
+- Expanded `packages/opencode/test/session/swarm-state.test.ts` with explicit verify skip, verify-pending, and completion-guard coverage.
+- **Learnings for future iterations:**
+  - Verify rules fit naturally in the same snapshot guard path as lifecycle checks, because completion validity depends on both task and verify state at once.
+  - `SwarmState.align()` should own the `pending/running -> stage=verifying` projection so every reader sees the same lifecycle semantics.
+  - Completion tests need a valid verify transition path first; jumping directly from `idle` to `passed` bypasses the transition matrix.
+---
