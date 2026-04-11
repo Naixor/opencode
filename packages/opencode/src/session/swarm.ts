@@ -343,6 +343,10 @@ export namespace Swarm {
   }
 
   export async function resume(id: string): Promise<Info> {
+    const state = await SwarmState.read(id)
+    if (state?.alignment.pending_confirmation?.kind === "run") {
+      throw new Error(`Run confirmation required before resuming swarm: ${id}`)
+    }
     const info = await load(id)
     if (!info) throw new Error(`Swarm not found: ${id}`)
     info.status = "active"
@@ -350,6 +354,47 @@ export namespace Swarm {
     info.resume.stage = null
     info.time.updated = Date.now()
     await save(info)
+    Bus.publish(Event.Updated, { swarm: info })
+    return info
+  }
+
+  export async function confirm(id: string, input: { actor: string }): Promise<Info> {
+    const next = await SwarmState.mutate(id, {
+      actor: "coordinator",
+      reason: "record run confirmation",
+      fn: (state) => {
+        if (state.alignment.pending_confirmation?.kind !== "run") {
+          throw new Error(`No pending run confirmation for swarm: ${id}`)
+        }
+        if (!state.alignment.gate.value || !state.alignment.contract) {
+          throw new Error(`Alignment state is incomplete for swarm: ${id}`)
+        }
+        const now = Date.now()
+        state.alignment.run_confirmation = {
+          gate: state.alignment.gate.value,
+          confirmed_at: now,
+          confirmed_by: input.actor,
+        }
+        state.alignment.pending_confirmation = null
+        state.alignment.summary = SwarmState.summarize({
+          contract: state.alignment.contract,
+          role_delta: state.alignment.role_delta,
+          gate: state.alignment.gate,
+          pending_confirmation: null,
+        })
+        state.alignment.audit.pending_confirmation = {
+          created_at: state.alignment.audit.pending_confirmation.created_at ?? now,
+          updated_at: now,
+          actor: input.actor,
+          run_id: id,
+        }
+        state.swarm.status = "active"
+        state.swarm.stage = state.swarm.resume.stage ?? state.swarm.stage
+        state.swarm.resume.stage = null
+        state.swarm.reason = null
+      },
+    })
+    const info = fromState(next)
     Bus.publish(Event.Updated, { swarm: info })
     return info
   }

@@ -38,6 +38,7 @@ describe("SwarmState", () => {
         expect(next?.alignment.contract).toBeNull()
         expect(next?.alignment.gate.value).toBeNull()
         expect(next?.alignment.role_delta.roles).toEqual([])
+        expect(next?.alignment.run_confirmation).toBeNull()
         expect(next?.alignment.summary).toBeNull()
         expect(next?.alignment.pending_confirmation).toBeNull()
       },
@@ -576,6 +577,123 @@ describe("SwarmState", () => {
     expect(blocked.summary?.ask).toBe("Material role delta requires user review")
     expect(blocked.pending_confirmation?.kind).toBe("run")
     expect(blocked.pending_confirmation?.roles).toEqual(["pm", "RD"])
+
+    const approved = SwarmState.preflight({
+      goal: "Ship the alignment flow",
+      scope: "Delegate RD analysis",
+      discussion: false,
+      role: "RD",
+      catalog: {
+        pm: {
+          id: "pm",
+          name: "PM",
+          purpose: "Own scope",
+          perspective: "User impact first",
+          default_when: "Trade-offs affect product direction",
+          version: 1,
+          created_at: now,
+          updated_at: now,
+          audit: { created_at: now, updated_at: now, actor: "alice", run_id: "SW-role-1" },
+        },
+      },
+      current: {
+        ...SwarmState.Example.alignment,
+        contract: blocked.contract,
+        gate: blocked.gate,
+        role_delta: blocked.role_delta,
+        run_confirmation: {
+          gate: "G2",
+          confirmed_at: now,
+          confirmed_by: "alice",
+        },
+      },
+    })
+    expect(approved.confirmed).toBe(true)
+    expect(approved.proceed).toBe(true)
+    expect(approved.pending_confirmation).toBeNull()
+    expect(approved.summary?.ask).toBeNull()
+  })
+
+  test("requires run confirmation before resuming a paused gate", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const now = Date.now()
+        const state = SwarmState.create({
+          id: "SW-confirm",
+          goal: "Pause for alignment approval",
+          conductor: "SE-conductor",
+          time: { created: now, updated: now },
+        })
+        state.swarm.status = "paused"
+        state.swarm.stage = "planning"
+        state.swarm.resume.stage = "planning"
+        state.swarm.reason = "Material role delta requires user review"
+        state.alignment.contract = {
+          goal: "Pause for alignment approval",
+          scope: "Delegate RD analysis",
+          constraints: [],
+          roles: [{ role_id: null, name: "RD", purpose: null, perspective: null, default_when: null }],
+          mode: "execute",
+          assumptions: [],
+          risks: [],
+          discussion_reason: null,
+          created_at: now,
+        }
+        state.alignment.gate = {
+          value: "G2",
+          reason: "Material role delta requires user review",
+          input: {
+            action_sensitive: false,
+            material_role_delta: true,
+            ambiguous: false,
+            valid_options: 1,
+            trade_offs: false,
+            confidence: "high",
+            routine: true,
+          },
+          evaluated_at: now,
+        }
+        state.alignment.role_delta = {
+          material: true,
+          roles: [{ role_id: null, name: "RD", state: "added", fields: [] }],
+          updated_at: now,
+        }
+        state.alignment.summary = SwarmState.summarize({
+          contract: state.alignment.contract,
+          role_delta: state.alignment.role_delta,
+          gate: state.alignment.gate,
+          pending_confirmation: {
+            kind: "run",
+            gate: "G2",
+            requested_at: now,
+            requested_by: "coordinator",
+            reason: "Material role delta requires user review",
+            roles: ["RD"],
+          },
+        })
+        state.alignment.pending_confirmation = {
+          kind: "run",
+          gate: "G2",
+          requested_at: now,
+          requested_by: "coordinator",
+          reason: "Material role delta requires user review",
+          roles: ["RD"],
+        }
+        await SwarmState.write(state)
+
+        await expect(Swarm.resume("SW-confirm")).rejects.toThrow("Run confirmation required")
+
+        const info = await Swarm.confirm("SW-confirm", { actor: "alice" })
+        const next = await SwarmState.read("SW-confirm")
+        expect(info.status).toBe("active")
+        expect(info.resume.stage).toBeNull()
+        expect(next?.alignment.pending_confirmation).toBeNull()
+        expect(next?.alignment.run_confirmation?.confirmed_by).toBe("alice")
+        expect(next?.alignment.summary?.ask).toBeNull()
+      },
+    })
   })
 
   test("restores the stored stage on paused to active", async () => {

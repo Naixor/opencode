@@ -8,6 +8,7 @@
 - `SwarmState.admit()` uses a strict 2-of-3 threshold across the primary discussion signals; `role_benefit` is supporting context and should never unlock discussion mode by itself.
 - `SwarmState.preflight()` is the canonical place to bundle contract drafting, role delta classification, gate evaluation, and pending-confirmation decisions before any swarm delegation proceeds.
 - Persist readable approval copy in `alignment.summary` and reuse `SwarmState.renderSummary()` for user-facing gate output instead of exposing worker prompts.
+- Persist approved high-risk runs in `alignment.run_confirmation`; reuse that approval only while the stored contract and gate still match, and keep `Swarm.resume()` blocked until pending run confirmation is cleared.
 
 ## 2026-04-11 19:15:48 CST - US-001
 - Added canonical alignment state to `packages/opencode/src/session/swarm-state.ts` for project-scoped role catalog data, user-scoped confirmations, run contract, gate state, role delta state, pending confirmations, and alignment audit metadata.
@@ -79,4 +80,13 @@
   - Store user-facing approval copy in canonical swarm state so CLI, web, and later write routes can all read the same alignment summary.
   - Reuse `SwarmState.renderSummary()` for approval messaging instead of rebuilding ad-hoc strings in individual surfaces.
   - Catalog-backed run roles should keep overlay values `null`; delta checks must treat those nulls as inherited catalog fields or summaries will show false-positive role changes.
+---
+
+## 2026-04-11 19:47:52 CST - US-009
+- Added `alignment.run_confirmation` reuse checks in `SwarmState.preflight()` plus `Swarm.confirm()` and a guarded `Swarm.resume()` path so `G2`/`G3` runs stay paused until confirmed, then resume without re-triggering the same checkpoint while the contract still matches.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/session/swarm.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Reusing a high-risk approval needs explicit persisted state; clearing `pending_confirmation` alone is not enough because later preflight checks will recompute the same gate.
+  - Approval reuse should compare both the stored gate and the full stored contract so later role or scope changes trigger a fresh checkpoint instead of silently inheriting an outdated confirmation.
+  - Keep `Swarm.resume()` strict for pending run confirmations so admin pause controls cannot accidentally bypass alignment gates.
 ---

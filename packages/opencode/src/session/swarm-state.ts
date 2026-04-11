@@ -231,6 +231,7 @@ export namespace SwarmState {
     "alignment.gate.reason",
     "alignment.gate.evaluated_at",
     "alignment.role_delta.updated_at",
+    "alignment.run_confirmation",
     "alignment.summary",
     "alignment.audit",
     "verify.required",
@@ -453,6 +454,13 @@ export namespace SwarmState {
   })
   export type Pending = z.infer<typeof Pending>
 
+  export const RunConfirmation = z.object({
+    gate: Gate,
+    confirmed_at: z.number(),
+    confirmed_by: z.string(),
+  })
+  export type RunConfirmation = z.infer<typeof RunConfirmation>
+
   export const Summary = z.object({
     goal: z.string(),
     scope: z.string(),
@@ -487,6 +495,7 @@ export namespace SwarmState {
     contract: RunContract.nullable().default(null),
     gate: GateState.default({ value: null, reason: null, input: null, evaluated_at: null }),
     role_delta: DeltaState.default({ material: false, roles: [], updated_at: null }),
+    run_confirmation: RunConfirmation.nullable().default(null),
     summary: Summary.nullable().default(null),
     pending_confirmation: Pending.nullable().default(null),
     audit: z
@@ -611,6 +620,7 @@ export namespace SwarmState {
       contract: null,
       gate: { value: null, reason: null, input: null, evaluated_at: null },
       role_delta: { material: false, roles: [], updated_at: null },
+      run_confirmation: null,
       summary: null,
       pending_confirmation: null,
       audit: {
@@ -670,6 +680,7 @@ export namespace SwarmState {
         contract: null,
         gate: { value: null, reason: null, input: null, evaluated_at: null },
         role_delta: { material: false, roles: [], updated_at: null },
+        run_confirmation: null,
         summary: null,
         pending_confirmation: null,
         audit: {
@@ -977,7 +988,7 @@ export namespace SwarmState {
     gate: GateState
     pending_confirmation: Pending | null
   }) {
-    const blocking = input.gate.value === "G2" || input.gate.value === "G3"
+    const blocking = input.pending_confirmation !== null
     return {
       goal: input.contract.goal,
       scope: input.contract.scope,
@@ -1044,7 +1055,11 @@ export namespace SwarmState {
       confidence: "high",
       routine: !input.discussion,
     })
-    const proceed = gate.value === "G0" || gate.value === "G1"
+    const confirmed =
+      input.current.run_confirmation !== null &&
+      input.current.gate.value === gate.value &&
+      JSON.stringify(input.current.contract) === JSON.stringify(contract)
+    const proceed = confirmed || gate.value === "G0" || gate.value === "G1"
     const pending_confirmation = proceed
       ? null
       : ({
@@ -1060,6 +1075,7 @@ export namespace SwarmState {
       contract,
       role_delta,
       gate,
+      confirmed,
       summary,
       pending_confirmation,
       proceed,
@@ -1214,6 +1230,7 @@ export namespace SwarmState {
         contract: null,
         gate: { value: null, reason: null, input: null, evaluated_at: null },
         role_delta: { material: false, roles: [], updated_at: null },
+        run_confirmation: null,
         summary: null,
         pending_confirmation: null,
         audit: {
