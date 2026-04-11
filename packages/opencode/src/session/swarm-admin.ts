@@ -83,7 +83,17 @@ export namespace SwarmAdmin {
     id: z.string(),
     label: z.string(),
     session_id: z.string(),
-    status: z.enum(["active", "idle", "blocked", "failed", "done"]),
+    status: z.enum([
+      "queued",
+      "starting",
+      "running",
+      "waiting",
+      "blocked",
+      "completed",
+      "failed",
+      "cancelled",
+      "stopped",
+    ]),
     task_count: z.number(),
     recent_activity_at: z.number().nullable(),
     current_task: z.string().nullable(),
@@ -516,7 +526,7 @@ export namespace SwarmAdmin {
             .filter((sig) => sig.from === worker.session_id || sig.from === worker.role || sig.from === worker.agent)
             .map((sig) => sig.timestamp),
         ].reduce((max, item) => (item > max ? item : max), 0)
-        return Boolean(time) && Date.now() - time > stale && worker.status === "active"
+        return Boolean(time) && Date.now() - time > stale && worker.status === "running"
       })
         ? Attention.enum.stale_worker
         : undefined,
@@ -548,7 +558,7 @@ export namespace SwarmAdmin {
         session_id: info.conductor,
         role: "Conductor",
         task_id: undefined,
-        status: "active" as const,
+        status: "running" as const,
         agent: "conductor",
       },
       ...info.workers.map((worker) => ({
@@ -586,11 +596,16 @@ export namespace SwarmAdmin {
           ? "failed"
           : reason
             ? "blocked"
-            : current?.status === "completed" || item.status === "done"
-              ? "done"
-              : SessionStatus.get(item.session_id).type === "idle" || item.status === "idle"
-                ? "idle"
-                : "active"
+            : current?.status === "completed" || item.status === "completed"
+              ? "completed"
+              : item.status === "queued" ||
+                  item.status === "starting" ||
+                  item.status === "cancelled" ||
+                  item.status === "stopped"
+                ? item.status
+                : SessionStatus.get(item.session_id).type === "idle" || item.status === "waiting"
+                  ? "waiting"
+                  : "running"
       return AgentInfo.parse({
         id: item.id,
         label: item.label,

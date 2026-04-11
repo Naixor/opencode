@@ -247,7 +247,10 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
                 agent: agent.name,
                 role: params.role_name,
                 task_id: params.task_id ?? "",
-                status: "active",
+                status: "running",
+                updated_at: Date.now(),
+                reason: null,
+                evidence: [],
               })
               info.status = "active"
               info.stage = "executing"

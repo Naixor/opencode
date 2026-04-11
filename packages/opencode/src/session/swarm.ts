@@ -14,11 +14,12 @@ import { SessionPrompt } from "./prompt"
 import { SessionStatus } from "./status"
 import { SessionMetadata } from "./session-metadata"
 import { SwarmState } from "./swarm-state"
+import { Config } from "../config/config"
 
 export namespace Swarm {
   const log = Log.create({ service: "swarm" })
 
-  export const WorkerStatus = z.enum(["active", "idle", "done", "failed"])
+  export const WorkerStatus = SwarmState.WorkerStatus
 
   export const Worker = z.object({
     session_id: z.string(),
@@ -26,6 +27,9 @@ export namespace Swarm {
     role: z.string().optional(),
     task_id: z.string(),
     status: WorkerStatus,
+    updated_at: z.number().default(() => Date.now()),
+    reason: z.string().nullable().default(null),
+    evidence: z.array(z.string()).default([]),
   })
   export type Worker = z.infer<typeof Worker>
 
@@ -44,9 +48,11 @@ export namespace Swarm {
       max_workers: z.number().default(4),
       auto_escalate: z.boolean().default(true),
       verify_on_complete: z.boolean().default(true),
+      wait_timeout_seconds: z.number().int().positive().default(600),
     }),
     status: Status,
     stage: Stage,
+    reason: z.string().nullable().default(null),
     resume: z.object({ stage: Stage.nullable().default(null) }).default({ stage: null }),
     visibility: z.object({ archived_at: z.number().nullable().default(null) }).default({ archived_at: null }),
     time: z.object({
@@ -91,13 +97,6 @@ export namespace Swarm {
     await Bun.write(filepath(), JSON.stringify(swarms, null, 2))
   }
 
-  function stateWorkerStatus(worker: Worker): SwarmState.WorkerStatus {
-    if (worker.status === "active") return "running"
-    if (worker.status === "idle") return "waiting"
-    if (worker.status === "done") return "completed"
-    return "failed"
-  }
-
   async function sync(info: Info) {
     const state =
       (await SwarmState.read(info.id)) ??
@@ -114,6 +113,7 @@ export namespace Swarm {
     state.swarm.config = info.config
     state.swarm.status = info.status
     state.swarm.stage = info.stage
+    state.swarm.reason = info.reason
     state.swarm.resume.stage = info.resume.stage
     state.swarm.visibility.archived_at = info.visibility.archived_at
     state.swarm.time.created = info.time.created
@@ -130,9 +130,10 @@ export namespace Swarm {
           agent: worker.agent,
           role: worker.role ?? null,
           task_id: worker.task_id || null,
-          status: stateWorkerStatus(worker),
-          updated_at: info.time.updated,
-          reason: null,
+          status: worker.status,
+          updated_at: worker.updated_at,
+          reason: worker.reason,
+          evidence: worker.evidence,
         },
       ]),
     )
@@ -194,6 +195,7 @@ export namespace Swarm {
   export async function launch(input: { goal: string; config?: Partial<Info["config"]> }): Promise<Info> {
     const id = `SW-${crypto.randomUUID()}`
     await SharedBoard.init(id)
+    const cfg = await Config.get()
 
     const session = await Session.create({
       title: `Swarm: ${input.goal.slice(0, 50)}`,
@@ -208,12 +210,14 @@ export namespace Swarm {
       conductor: session.id,
       workers: [],
       config: {
-        max_workers: input.config?.max_workers ?? 4,
-        auto_escalate: input.config?.auto_escalate ?? true,
-        verify_on_complete: input.config?.verify_on_complete ?? true,
+        max_workers: input.config?.max_workers ?? cfg.swarm?.max_workers ?? 4,
+        auto_escalate: input.config?.auto_escalate ?? cfg.swarm?.auto_escalate ?? true,
+        verify_on_complete: input.config?.verify_on_complete ?? cfg.swarm?.verify_on_complete ?? true,
+        wait_timeout_seconds: input.config?.wait_timeout_seconds ?? cfg.swarm?.wait_timeout_seconds ?? 600,
       },
       status: "active",
       stage: "planning",
+      reason: null,
       resume: { stage: null },
       visibility: { archived_at: null },
       time: { created: now, updated: now },
@@ -235,12 +239,31 @@ export namespace Swarm {
   export async function status(id: string, input?: { include_deleted?: boolean }): Promise<Info> {
     const info = await load(id, input)
     if (!info) throw new Error(`Swarm not found: ${id}`)
+    const now = Date.now()
+    let changed = false
     // Merge live session status for workers
     for (const w of info.workers) {
       const ss = SessionStatus.get(w.session_id)
-      if (ss && ss.type === "idle" && w.status === "active") {
-        w.status = "idle"
+      if (ss && ss.type === "idle" && w.status === "running") {
+        w.status = "waiting"
+        w.updated_at = now
+        changed = true
       }
+      if (w.status === "waiting" && now - w.updated_at >= info.config.wait_timeout_seconds * 1000) {
+        w.status = "blocked"
+        w.reason = `wait timeout after ${info.config.wait_timeout_seconds}s`
+        w.updated_at = now
+        changed = true
+      }
+    }
+    if (info.workers.some((worker) => worker.status === "blocked") && info.status === "active") {
+      info.status = "blocked"
+      info.reason = info.reason ?? "worker blocked"
+      changed = true
+    }
+    if (changed) {
+      info.time.updated = now
+      await save(info)
     }
     return info
   }
@@ -249,7 +272,7 @@ export namespace Swarm {
     const info = await load(id)
     if (!info) throw new Error(`Swarm not found: ${id}`)
     for (const w of info.workers) {
-      if (w.status === "active") SessionPrompt.cancel(w.session_id)
+      if (["queued", "starting", "running", "waiting"].includes(w.status)) SessionPrompt.cancel(w.session_id)
     }
     info.resume.stage = info.stage
     info.status = "paused"
@@ -276,7 +299,11 @@ export namespace Swarm {
     const info = await load(id)
     if (!info) throw new Error(`Swarm not found: ${id}`)
     for (const w of info.workers) {
-      SessionPrompt.cancel(w.session_id)
+      if (["queued", "starting", "running", "waiting", "blocked"].includes(w.status)) {
+        SessionPrompt.cancel(w.session_id)
+        w.status = "stopped"
+        w.updated_at = Date.now()
+      }
     }
     SessionPrompt.cancel(info.conductor)
     const now = Date.now()

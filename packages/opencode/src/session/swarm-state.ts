@@ -28,6 +28,18 @@ export namespace SwarmState {
     idle: ["idle", "planning", "dispatching", "executing", "discussing", "verifying", "repairing"],
   }
 
+  export const WorkerNext: Record<WorkerStatus, readonly WorkerStatus[]> = {
+    queued: ["queued", "starting", "cancelled", "stopped"],
+    starting: ["starting", "running", "blocked", "failed", "cancelled", "stopped"],
+    running: ["running", "waiting", "blocked", "completed", "failed", "cancelled", "stopped"],
+    waiting: ["waiting", "blocked", "completed", "failed", "cancelled", "stopped"],
+    blocked: ["blocked", "running", "failed", "cancelled", "stopped"],
+    completed: ["completed"],
+    failed: ["failed"],
+    cancelled: ["cancelled"],
+    stopped: ["stopped"],
+  }
+
   export const Status = z.enum(["active", "paused", "blocked", "completed", "failed", "stopped"])
   export type Status = z.infer<typeof Status>
 
@@ -142,6 +154,7 @@ export namespace SwarmState {
     max_workers: z.number().int().positive().default(4),
     auto_escalate: z.boolean().default(true),
     verify_on_complete: z.boolean().default(true),
+    wait_timeout_seconds: z.number().int().positive().default(600),
   })
   export type Config = z.infer<typeof Config>
 
@@ -192,6 +205,7 @@ export namespace SwarmState {
     status: WorkerStatus,
     updated_at: z.number(),
     reason: z.string().nullable().default(null),
+    evidence: z.array(z.string()).default([]),
   })
   export type Worker = z.infer<typeof Worker>
 
@@ -293,7 +307,7 @@ export namespace SwarmState {
       reason: "all_required_tasks_finished",
       visibility: { archived_at: null },
       resume: { stage: "executing" },
-      config: { max_workers: 4, auto_escalate: true, verify_on_complete: true },
+      config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
       time: { created: 1, updated: 2, completed: null, stopped: null, archived: null, deleted: null },
     },
     workers: {
@@ -306,6 +320,7 @@ export namespace SwarmState {
         status: "completed",
         updated_at: 2,
         reason: null,
+        evidence: [],
       },
     },
     tasks: {
@@ -384,6 +399,20 @@ export namespace SwarmState {
     if (prev.swarm.status === "blocked" && next.swarm.status === "active" && !next.swarm.reason) {
       throw new Error("Blocked swarm recovery requires explicit unblock evidence")
     }
+    const tasks = new Map<string, string>()
+    for (const [id, worker] of Object.entries(next.workers)) {
+      const prevWorker = prev.workers[id]
+      if (prevWorker && !WorkerNext[prevWorker.status].includes(worker.status)) {
+        throw new Error(`Invalid worker status transition: ${prevWorker.status} -> ${worker.status}`)
+      }
+      if (prevWorker?.status === "blocked" && worker.status === "running" && worker.evidence.length === 0) {
+        throw new Error(`Blocked worker ${id} requires explicit unblock evidence`)
+      }
+      if (!worker.task_id || ["completed", "failed", "cancelled", "stopped"].includes(worker.status)) continue
+      const hit = tasks.get(worker.task_id)
+      if (hit) throw new Error(`Only one non-terminal worker may own task ${worker.task_id}: ${hit}, ${id}`)
+      tasks.set(worker.task_id, id)
+    }
   }
 
   export async function mutate(
@@ -436,6 +465,7 @@ export namespace SwarmState {
           max_workers: input.config?.max_workers ?? 4,
           auto_escalate: input.config?.auto_escalate ?? true,
           verify_on_complete: input.config?.verify_on_complete ?? true,
+          wait_timeout_seconds: input.config?.wait_timeout_seconds ?? 600,
         },
         time: {
           created: input.time?.created ?? now,

@@ -1301,6 +1301,13 @@ export namespace Config {
             .optional()
             .default(true)
             .describe("Run verification after all tasks complete (default: true)"),
+          wait_timeout_seconds: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .default(600)
+            .describe("Seconds before a waiting worker is promoted to blocked (default: 600)"),
           escalation: z
             .array(
               z.object({

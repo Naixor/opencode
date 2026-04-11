@@ -58,9 +58,10 @@ describe("SwarmState", () => {
           goal: "Keep lifecycle separate from stage",
           conductor: "SE-conductor",
           workers: [],
-          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true },
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
           status: "active",
           stage: "verifying",
+          reason: null,
           resume: { stage: null },
           visibility: { archived_at: null },
           time: { created: now, updated: now },
@@ -91,9 +92,10 @@ describe("SwarmState", () => {
           goal: "Keep snapshot writes coordinator-only",
           conductor: "SE-conductor",
           workers: [],
-          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true },
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
           status: "active",
           stage: "executing",
+          reason: null,
           resume: { stage: null },
           visibility: { archived_at: null },
           time: { created: now, updated: now },
@@ -124,9 +126,10 @@ describe("SwarmState", () => {
           goal: "Honor the lifecycle matrix",
           conductor: "SE-conductor",
           workers: [],
-          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true },
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
           status: "completed",
           stage: "idle",
+          reason: null,
           resume: { stage: null },
           visibility: { archived_at: null },
           time: { created: now, updated: now, completed: now },
@@ -137,9 +140,10 @@ describe("SwarmState", () => {
             goal: "Honor the lifecycle matrix",
             conductor: "SE-conductor",
             workers: [],
-            config: { max_workers: 4, auto_escalate: true, verify_on_complete: true },
+            config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
             status: "active",
             stage: "executing",
+            reason: null,
             resume: { stage: null },
             visibility: { archived_at: null },
             time: { created: now, updated: now + 1, completed: now },
@@ -188,5 +192,89 @@ describe("SwarmState", () => {
       },
     })
     expect(() => SwarmState.check(prev, next)).toThrow("Invalid swarm stage transition")
+  })
+
+  test("promotes waiting workers to blocked after the timeout", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const now = Date.now()
+        await Swarm.save({
+          id: "SW-timeout",
+          goal: "Surface stalled workers",
+          conductor: "SE-conductor",
+          workers: [
+            {
+              session_id: "SE-worker-1",
+              agent: "sisyphus",
+              role: "RD",
+              task_id: "BT-1",
+              status: "waiting",
+              updated_at: now - 2_000,
+              reason: null,
+              evidence: [],
+            },
+          ],
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 1 },
+          status: "active",
+          stage: "executing",
+          reason: null,
+          resume: { stage: null },
+          visibility: { archived_at: null },
+          time: { created: now, updated: now },
+        })
+        const info = await Swarm.status("SW-timeout")
+        expect(info.status).toBe("blocked")
+        expect(info.workers[0]?.status).toBe("blocked")
+        expect(info.workers[0]?.reason).toContain("wait timeout")
+      },
+    })
+  })
+
+  test("allows only one non-terminal worker per task", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const now = Date.now()
+        await expect(
+          Swarm.save({
+            id: "SW-dup-worker",
+            goal: "Prevent duplicate task ownership",
+            conductor: "SE-conductor",
+            workers: [
+              {
+                session_id: "SE-worker-1",
+                agent: "sisyphus",
+                role: "RD",
+                task_id: "BT-1",
+                status: "running",
+                updated_at: now,
+                reason: null,
+                evidence: [],
+              },
+              {
+                session_id: "SE-worker-2",
+                agent: "sisyphus",
+                role: "QA",
+                task_id: "BT-1",
+                status: "waiting",
+                updated_at: now,
+                reason: null,
+                evidence: [],
+              },
+            ],
+            config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
+            status: "active",
+            stage: "executing",
+            reason: null,
+            resume: { stage: null },
+            visibility: { archived_at: null },
+            time: { created: now, updated: now },
+          }),
+        ).rejects.toThrow("Only one non-terminal worker may own task")
+      },
+    })
   })
 })

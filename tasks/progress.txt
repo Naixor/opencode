@@ -2,6 +2,7 @@
 
 - Use `SwarmState.create/read/write` in `packages/opencode/src/session/swarm-state.ts` for canonical swarm snapshot setup instead of hand-rolling `state.json` payloads.
 - Route authoritative swarm/task/discussion changes through `SwarmState.mutate`; `BoardTask` and `Discussion` raw JSON files are compatibility mirrors, not the source of truth.
+- Worker timeout tests should call `Swarm.status()` after seeding a `waiting` worker, because the timeout promotion to `blocked` happens when swarm state is refreshed.
 
 ---
 
@@ -39,4 +40,13 @@
   - Transition validation needs to run before any legacy mirror write, otherwise `swarms.json` can drift from `state.json` on rejected transitions.
   - The status matrix can stay strict while the stage matrix remains slightly more permissive for direct conductor jumps like `planning -> verifying`.
   - Reusing `swarm.reason` as unblock evidence keeps the guard simple until a richer evidence model lands.
+---
+
+## 2026-04-11 12:22:33 CST - US-005
+- Switched `Swarm.Worker` to the explicit v2 worker lifecycle, added `wait_timeout_seconds` to swarm config and project config, and enforced worker transition rules plus one non-terminal worker per `task_id` in `packages/opencode/src/session/swarm-state.ts`.
+- Updated `packages/opencode/src/session/swarm.ts` and `packages/opencode/src/tool/delegate-task.ts` so launched workers start in `running`, idle sessions become `waiting`, timed-out waiters promote to `blocked`, and stop flows mark workers as `stopped`.
+- **Learnings for future iterations:**
+  - Worker timeout promotion is lazy and happens on `Swarm.status()` reads, which keeps the current runtime simple without a background sweeper.
+  - The launched swarm snapshot should capture the resolved `wait_timeout_seconds` value so runtime checks do not have to keep rereading global config.
+  - Worker unblock validation is currently evidence-based through `worker.evidence`, so any future resume path must populate that field before moving `blocked -> running`.
 ---
