@@ -65,7 +65,11 @@ export namespace Discussion {
       swarm_id: swarm,
       expected: item.participants,
       received: item.received,
-      complete: item.status === "round_complete" || item.status === "consensus_ready" || item.status === "decided",
+      complete:
+        item.status === "round_complete" ||
+        item.status === "consensus_ready" ||
+        item.status === "decided" ||
+        item.status === "exhausted",
     })
   }
 
@@ -121,10 +125,8 @@ export namespace Discussion {
         if (!item) throw new Error(`No discussion found for channel ${channel}`)
         if (item.current_round !== _round) return
         if (!item.received.includes(from)) item.received.push(from)
-        item.status =
-          item.participants.length > 0 && item.received.length >= item.participants.length
-            ? "round_complete"
-            : "collecting"
+        const done = item.participants.length > 0 && item.received.length >= item.participants.length
+        item.status = done ? (item.current_round >= item.max_rounds ? "exhausted" : "round_complete") : "collecting"
         item.updated_at = Date.now()
       },
     })
@@ -149,6 +151,9 @@ export namespace Discussion {
       fn: (next) => {
         const item = next.discussions[channel]
         if (!item) throw new Error(`No discussion found for channel ${channel}`)
+        if (item.current_round >= item.max_rounds) {
+          throw new Error(`Discussion ${channel} already reached max rounds`)
+        }
         item.current_round += 1
         item.received = []
         item.status = "collecting"

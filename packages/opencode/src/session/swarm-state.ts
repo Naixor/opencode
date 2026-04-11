@@ -40,6 +40,17 @@ export namespace SwarmState {
     stopped: ["stopped"],
   }
 
+  export const DiscussionNext: Record<DiscussionStatus, readonly DiscussionStatus[]> = {
+    idle: ["idle", "collecting", "cancelled"],
+    collecting: ["collecting", "round_complete", "consensus_ready", "exhausted", "failed", "cancelled"],
+    round_complete: ["round_complete", "collecting", "consensus_ready", "decided", "exhausted", "failed", "cancelled"],
+    consensus_ready: ["consensus_ready", "collecting", "decided", "exhausted", "failed", "cancelled"],
+    decided: ["decided"],
+    exhausted: ["exhausted"],
+    failed: ["failed"],
+    cancelled: ["cancelled"],
+  }
+
   export function align(snapshot: Snapshot) {
     for (const task of Object.values(snapshot.tasks)) {
       if (["pending", "ready"].includes(task.status)) {
@@ -447,6 +458,14 @@ export namespace SwarmState {
       const hit = tasks.get(worker.task_id)
       if (hit) throw new Error(`Only one non-terminal worker may own task ${worker.task_id}: ${hit}, ${id}`)
       tasks.set(worker.task_id, id)
+    }
+    for (const [id, item] of Object.entries(next.discussions)) {
+      const prevItem = prev.discussions[id]
+      if (prevItem && !DiscussionNext[prevItem.status].includes(item.status)) {
+        throw new Error(`Invalid discussion status transition: ${prevItem.status} -> ${item.status}`)
+      }
+      if (item.current_round < 1) throw new Error(`Discussion ${id} must start at round 1`)
+      if (item.current_round > item.max_rounds) throw new Error(`Discussion ${id} exceeded max rounds`)
     }
   }
 

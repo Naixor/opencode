@@ -4,6 +4,7 @@ import { Instance } from "../../src/project/instance"
 import { SwarmState } from "../../src/session/swarm-state"
 import { Swarm } from "../../src/session/swarm"
 import { BoardTask } from "../../src/board"
+import { Discussion } from "../../src/board/discussion"
 
 describe("SwarmState", () => {
   test("requires schema version 2", () => {
@@ -357,5 +358,39 @@ describe("SwarmState", () => {
     base.verify.status = "passed"
     SwarmState.align(base)
     expect(base.tasks.t_1?.status).toBe("completed")
+  })
+
+  test("tracks discussion rounds explicitly and blocks extra rounds", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const now = Date.now()
+        await Swarm.save({
+          id: "SW-discuss",
+          goal: "Model discussion rounds",
+          conductor: "SE-conductor",
+          workers: [],
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 600 },
+          status: "active",
+          stage: "discussing",
+          reason: null,
+          resume: { stage: null },
+          visibility: { archived_at: null },
+          time: { created: now, updated: now },
+        })
+        const first = await Discussion.start("SW-discuss", "design", ["PM", "RD"], 2)
+        expect(first.round).toBe(1)
+        await Discussion.record("SW-discuss", "design", "PM", 1)
+        const done = await Discussion.record("SW-discuss", "design", "RD", 1)
+        expect(done.complete).toBe(true)
+        const second = await Discussion.advance("SW-discuss", "design")
+        expect(second.round).toBe(2)
+        await Discussion.record("SW-discuss", "design", "PM", 2)
+        const last = await Discussion.record("SW-discuss", "design", "RD", 2)
+        expect(last.complete).toBe(true)
+        await expect(Discussion.advance("SW-discuss", "design")).rejects.toThrow("max rounds")
+      },
+    })
   })
 })

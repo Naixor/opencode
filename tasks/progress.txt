@@ -59,3 +59,12 @@
   - Worker-to-task linkage belongs in snapshot reconciliation, not scattered across board readers, so task state stays coherent after both worker and verify updates.
   - UI aggregates need to treat `ready` as pending inventory and `verifying` as active work to stay compatible with the old overview layout.
 ---
+
+## 2026-04-11 12:28:54 CST - US-007
+- Added explicit discussion transition validation in `packages/opencode/src/session/swarm-state.ts`, updated `packages/opencode/src/board/discussion.ts` to keep round state in the canonical snapshot, and blocked `advance_round` once `current_round == max_rounds`.
+- Extended `packages/opencode/test/session/swarm-state.test.ts` to cover round-one initialization, round completion, final-round exhaustion, and the max-round guard.
+- **Learnings for future iterations:**
+  - Discussion state needs a dedicated transition matrix because final-round completion can jump directly from `collecting` to `exhausted` without an intermediate `advance_round`.
+  - `Discussion.advance()` is the right choke point for max-round enforcement because both tools and tests already funnel through it.
+  - The admin read model only needs the simplified `Round` projection, so the richer snapshot discussion status can evolve without breaking the current UI contract.
+---
