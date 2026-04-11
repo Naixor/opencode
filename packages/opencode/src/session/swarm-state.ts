@@ -122,25 +122,42 @@ export namespace SwarmState {
   })
   export type Config = z.infer<typeof Config>
 
-  export const Swarm = z.object({
-    id: z.string(),
-    goal: z.string(),
-    conductor: z.string(),
-    status: Status,
-    stage: Stage,
-    reason: z.string().nullable().default(null),
-    visibility: z.object({ archived_at: z.number().nullable().default(null) }).default({ archived_at: null }),
-    resume: z.object({ stage: Stage.nullable().default(null) }).default({ stage: null }),
-    config: Config,
-    time: z.object({
-      created: z.number(),
-      updated: z.number(),
-      completed: z.number().nullable().default(null),
-      stopped: z.number().nullable().default(null),
-      archived: z.number().nullable().default(null),
-      deleted: z.number().nullable().default(null),
-    }),
-  })
+  export const Swarm = z
+    .object({
+      id: z.string(),
+      goal: z.string(),
+      conductor: z.string(),
+      status: Status,
+      stage: Stage,
+      reason: z.string().nullable().default(null),
+      visibility: z.object({ archived_at: z.number().nullable().default(null) }).default({ archived_at: null }),
+      resume: z.object({ stage: Stage.nullable().default(null) }).default({ stage: null }),
+      config: Config,
+      time: z.object({
+        created: z.number(),
+        updated: z.number(),
+        completed: z.number().nullable().default(null),
+        stopped: z.number().nullable().default(null),
+        archived: z.number().nullable().default(null),
+        deleted: z.number().nullable().default(null),
+      }),
+    })
+    .superRefine((value, ctx) => {
+      if (["completed", "failed", "stopped"].includes(value.status) && value.stage !== "idle") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["stage"],
+          message: `terminal swarm status requires stage=idle, got ${value.status}/${value.stage}`,
+        })
+      }
+      if (value.status === "paused" && value.resume.stage === null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["resume", "stage"],
+          message: "paused swarm status requires resume.stage",
+        })
+      }
+    })
   export type Swarm = z.infer<typeof Swarm>
 
   export const Worker = z.object({

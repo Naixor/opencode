@@ -29,8 +29,11 @@ export namespace Swarm {
   })
   export type Worker = z.infer<typeof Worker>
 
-  export const Status = z.enum(["planning", "running", "paused", "completed", "failed"])
+  export const Status = SwarmState.Status
   export type Status = z.infer<typeof Status>
+
+  export const Stage = SwarmState.Stage
+  export type Stage = z.infer<typeof Stage>
 
   export const Info = z.object({
     id: z.string(),
@@ -43,6 +46,9 @@ export namespace Swarm {
       verify_on_complete: z.boolean().default(true),
     }),
     status: Status,
+    stage: Stage,
+    resume: z.object({ stage: Stage.nullable().default(null) }).default({ stage: null }),
+    visibility: z.object({ archived_at: z.number().nullable().default(null) }).default({ archived_at: null }),
     time: z.object({
       created: z.number(),
       updated: z.number(),
@@ -85,20 +91,6 @@ export namespace Swarm {
     await Bun.write(filepath(), JSON.stringify(swarms, null, 2))
   }
 
-  function stateStatus(info: Info): SwarmState.Status {
-    if (info.time.stopped) return "stopped"
-    if (info.status === "paused") return "paused"
-    if (info.status === "completed") return "completed"
-    if (info.status === "failed") return "failed"
-    return "active"
-  }
-
-  function stateStage(info: Info): SwarmState.Stage {
-    if (info.time.stopped || info.status === "completed" || info.status === "failed") return "idle"
-    if (info.status === "planning") return "planning"
-    return "executing"
-  }
-
   function stateWorkerStatus(worker: Worker): SwarmState.WorkerStatus {
     if (worker.status === "active") return "running"
     if (worker.status === "idle") return "waiting"
@@ -119,8 +111,10 @@ export namespace Swarm {
     state.swarm.goal = info.goal
     state.swarm.conductor = info.conductor
     state.swarm.config = info.config
-    state.swarm.status = stateStatus(info)
-    state.swarm.stage = stateStage(info)
+    state.swarm.status = info.status
+    state.swarm.stage = info.stage
+    state.swarm.resume.stage = info.resume.stage
+    state.swarm.visibility.archived_at = info.visibility.archived_at
     state.swarm.time.created = info.time.created
     state.swarm.time.updated = info.time.updated
     state.swarm.time.completed = info.time.completed ?? null
@@ -216,7 +210,10 @@ export namespace Swarm {
         auto_escalate: input.config?.auto_escalate ?? true,
         verify_on_complete: input.config?.verify_on_complete ?? true,
       },
-      status: "planning",
+      status: "active",
+      stage: "planning",
+      resume: { stage: null },
+      visibility: { archived_at: null },
       time: { created: now, updated: now },
     }
     await save(info)
@@ -252,7 +249,9 @@ export namespace Swarm {
     for (const w of info.workers) {
       if (w.status === "active") SessionPrompt.cancel(w.session_id)
     }
+    info.resume.stage = info.stage
     info.status = "paused"
+    info.stage = info.resume.stage ?? info.stage
     info.time.updated = Date.now()
     await save(info)
     Bus.publish(Event.Updated, { swarm: info })
@@ -262,7 +261,9 @@ export namespace Swarm {
   export async function resume(id: string): Promise<Info> {
     const info = await load(id)
     if (!info) throw new Error(`Swarm not found: ${id}`)
-    info.status = "running"
+    info.status = "active"
+    info.stage = info.resume.stage ?? info.stage
+    info.resume.stage = null
     info.time.updated = Date.now()
     await save(info)
     Bus.publish(Event.Updated, { swarm: info })
@@ -277,7 +278,9 @@ export namespace Swarm {
     }
     SessionPrompt.cancel(info.conductor)
     const now = Date.now()
-    info.status = "failed"
+    info.status = "stopped"
+    info.stage = "idle"
+    info.resume.stage = null
     info.time.updated = now
     info.time.completed = now
     info.time.stopped = now
@@ -290,7 +293,7 @@ export namespace Swarm {
   export async function remove(id: string): Promise<Info> {
     const info = await load(id, { include_deleted: true })
     if (!info) throw new Error(`Swarm not found: ${id}`)
-    if (info.status === "planning" || info.status === "running" || info.status === "paused") {
+    if (info.status === "active" || info.status === "paused" || info.status === "blocked") {
       throw new Error(`Cannot delete running swarm: ${id}`)
     }
     if (info.time.deleted) return info
@@ -368,7 +371,8 @@ export namespace Swarm {
         const snap = await SharedBoard.snapshot(id)
         const isDiscussion = ["proposal", "opinion", "objection", "consensus"].includes(signal.type)
         const current = await load(id)
-        if (!current || current.status === "completed" || current.status === "failed") return
+        if (!current || current.status === "completed" || current.status === "failed" || current.status === "stopped")
+          return
 
         if (isDiscussion && signal.channel) {
           const round = (signal.payload.round as number) ?? 1

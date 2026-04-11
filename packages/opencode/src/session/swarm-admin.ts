@@ -202,13 +202,12 @@ export namespace SwarmAdmin {
     if (info.status === "completed") return "completed"
     if (info.status === "failed") return "failed"
     if (info.status === "paused") return "paused"
-    if (tasks.length === 0) return "planning"
     if (disc.some((item) => item.consensus_state === "active")) return "discussing"
-    if (tasks.some((task) => task.status === "pending" && !task.assignee)) return "assigning"
-    if (tasks.some((task) => task.status === "in_progress")) return "running"
-    if (tasks.length > 0 && tasks.every((task) => task.status === "completed" || task.status === "cancelled"))
-      return "verifying"
-    return info.status === "planning" ? "planning" : "running"
+    if (tasks.length === 0 && info.stage === "planning") return "planning"
+    if (info.stage === "executing" && tasks.some((task) => task.status === "pending" && !task.assignee))
+      return "assigning"
+    if (info.stage === "executing") return "running"
+    return info.stage
   }
 
   function state(info: Swarm.Info, count: z.infer<typeof TaskCount>) {
@@ -217,8 +216,8 @@ export namespace SwarmAdmin {
     if (info.status === "completed") return Status.enum.completed
     if (info.status === "failed" || count.failed > 0) return Status.enum.failed
     if (info.status === "paused") return Status.enum.paused
-    if (count.blocked > 0) return Status.enum.blocked
-    if (info.status === "planning") return Status.enum.planning
+    if (info.status === "blocked" || count.blocked > 0) return Status.enum.blocked
+    if (info.stage === "planning") return Status.enum.planning
     return Status.enum.running
   }
 

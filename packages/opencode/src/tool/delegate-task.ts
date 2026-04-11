@@ -249,7 +249,8 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
                 task_id: params.task_id ?? "",
                 status: "active",
               })
-              info.status = "running"
+              info.status = "active"
+              info.stage = "executing"
               info.time.updated = Date.now()
               await Swarm.save(info)
             }),

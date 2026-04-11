@@ -12,3 +12,12 @@
   - Legacy `Swarm.save()` calls still happen in tests and admin flows, so snapshot changes should preserve existing task/discussion data when syncing.
   - Snapshot metadata currently carries the legacy conductor/config/time fields, which makes it possible to migrate readers incrementally.
 ---
+
+## 2026-04-11 12:08:01 CST - US-002
+- Split lifecycle from execution by adding `stage`, `resume.stage`, and `visibility` to `Swarm.Info`, moving new launches to `status=active` + `stage=planning`, and restoring the stored stage on `paused -> active` in `packages/opencode/src/session/swarm.ts`.
+- Added lifecycle/stage validation in `packages/opencode/src/session/swarm-state.ts`, updated downstream swarm registration and admin read-model mapping, and expanded `packages/opencode/test/session/swarm-state.test.ts` coverage for invalid terminal stage combos and pause/resume restoration.
+- **Learnings for future iterations:**
+  - `Swarm.Info.status` now carries only lifecycle values; any UI or read-model phase label should come from `stage` or a deliberate projection.
+  - Pause/resume logic should preserve the last active `stage` in `resume.stage` before any sync back to `state.json`.
+  - Admin routes still expose compatibility labels like `planning` and `running`, but they should be treated as derived presentation values rather than authoritative swarm state.
+---

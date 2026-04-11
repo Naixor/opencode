@@ -24,7 +24,7 @@ async function withInstance(fn: (dir: string) => Promise<void>) {
   })
 }
 
-async function seed(id: string, input?: { status?: Swarm.Status; done?: boolean }) {
+async function seed(id: string, input?: { status?: Swarm.Status; stage?: Swarm.Stage; done?: boolean }) {
   await SharedBoard.init(id)
   const now = Date.now()
   await Swarm.save({
@@ -46,6 +46,9 @@ async function seed(id: string, input?: { status?: Swarm.Status; done?: boolean 
       verify_on_complete: true,
     },
     status: input?.status ?? "failed",
+    stage: input?.stage ?? (input?.status === "active" ? "executing" : "idle"),
+    resume: { stage: null },
+    visibility: { archived_at: null },
     time: {
       created: now - 2_000,
       updated: now - 1_000,
@@ -96,7 +99,7 @@ describe("Swarm admin", () => {
   test("cannot delete a running swarm", async () => {
     await withInstance(async () => {
       const id = "SW-running"
-      await seed(id, { status: "running" })
+      await seed(id, { status: "active", stage: "executing" })
       await expect(Swarm.remove(id)).rejects.toThrow("Cannot delete running swarm")
     })
   })
@@ -104,11 +107,12 @@ describe("Swarm admin", () => {
   test("stop marks stop time for admin controls", async () => {
     await withInstance(async () => {
       const id = "SW-stop"
-      await seed(id, { status: "running" })
+      await seed(id, { status: "active", stage: "executing" })
 
       const info = await Swarm.stop(id)
 
-      expect(info.status).toBe("failed")
+      expect(info.status).toBe("stopped")
+      expect(info.stage).toBe("idle")
       expect(info.time.stopped).toBeDefined()
       expect(info.time.completed).toBeDefined()
     })
@@ -117,7 +121,7 @@ describe("Swarm admin", () => {
   test("builds overview and detail read models with attention and discussion summaries", async () => {
     await withInstance(async () => {
       const id = "SW-detail"
-      await seed(id, { status: "running" })
+      await seed(id, { status: "active", stage: "executing" })
       const done = await BoardTask.create({
         subject: "Prepare plan",
         type: "implement",
