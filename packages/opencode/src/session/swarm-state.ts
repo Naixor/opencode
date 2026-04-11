@@ -954,6 +954,54 @@ export namespace SwarmState {
     }
   }
 
+  export function preflight(input: {
+    goal: string
+    scope: string
+    discussion: boolean
+    reason?: string | null
+    role?: string | null
+    catalog: Record<string, Role>
+    current: Alignment
+  }) {
+    const contract = draft({
+      goal: input.goal,
+      scope: input.scope,
+      discussion: input.discussion,
+      reason: input.reason,
+      role: input.role,
+      catalog: input.catalog,
+      current: input.current.contract,
+    })
+    const role_delta = classify({ catalog: input.catalog, roles: contract.roles })
+    const gate = decide({
+      action_sensitive: false,
+      material_role_delta: role_delta.material,
+      ambiguous: input.discussion,
+      valid_options: input.discussion ? 2 : 1,
+      trade_offs: input.discussion,
+      confidence: "high",
+      routine: !input.discussion,
+    })
+    const proceed = gate.value === "G0" || gate.value === "G1"
+    const pending_confirmation = proceed
+      ? null
+      : ({
+          kind: "run",
+          gate: gate.value,
+          requested_at: Date.now(),
+          requested_by: "coordinator",
+          reason: gate.reason,
+          roles: role_delta.roles.filter((role) => role.state !== "unchanged").map((role) => role.role_id ?? role.name),
+        } satisfies Pending)
+    return {
+      contract,
+      role_delta,
+      gate,
+      pending_confirmation,
+      proceed,
+    }
+  }
+
   export async function illegal(id: string, input: { actor: string; reason: string }) {
     using _ = await Lock.write(key(id))
     const state = await read(id)

@@ -502,6 +502,58 @@ describe("SwarmState", () => {
     expect(three.primary).toBe(3)
   })
 
+  test("builds alignment preflight state before delegation", () => {
+    const now = Date.now()
+    const flagged = SwarmState.preflight({
+      goal: "Ship the alignment flow",
+      scope: "Delegate PM analysis",
+      discussion: false,
+      role: "PM",
+      catalog: {
+        pm: {
+          id: "pm",
+          name: "PM",
+          purpose: "Own scope",
+          perspective: "User impact first",
+          default_when: "Trade-offs affect product direction",
+          version: 1,
+          created_at: now,
+          updated_at: now,
+          audit: { created_at: now, updated_at: now, actor: "alice", run_id: "SW-role-1" },
+        },
+      },
+      current: SwarmState.Example.alignment,
+    })
+    expect(flagged.proceed).toBe(true)
+    expect(flagged.gate.value).toBe("G0")
+    expect(flagged.pending_confirmation).toBeNull()
+
+    const blocked = SwarmState.preflight({
+      goal: "Ship the alignment flow",
+      scope: "Delegate RD analysis",
+      discussion: false,
+      role: "RD",
+      catalog: {
+        pm: {
+          id: "pm",
+          name: "PM",
+          purpose: "Own scope",
+          perspective: "User impact first",
+          default_when: "Trade-offs affect product direction",
+          version: 1,
+          created_at: now,
+          updated_at: now,
+          audit: { created_at: now, updated_at: now, actor: "alice", run_id: "SW-role-1" },
+        },
+      },
+      current: SwarmState.Example.alignment,
+    })
+    expect(blocked.proceed).toBe(false)
+    expect(blocked.gate.value).toBe("G2")
+    expect(blocked.pending_confirmation?.kind).toBe("run")
+    expect(blocked.pending_confirmation?.roles).toEqual(["RD"])
+  })
+
   test("restores the stored stage on paused to active", async () => {
     await using tmp = await tmpdir({ git: true, config: {} })
     await Instance.provide({

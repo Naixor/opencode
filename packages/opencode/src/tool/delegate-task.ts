@@ -163,28 +163,25 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
 
       if (isSwarm && params.swarm_id) {
         const align = await SwarmState.readAlignment()
+        let allow = true
         await SwarmState.mutate(params.swarm_id, {
           actor: "coordinator",
-          reason: "persist run contract",
+          reason: "run alignment preflight",
           fn: (state) => {
-            state.alignment.contract = SwarmState.draft({
+            const next = SwarmState.preflight({
               goal: state.swarm.goal,
               scope: params.description,
               discussion: Boolean(params.discussion_channel),
               reason: params.discussion_channel ? params.description : null,
               role: params.role_name ?? null,
               catalog: align.catalog.roles,
-              current: state.alignment.contract,
+              current: state.alignment,
             })
-            state.alignment.gate = SwarmState.decide({
-              action_sensitive: false,
-              material_role_delta: state.alignment.role_delta.material,
-              ambiguous: Boolean(params.discussion_channel),
-              valid_options: params.discussion_channel ? 2 : 1,
-              trade_offs: Boolean(params.discussion_channel),
-              confidence: "high",
-              routine: !params.discussion_channel,
-            })
+            state.alignment.contract = next.contract
+            state.alignment.role_delta = next.role_delta
+            state.alignment.gate = next.gate
+            state.alignment.pending_confirmation = next.pending_confirmation
+            allow = next.proceed
             const now = Date.now()
             state.alignment.audit.contract = {
               created_at: state.alignment.audit.contract.created_at ?? now,
@@ -198,8 +195,30 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
               actor: "coordinator",
               run_id: params.swarm_id ?? null,
             }
+            state.alignment.audit.pending_confirmation = {
+              created_at: state.alignment.audit.pending_confirmation.created_at ?? now,
+              updated_at: now,
+              actor: "coordinator",
+              run_id: params.swarm_id ?? null,
+            }
+            if (!allow) {
+              state.swarm.resume.stage = state.swarm.resume.stage ?? state.swarm.stage
+              state.swarm.status = "paused"
+              state.swarm.reason = next.gate.reason
+              return
+            }
+            state.swarm.status = "active"
+            state.swarm.reason = null
+            state.swarm.resume.stage = null
           },
         }).catch((e) => log.warn("failed to persist run contract", { swarmID: params.swarm_id, error: e }))
+        if (!allow) {
+          return {
+            title: params.description,
+            metadata: { blocked: true, swarmID: params.swarm_id },
+            output: `Run confirmation required before delegation: ${params.swarm_id}`,
+          }
+        }
       }
 
       // Create or resume session

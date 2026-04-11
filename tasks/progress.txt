@@ -5,6 +5,7 @@
 - `delegate_task` is the first guaranteed pre-worker checkpoint for swarm runs, so run-contract persistence belongs there before worker sessions are created or registered.
 - `SwarmState.decide()` owns deterministic gate mapping, and the caller should pass the explicit input object through unchanged so stored gate state explains why the run auto-ran or paused.
 - `SwarmState.admit()` uses a strict 2-of-3 threshold across the primary discussion signals; `role_benefit` is supporting context and should never unlock discussion mode by itself.
+- `SwarmState.preflight()` is the canonical place to bundle contract drafting, role delta classification, gate evaluation, and pending-confirmation decisions before any swarm delegation proceeds.
 
 ## 2026-04-11 19:15:48 CST - US-001
 - Added canonical alignment state to `packages/opencode/src/session/swarm-state.ts` for project-scoped role catalog data, user-scoped confirmations, run contract, gate state, role delta state, pending confirmations, and alignment audit metadata.
@@ -58,4 +59,13 @@
   - Discussion admission should stay pure and separate from contract drafting so the conductor can evaluate thresholds before deciding between execute and discussion modes.
   - The `0/3`, `1/3`, `2/3`, and `3/3` cases are worth keeping as explicit tests because they document the threshold better than prose alone.
   - `role_benefit` should remain visible in the result for later summaries, but it must never override the primary-signal threshold.
+---
+
+## 2026-04-11 19:39:19 CST - US-007
+- Added `SwarmState.preflight()` and updated `packages/opencode/src/tool/delegate-task.ts` plus `packages/opencode/src/agent/prompt/conductor.txt` so conductor delegation now drafts the contract, classifies role deltas, evaluates the gate, pauses on `G2`/`G3`, and avoids asking for approval on every task breakdown or worker prompt.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/tool/delegate-task.ts`, `packages/opencode/src/agent/prompt/conductor.txt`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep conductor preflight in one pure helper so later confirmation routes and escalation logic can reuse the same state transition inputs.
+  - Returning early from `delegate_task` on `G2` or `G3` is an effective pre-worker guard because it stops session creation before any worker is registered.
+  - Direction-level approval prompts belong in conductor policy text, not in per-task or per-worker delegation logic.
 ---
