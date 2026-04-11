@@ -108,6 +108,7 @@ export namespace Swarm {
         config: info.config,
         time: { created: info.time.created, updated: info.time.updated },
       })
+    const prev = structuredClone(state)
     state.swarm.goal = info.goal
     state.swarm.conductor = info.conductor
     state.swarm.config = info.config
@@ -135,6 +136,7 @@ export namespace Swarm {
         },
       ]),
     )
+    if (prev.schema_version === state.schema_version) SwarmState.check(prev, state)
     await SwarmState.write(SwarmState.Snapshot.parse(state))
   }
 
@@ -143,8 +145,8 @@ export namespace Swarm {
     const idx = all.findIndex((s) => s.id === info.id)
     if (idx >= 0) all[idx] = info
     else all.push(info)
-    await saveAll(all)
     await sync(info)
+    await saveAll(all)
   }
 
   function visible(info: Info, include_deleted?: boolean) {

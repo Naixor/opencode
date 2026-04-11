@@ -31,3 +31,12 @@
   - Non-coordinator worker updates should become observations (`BoardSignal`) unless the conductor explicitly commits them.
   - Audit trails for rejected snapshot writes live in `state.audit.illegal`, which makes it easy to assert policy enforcement in tests.
 ---
+
+## 2026-04-11 12:16:44 CST - US-004
+- Added explicit lifecycle and stage transition matrices in `packages/opencode/src/session/swarm-state.ts`, enforced them for both coordinator mutations and legacy `Swarm.save()` sync writes, and blocked blocked-to-active recovery without explicit unblock evidence.
+- Expanded `packages/opencode/test/session/swarm-state.test.ts` to cover invalid terminal lifecycle recovery, invalid stage transitions, and the blocked-recovery evidence rule.
+- **Learnings for future iterations:**
+  - Transition validation needs to run before any legacy mirror write, otherwise `swarms.json` can drift from `state.json` on rejected transitions.
+  - The status matrix can stay strict while the stage matrix remains slightly more permissive for direct conductor jumps like `planning -> verifying`.
+  - Reusing `swarm.reason` as unblock evidence keeps the guard simple until a richer evidence model lands.
+---

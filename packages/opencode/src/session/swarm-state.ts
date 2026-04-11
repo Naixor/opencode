@@ -9,6 +9,25 @@ import { Log } from "../util/log"
 export namespace SwarmState {
   const log = Log.create({ service: "swarm.state" })
 
+  export const StatusNext: Record<Status, readonly Status[]> = {
+    active: ["active", "paused", "blocked", "completed", "failed", "stopped"],
+    paused: ["paused", "active", "blocked", "failed", "stopped"],
+    blocked: ["blocked", "active", "paused", "failed", "stopped"],
+    completed: ["completed"],
+    failed: ["failed"],
+    stopped: ["stopped"],
+  }
+
+  export const StageNext: Record<Stage, readonly Stage[]> = {
+    planning: ["planning", "dispatching", "executing", "discussing", "verifying", "repairing", "idle"],
+    dispatching: ["dispatching", "executing", "discussing", "verifying", "repairing", "idle"],
+    executing: ["executing", "dispatching", "discussing", "verifying", "repairing", "idle"],
+    discussing: ["discussing", "dispatching", "executing", "verifying", "idle"],
+    verifying: ["verifying", "repairing", "idle"],
+    repairing: ["repairing", "dispatching", "executing", "verifying", "idle"],
+    idle: ["idle", "planning", "dispatching", "executing", "discussing", "verifying", "repairing"],
+  }
+
   export const Status = z.enum(["active", "paused", "blocked", "completed", "failed", "stopped"])
   export type Status = z.infer<typeof Status>
 
@@ -355,6 +374,18 @@ export namespace SwarmState {
     log.warn("illegal swarm mutation", { swarm: id, actor: input.actor, reason: input.reason })
   }
 
+  export function check(prev: Snapshot, next: Snapshot) {
+    if (!StatusNext[prev.swarm.status].includes(next.swarm.status)) {
+      throw new Error(`Invalid swarm status transition: ${prev.swarm.status} -> ${next.swarm.status}`)
+    }
+    if (!StageNext[prev.swarm.stage].includes(next.swarm.stage)) {
+      throw new Error(`Invalid swarm stage transition: ${prev.swarm.stage} -> ${next.swarm.stage}`)
+    }
+    if (prev.swarm.status === "blocked" && next.swarm.status === "active" && !next.swarm.reason) {
+      throw new Error("Blocked swarm recovery requires explicit unblock evidence")
+    }
+  }
+
   export async function mutate(
     id: string,
     input: {
@@ -374,6 +405,7 @@ export namespace SwarmState {
     }
     const next = structuredClone(state)
     input.fn(next)
+    check(state, next)
     const checked = Snapshot.parse(next)
     await write(checked)
     return checked

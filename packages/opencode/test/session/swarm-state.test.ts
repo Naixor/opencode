@@ -112,4 +112,81 @@ describe("SwarmState", () => {
       },
     })
   })
+
+  test("rejects invalid lifecycle transitions", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const now = Date.now()
+        await Swarm.save({
+          id: "SW-matrix",
+          goal: "Honor the lifecycle matrix",
+          conductor: "SE-conductor",
+          workers: [],
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true },
+          status: "completed",
+          stage: "idle",
+          resume: { stage: null },
+          visibility: { archived_at: null },
+          time: { created: now, updated: now, completed: now },
+        })
+        await expect(
+          Swarm.save({
+            id: "SW-matrix",
+            goal: "Honor the lifecycle matrix",
+            conductor: "SE-conductor",
+            workers: [],
+            config: { max_workers: 4, auto_escalate: true, verify_on_complete: true },
+            status: "active",
+            stage: "executing",
+            resume: { stage: null },
+            visibility: { archived_at: null },
+            time: { created: now, updated: now + 1, completed: now },
+          }),
+        ).rejects.toThrow("Invalid swarm status transition")
+      },
+    })
+  })
+
+  test("requires explicit unblock evidence for blocked recovery", () => {
+    const prev = SwarmState.Snapshot.parse({
+      ...SwarmState.Example,
+      swarm: {
+        ...SwarmState.Example.swarm,
+        status: "blocked",
+        stage: "executing",
+        reason: "timed out waiting for dependency",
+      },
+    })
+    const next = SwarmState.Snapshot.parse({
+      ...prev,
+      swarm: {
+        ...prev.swarm,
+        status: "active",
+        stage: "executing",
+        reason: null,
+      },
+    })
+    expect(() => SwarmState.check(prev, next)).toThrow("Blocked swarm recovery requires explicit unblock evidence")
+  })
+
+  test("rejects invalid stage transitions", () => {
+    const prev = SwarmState.Snapshot.parse({
+      ...SwarmState.Example,
+      swarm: {
+        ...SwarmState.Example.swarm,
+        status: "active",
+        stage: "verifying",
+      },
+    })
+    const next = SwarmState.Snapshot.parse({
+      ...prev,
+      swarm: {
+        ...prev.swarm,
+        stage: "planning",
+      },
+    })
+    expect(() => SwarmState.check(prev, next)).toThrow("Invalid swarm stage transition")
+  })
 })
