@@ -1,8 +1,13 @@
 import { describe, test, expect } from "bun:test"
+import fs from "fs/promises"
+import path from "path"
+import { Global } from "../../src/global"
 import { Instance } from "../../src/project/instance"
 import { Memory } from "../../src/memory/memory"
 import { MemoryStorage } from "../../src/memory/storage"
 import { MemoryInject } from "../../src/memory/engine/injector"
+import { registerMemoryInjector } from "../../src/memory/hooks/inject"
+import { HookChain } from "../../src/session/hooks"
 import { tmpdir } from "../fixture/fixture"
 
 async function withInstance<T>(fn: () => Promise<T>): Promise<T> {
@@ -148,6 +153,103 @@ describe("Memory Hooks (unit-level)", () => {
         Memory.markDirty(sessionID)
         expect(MemoryInject.shouldReRecall(sessionID, 4)).toBe(true)
         MemoryInject.clearCache(sessionID)
+      })
+    })
+  })
+
+  describe("legacy memory compatibility", () => {
+    test("injector migrates legacy category records and still injects memory", async () => {
+      await using tmp = await tmpdir({ git: true })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          HookChain.reset()
+          MemoryInject.reset()
+          await MemoryStorage.clear()
+
+          const dir = path.join(Global.Path.data, "memory", encodeURIComponent(tmp.path))
+          const file = path.join(dir, "personal.json")
+          const now = Date.now()
+          await fs.mkdir(dir, { recursive: true })
+          await Bun.write(
+            file,
+            JSON.stringify(
+              {
+                memories: {
+                  mem_legacy: {
+                    id: "mem_legacy",
+                    content: "Use Hono for HTTP",
+                    category: "tool",
+                    scope: "personal",
+                    status: "confirmed",
+                    tags: ["framework"],
+                    citations: [],
+                    score: 1,
+                    baseScore: 1,
+                    useCount: 0,
+                    hitCount: 0,
+                    source: { sessionID: "ses_legacy", method: "manual" },
+                    createdAt: now,
+                    updatedAt: now,
+                    inject: false,
+                  },
+                },
+                meta: {},
+              },
+              null,
+              2,
+            ),
+          )
+          MemoryStorage.invalidate()
+
+          registerMemoryInjector()
+
+          const ctx: HookChain.PreLLMContext = {
+            sessionID: "ses_legacy",
+            system: ["base"],
+            agent: "sisyphus",
+            model: "claude-sonnet-4-5-20250929",
+            messages: [{ role: "user", content: "remember project rules" }],
+          }
+
+          await HookChain.execute("pre-llm", ctx)
+
+          expect(ctx.system.some((item) => item.includes("Use Hono for HTTP"))).toBe(true)
+
+          const text = await Bun.file(file).text()
+          expect(text).toContain('"categories": [')
+          expect(text).not.toContain('"category": "tool"')
+        },
+      })
+    })
+
+    test("injector errors are surfaced instead of swallowed", async () => {
+      await using tmp = await tmpdir({ git: true })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          HookChain.reset()
+          MemoryInject.reset()
+          await MemoryStorage.clear()
+
+          const dir = path.join(Global.Path.data, "memory", encodeURIComponent(tmp.path))
+          const file = path.join(dir, "personal.json")
+          await fs.mkdir(dir, { recursive: true })
+          await Bun.write(file, JSON.stringify({ memories: { broken: { id: "broken" } }, meta: {} }, null, 2))
+          MemoryStorage.invalidate()
+
+          registerMemoryInjector()
+
+          const ctx: HookChain.PreLLMContext = {
+            sessionID: "ses_broken",
+            system: ["base"],
+            agent: "sisyphus",
+            model: "claude-sonnet-4-5-20250929",
+            messages: [{ role: "user", content: "hello" }],
+          }
+
+          await expect(HookChain.execute("pre-llm", ctx)).rejects.toThrow("memory injector failed")
+        },
       })
     })
   })

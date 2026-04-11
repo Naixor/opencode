@@ -1,0 +1,222 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/swarm-state-machine",
+  "sourcePrdFile": "tasks/prds/prd-swarm-state-machine.md",
+  "description": "Swarm state machine v2 - establish a single canonical snapshot, coordinator-only transitions, explicit verify and blocking rules, and cleanup-based rollout for reliable swarm execution.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Define canonical snapshot schema",
+      "description": "As a platform engineer, I want one v2 snapshot schema for each swarm so that all authoritative state lives in one place.",
+      "acceptanceCriteria": [
+        "Define one canonical file per swarm, such as `state.json`",
+        "Include `schema_version`, `rev`, `seq`, `swarm`, `workers`, `tasks`, `discussions`, `verify`, and `audit` in the schema",
+        "Require `schema_version=2` for all newly created v2 swarms",
+        "Document authoritative fields versus metadata fields",
+        "Document a minimal valid snapshot example",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Split swarm lifecycle from execution stage",
+      "description": "As a coordinator implementer, I want `status` and `stage` to be separate so that terminal state and current execution work are never conflated.",
+      "acceptanceCriteria": [
+        "Define `Swarm.status` as `active | paused | blocked | completed | failed | stopped`",
+        "Define `Swarm.stage` as `planning | dispatching | executing | discussing | verifying | repairing | idle`",
+        "Reject any state where `stage` uses terminal lifecycle values",
+        "Reject any state where `status` uses execution-phase values",
+        "Require `stage=idle` whenever `status` is `completed`, `failed`, or `stopped`",
+        "Persist `resume.stage` and restore it on `paused -> active`",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Enforce coordinator-only authoritative writes",
+      "description": "As a system owner, I want only the coordinator to commit authoritative state so that writes remain consistent and auditable.",
+      "acceptanceCriteria": [
+        "Allow only the coordinator to commit authoritative transitions to `state.json`",
+        "Treat worker, verify, discussion, and admin inputs as observations or commands until coordinator commit",
+        "Reject direct non-coordinator mutation of the snapshot",
+        "Record audit output for illegal direct snapshot mutations",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Validate swarm lifecycle and stage transitions",
+      "description": "As a coordinator implementer, I want strict swarm transition guards so that lifecycle behavior stays predictable.",
+      "acceptanceCriteria": [
+        "Implement the approved `Swarm.status` transition matrix",
+        "Implement the approved `Swarm.stage` transition matrix",
+        "Reject `completed -> active`, `failed -> active`, `paused -> completed`, and `blocked -> completed`",
+        "Reject blocked recovery when only elapsed time is present and no unblock evidence exists",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Implement worker timeout and unblock rules",
+      "description": "As a runtime engineer, I want workers to move from waiting to blocked consistently so that stalled execution is visible and controlled.",
+      "acceptanceCriteria": [
+        "Define `Worker.status` as `queued | starting | running | waiting | blocked | completed | failed | cancelled | stopped`",
+        "Move `waiting -> blocked` after the default `600s` timeout",
+        "Allow timeout override through `lark-opencode.json` key `swarm.wait_timeout_seconds`",
+        "Fall back to `600` when the config key is absent",
+        "Require explicit unblock evidence and coordinator approval for `blocked -> running`",
+        "Allow at most one non-terminal worker for the same `task_id`",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Align task state with worker and verify outcomes",
+      "description": "As a task orchestration engineer, I want task state transitions to reflect worker and verify outcomes so that dependencies stay correct.",
+      "acceptanceCriteria": [
+        "Define `BoardTask.status` as `pending | ready | in_progress | verifying | completed | blocked | failed | cancelled`",
+        "Move a task to `ready` only when all dependencies are `completed`",
+        "Keep downstream tasks in `pending` when any dependency is `failed`, `cancelled`, or `blocked`",
+        "Do not auto-mark downstream tasks as `blocked` unless the coordinator explicitly writes that state and reason",
+        "Apply documented worker-to-task linkage for `in_progress`, `verifying`, `completed`, `blocked`, and `failed`",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Model discussion rounds explicitly",
+      "description": "As a discussion workflow engineer, I want discussion state and round handling to be explicit so that multi-round decisions remain deterministic.",
+      "acceptanceCriteria": [
+        "Define `Discussion.status` as `idle | collecting | round_complete | consensus_ready | decided | exhausted | failed | cancelled`",
+        "Start `current_round` at `1`",
+        "Allow only the coordinator to trigger `advance_round`",
+        "Prevent new `collecting` rounds after `current_round == max_rounds`",
+        "Keep `decided` and `exhausted` mutually exclusive terminal states",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Make verify state explicit and waiver-only when skipped",
+      "description": "As a verification engineer, I want verify state to be explicit so that completion rules remain auditable and safe.",
+      "acceptanceCriteria": [
+        "Define `Verify.status` as `idle | pending | running | passed | failed | repair_required | skipped | cancelled`",
+        "Allow `Verify.skipped` only when explicit waiver evidence exists",
+        "Reject any path that derives `Verify.skipped` from legacy data, inferred logic, or default behavior",
+        "Keep `swarm.status=active` and `swarm.stage=verifying` while verify is `pending` or `running`",
+        "Allow swarm completion only when all required tasks are `completed` and verify is `passed`, or `skipped` with explicit waiver evidence",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Commit snapshot updates atomically",
+      "description": "As a storage engineer, I want each authoritative transition to commit atomically so that snapshot integrity survives process and delivery failures.",
+      "acceptanceCriteria": [
+        "Allow only one coordinator writer per swarm at a time",
+        "Support multi-entity updates in one transaction over `swarm`, `workers`, `tasks`, `discussions`, `verify`, and `audit`",
+        "Commit through read current snapshot, build next snapshot, validate, write temp file, `fsync`, and `rename`",
+        "Record `reason`, `actor`, `at`, and `txn` for every successful commit",
+        "Generate a new `rev` and a strictly increasing `seq` on every successful commit",
+        "Treat failures before `rename` as uncommitted and failures after `rename` as committed-on-disk",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Publish authoritative snapshot and transition events",
+      "description": "As a client integrator, I want a minimal authoritative SSE contract so that every consumer can rebuild current swarm state reliably.",
+      "acceptanceCriteria": [
+        "Expose authoritative SSE event types `snapshot` and `transition` only",
+        "Send a full `snapshot` when a client connects",
+        "Emit `transition` events after each successful transaction with monotonic `seq` values",
+        "Require clients to process events in `seq` order and de-duplicate repeated `seq` values",
+        "Require clients to request a fresh `snapshot` when a `seq` gap is detected",
+        "Send transition logs to the overall logging system without treating them as the source of truth",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Support consistent v2 reads across product surfaces",
+      "description": "As an operator, I want Admin UI, Web UI, and TUI to read the same v2 state semantics so that status displays match backend truth.",
+      "acceptanceCriteria": [
+        "Have Admin UI, Web UI, and TUI read from the v2 canonical snapshot or a read model derived from it",
+        "Render lifecycle state from `status`, not from derived guesses based on `stage`",
+        "Show `idle` stage for terminal swarms only when `status` is terminal",
+        "Keep archived swarms readable without changing lifecycle semantics",
+        "Display verify-skipped state only when waiver evidence exists in the underlying snapshot",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Separate archive from purge",
+      "description": "As an administrator, I want archive and purge to stay distinct so that hiding data is never confused with deleting it.",
+      "acceptanceCriteria": [
+        "Make `archive` change visibility only without changing `swarm.status` or `swarm.stage`",
+        "Make `unarchive` only clear `swarm.visibility.archived_at`",
+        "Do not introduce `deleted` as any lifecycle state",
+        "Keep auto-archive optional and default-off",
+        "Allow auto-archive only for `completed | failed | stopped`",
+        "Do not implement auto-purge",
+        "Allow purge only as a manual administrative action for `completed | failed | stopped` when no active worker, verify run, or discussion remains",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Roll out through cleanup and reset",
+      "description": "As a release engineer, I want v2 rollout to depend on cleanup instead of migration so that no mixed legacy state remains.",
+      "acceptanceCriteria": [
+        "Do not implement legacy compatibility reads for v2 rollout",
+        "Do not implement legacy backfill for v2 rollout",
+        "Do not implement migration scripts that convert old swarm data into v2 state",
+        "Provide cleanup tooling with `dry-run`, explicit confirmation, deletion stats, deletion listing, and post-check validation",
+        "Block v2 rollout until cleanup completes successfully",
+        "Create all new swarms as `schema_version=2` after cleanup",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

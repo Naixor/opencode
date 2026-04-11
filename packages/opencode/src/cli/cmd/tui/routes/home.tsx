@@ -20,6 +20,11 @@ import { useSDK } from "@tui/context/sdk"
 // TODO: what is the best way to do this?
 let once = false
 
+type Row = {
+  status?: string
+  workers?: Array<{ status?: string }>
+}
+
 export function Home() {
   const sync = useSync()
   const kv = useKV()
@@ -43,18 +48,20 @@ export function Home() {
       if (!enabled) return []
       const base = sdk.fetch ?? globalThis.fetch
       return base(`${sdk.url}/swarm`)
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : []))
+        .then((x) => (Array.isArray(x) ? (x as Row[]) : []))
         .catch(() => [])
     },
   )
   const activeWorkers = createMemo(() => {
-    const list = swarms() ?? []
+    const list = swarms()
+    if (!Array.isArray(list)) return 0
     return list
-      .filter((s: any) => s.status === "active")
+      .filter((s) => s.status === "active")
       .reduce(
-        (sum: number, s: any) =>
+        (sum, s) =>
           sum +
-          (s.workers?.filter((w: any) => ["queued", "starting", "running", "waiting"].includes(w.status)).length ?? 0),
+          (s.workers?.filter((w) => ["queued", "starting", "running", "waiting"].includes(w.status ?? "")).length ?? 0),
         0,
       )
   })

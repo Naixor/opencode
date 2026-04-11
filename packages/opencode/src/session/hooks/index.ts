@@ -105,6 +105,7 @@ export namespace HookChain {
     priority: number
     enabled: boolean
     injector?: boolean
+    fatal?: boolean
     handler: Handler<T>
   }
 
@@ -156,7 +157,7 @@ export namespace HookChain {
     chainType: T,
     priority: number,
     handler: Handler<T>,
-    opts?: { injector?: boolean },
+    opts?: { injector?: boolean; fatal?: boolean },
   ): void {
     const s = state()
     const hooks = s.registered.get(chainType) ?? []
@@ -171,6 +172,7 @@ export namespace HookChain {
       priority,
       enabled,
       injector: opts?.injector,
+      fatal: opts?.fatal,
       handler: handler as Handler<ChainType>,
     }
     if (idx >= 0) {
@@ -253,13 +255,17 @@ export namespace HookChain {
         startTime = performance.now()
       }
 
-      await (hook.handler as Handler<T>)(ctx).catch((err: unknown) => {
+      let err: unknown
+      await (hook.handler as Handler<T>)(ctx).catch((cause: unknown) => {
+        err = cause
         log.error("hook execution error", {
           hook: hook.name,
           chainType,
-          error: err instanceof Error ? err.message : String(err),
+          error: cause instanceof Error ? cause.message : String(cause),
         })
       })
+
+      if (err && hook.fatal) throw err
 
       if (instrumenting && snapshot && startTime !== undefined) {
         try {

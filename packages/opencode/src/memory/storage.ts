@@ -55,6 +55,11 @@ export namespace MemoryStorage {
     meta: Record<string, number>
   }
 
+  type Legacy = Omit<MemoryRecord, "categories"> & {
+    categories?: string[]
+    category?: string
+  }
+
   // --- In-memory cache ---
   let cache: Store | undefined
 
@@ -77,15 +82,22 @@ export namespace MemoryStorage {
 
   async function load(): Promise<Store> {
     if (cache) return cache
-    try {
-      const raw = await Bun.file(filePath()).text()
-      const data = JSON.parse(raw) as Store
-      cache = {
-        memories: data.memories ?? {},
-        meta: data.meta ?? {},
-      }
-    } catch {
+    const file = Bun.file(filePath())
+    if (!(await file.exists())) {
       cache = { memories: {}, meta: {} }
+      return cache
+    }
+
+    const next = shape(
+      JSON.parse(await file.text()) as { memories?: Record<string, Legacy>; meta?: Record<string, number> },
+    )
+    cache = next.store
+    if (next.dirty) {
+      log.info("migrated legacy memory store", {
+        path: filePath(),
+        count: Object.keys(next.store.memories).length,
+      })
+      await persist(next.store)
     }
     return cache
   }
@@ -118,7 +130,7 @@ export namespace MemoryStorage {
 
   export async function get(id: string): Promise<MemoryRecord | undefined> {
     const fp = filePath()
-    using _ = await Lock.read(fp)
+    using _ = await Lock.write(fp)
     const store = await load()
     return store.memories[id]
   }
@@ -135,7 +147,7 @@ export namespace MemoryStorage {
 
   export async function loadAll(): Promise<MemoryRecord[]> {
     const fp = filePath()
-    using _ = await Lock.read(fp)
+    using _ = await Lock.write(fp)
     cache = undefined
     const store = await load()
     return Object.values(store.memories)
@@ -228,7 +240,7 @@ export namespace MemoryStorage {
 
   export async function getMeta(key: string): Promise<number | undefined> {
     const fp = filePath()
-    using _ = await Lock.read(fp)
+    using _ = await Lock.write(fp)
     const store = await load()
     return store.meta[key]
   }
@@ -246,5 +258,34 @@ export namespace MemoryStorage {
     const fp = filePath()
     using _ = await Lock.write(fp)
     await persist({ memories: {}, meta: {} })
+  }
+
+  function shape(input: { memories?: Record<string, Legacy>; meta?: Record<string, number> }) {
+    let dirty = false
+    const memories = Object.fromEntries(
+      Object.entries(input.memories ?? {}).map(([id, item]) => {
+        const categories = Array.isArray(item.categories)
+          ? item.categories
+          : typeof item.category === "string"
+            ? [item.category]
+            : []
+        if (!Array.isArray(item.categories) && typeof item.category === "string") dirty = true
+
+        const next = {
+          ...item,
+          categories,
+        }
+        delete next.category
+        return [id, next]
+      }),
+    ) as Record<string, MemoryRecord>
+
+    return {
+      store: {
+        memories,
+        meta: input.meta ?? {},
+      },
+      dirty,
+    }
   }
 }
