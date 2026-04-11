@@ -173,7 +173,7 @@ export namespace Swarm {
 
   function visible(info: Info, include_deleted?: boolean) {
     if (include_deleted) return true
-    return info.time.deleted === undefined
+    return info.visibility.archived_at === null
   }
 
   export async function load(id: string, input?: { include_deleted?: boolean }): Promise<Info | undefined> {
@@ -344,14 +344,58 @@ export namespace Swarm {
     const info = await load(id, { include_deleted: true })
     if (!info) throw new Error(`Swarm not found: ${id}`)
     if (info.status === "active" || info.status === "paused" || info.status === "blocked") {
-      throw new Error(`Cannot delete running swarm: ${id}`)
+      throw new Error(`Cannot archive running swarm: ${id}`)
     }
-    if (info.time.deleted) return info
-    info.time.deleted = Date.now()
-    info.time.updated = info.time.deleted
+    if (info.visibility.archived_at) return info
+    info.visibility.archived_at = Date.now()
+    info.time.updated = info.visibility.archived_at
     await save(info)
     Bus.publish(Event.Updated, { swarm: info })
     return info
+  }
+
+  export async function unarchive(id: string): Promise<Info> {
+    const info = await load(id, { include_deleted: true })
+    if (!info) throw new Error(`Swarm not found: ${id}`)
+    if (!info.visibility.archived_at) return info
+    info.visibility.archived_at = null
+    info.time.updated = Date.now()
+    await save(info)
+    Bus.publish(Event.Updated, { swarm: info })
+    return info
+  }
+
+  export async function purge(id: string): Promise<void> {
+    const info = await load(id, { include_deleted: true })
+    if (!info) throw new Error(`Swarm not found: ${id}`)
+    if (!["completed", "failed", "stopped"].includes(info.status)) {
+      throw new Error(`Cannot purge non-terminal swarm: ${id}`)
+    }
+    const state = await SwarmState.read(id)
+    if (!state) throw new Error(`Swarm state not found: ${id}`)
+    if (
+      Object.values(state.workers).some(
+        (worker) => !["completed", "failed", "cancelled", "stopped"].includes(worker.status),
+      )
+    ) {
+      throw new Error(`Cannot purge swarm with active workers: ${id}`)
+    }
+    if (["pending", "running", "repair_required"].includes(state.verify.status)) {
+      throw new Error(`Cannot purge swarm with active verify state: ${id}`)
+    }
+    if (
+      Object.values(state.discussions).some(
+        (item) => !["idle", "decided", "exhausted", "failed", "cancelled"].includes(item.status),
+      )
+    ) {
+      throw new Error(`Cannot purge swarm with active discussions: ${id}`)
+    }
+    const all = await loadAll()
+    await saveAll(all.filter((item) => item.id !== id))
+    await fs.rm(path.join(Global.Path.data, "projects", Instance.project.id, "board", id), {
+      recursive: true,
+      force: true,
+    })
   }
 
   export async function intervene(id: string, message: string): Promise<void> {

@@ -11,6 +11,7 @@ type Detail = {
     current_phase: string
     verify_status: string | null
     updated_at: number
+    archived_at: number | null
     needs_attention: boolean
     attention: string[]
   }
@@ -162,7 +163,7 @@ export default function SwarmDashboard() {
     jump(ref)
   }
 
-  async function act(kind: "stop" | "delete") {
+  async function act(kind: "stop" | "archive" | "unarchive" | "purge") {
     await fetch(`${sdk.url}/swarm/${params.id}/${kind}`, { method: "POST" })
     setState("confirm", "")
     refetch()
@@ -173,12 +174,15 @@ export default function SwarmDashboard() {
     return value === "active" || value === "blocked" || value === "paused"
   })
 
-  const canDelete = createMemo(() => {
+  const canArchive = createMemo(() => {
     const value = data()?.overview.status
     if (!value) return false
-    if (value === "deleted") return false
     return value !== "active" && value !== "blocked" && value !== "paused"
   })
+
+  const canUnarchive = createMemo(() => Boolean(data()?.overview.archived_at))
+
+  const canPurge = createMemo(() => Boolean(data()?.overview.archived_at))
 
   return (
     <div class="flex size-full flex-col gap-4 overflow-auto p-4">
@@ -200,6 +204,13 @@ export default function SwarmDashboard() {
                     <Show when={item().verify_status}>
                       <span class="rounded-full border border-border-weak-base bg-surface-base px-2.5 py-1 text-11-medium uppercase tracking-[0.18em] text-text-weak">
                         verify {item().verify_status}
+                      </span>
+                    </Show>
+                    <Show when={item().overview.archived_at}>
+                      <span
+                        class={`rounded-full border px-2.5 py-1 text-11-medium uppercase tracking-[0.18em] ${stateTone("archived")}`}
+                      >
+                        archived
                       </span>
                     </Show>
                     <span class="text-12-regular text-text-weak">Updated {ago(item().overview.updated_at)}</span>
@@ -235,20 +246,39 @@ export default function SwarmDashboard() {
                         Stop Swarm
                       </button>
                     </Show>
-                    <Show when={canDelete()}>
+                    <Show when={canArchive() && !item().overview.archived_at}>
+                      <button
+                        class="rounded-full border border-zinc-500/30 bg-zinc-500/10 px-3 py-1.5 text-12-medium text-zinc-200"
+                        onClick={() => setState("confirm", "archive")}
+                      >
+                        Archive Swarm
+                      </button>
+                    </Show>
+                    <Show when={canUnarchive()}>
+                      <button
+                        class="rounded-full border border-zinc-500/30 bg-zinc-500/10 px-3 py-1.5 text-12-medium text-zinc-200"
+                        onClick={() => setState("confirm", "unarchive")}
+                      >
+                        Unarchive
+                      </button>
+                    </Show>
+                    <Show when={canPurge()}>
                       <button
                         class="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-12-medium text-red-200"
-                        onClick={() =>
-                          setState("confirm", state.confirm === "delete-ready" ? "delete-ready" : "delete")
-                        }
+                        onClick={() => setState("confirm", "purge")}
                       >
-                        Delete Swarm
+                        Purge Swarm
                       </button>
                     </Show>
                   </div>
 
                   <Show
-                    when={state.confirm === "stop" || state.confirm === "delete" || state.confirm === "delete-ready"}
+                    when={
+                      state.confirm === "stop" ||
+                      state.confirm === "archive" ||
+                      state.confirm === "unarchive" ||
+                      state.confirm === "purge"
+                    }
                   >
                     <div
                       role="dialog"
@@ -275,10 +305,10 @@ export default function SwarmDashboard() {
                         </div>
                       </Show>
 
-                      <Show when={state.confirm === "delete"}>
+                      <Show when={state.confirm === "archive"}>
                         <div class="space-y-3">
-                          <div class="text-14-medium text-text-strong">Delete this swarm from default lists?</div>
-                          <div>Safe delete keeps board, artifact, signal, and discussion records intact.</div>
+                          <div class="text-14-medium text-text-strong">Archive this swarm?</div>
+                          <div>Archiving hides this swarm from default lists but keeps board records intact.</div>
                           <div class="flex gap-2">
                             <button
                               class="rounded-full border border-border-weak-base px-3 py-1"
@@ -287,21 +317,20 @@ export default function SwarmDashboard() {
                               Cancel
                             </button>
                             <button
-                              class="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-red-200"
-                              onClick={() => setState("confirm", "delete-ready")}
+                              class="rounded-full border border-zinc-500/30 bg-zinc-500/10 px-3 py-1 text-zinc-200"
+                              onClick={() => act("archive")}
                             >
-                              I understand
+                              Archive
                             </button>
                           </div>
                         </div>
                       </Show>
 
-                      <Show when={state.confirm === "delete-ready"}>
+                      <Show when={state.confirm === "unarchive"}>
                         <div class="space-y-3">
-                          <div class="text-14-medium text-text-strong">Final confirmation</div>
+                          <div class="text-14-medium text-text-strong">Restore this swarm?</div>
                           <div>
-                            After delete, this swarm disappears from the default overview and only shows in the deleted
-                            filter.
+                            Unarchive returns the swarm to the default overview without changing lifecycle state.
                           </div>
                           <div class="flex gap-2">
                             <button
@@ -311,10 +340,31 @@ export default function SwarmDashboard() {
                               Cancel
                             </button>
                             <button
-                              class="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-red-200"
-                              onClick={() => act("delete")}
+                              class="rounded-full border border-zinc-500/30 bg-zinc-500/10 px-3 py-1 text-zinc-200"
+                              onClick={() => act("unarchive")}
                             >
-                              Delete Swarm
+                              Unarchive
+                            </button>
+                          </div>
+                        </div>
+                      </Show>
+
+                      <Show when={state.confirm === "purge"}>
+                        <div class="space-y-3">
+                          <div class="text-14-medium text-text-strong">Purge this swarm?</div>
+                          <div>Purging permanently removes the archived swarm data from disk.</div>
+                          <div class="flex gap-2">
+                            <button
+                              class="rounded-full border border-border-weak-base px-3 py-1"
+                              onClick={() => setState("confirm", "")}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              class="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-red-200"
+                              onClick={() => act("purge")}
+                            >
+                              Purge Swarm
                             </button>
                           </div>
                         </div>

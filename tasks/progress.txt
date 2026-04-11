@@ -103,3 +103,12 @@
   - Browser verification is easiest against an isolated XDG data home so old local swarm files do not interfere with v2-only readers.
   - `verify_status` should stay hidden for `idle`, and `skipped` must only surface when waiver data exists in the snapshot.
 ---
+
+## 2026-04-11 13:00:31 CST - US-012
+- Replaced safe-delete semantics with archive/unarchive/purge behavior in `packages/opencode/src/session/swarm.ts`, added archive/purge routes and UI controls, and made archived swarms invisible by default while keeping lifecycle `status` and execution `stage` unchanged.
+- Updated admin/web surfaces to treat archiving as visibility metadata (`archived_at`) instead of a lifecycle state, and added purge coverage in `packages/opencode/test/session/swarm-admin.test.ts`.
+- **Learnings for future iterations:**
+  - Archive is just visibility, so it should live on `visibility.archived_at` and never leak into the lifecycle `status` enum.
+  - Purge should only be offered after archive; that keeps “hidden” and “deleted” as clearly separate operator actions.
+  - Reusing the legacy `include_deleted` query flag as “include archived” keeps older callers working while the UI terminology moves to archive/purge.
+---

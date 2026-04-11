@@ -10,7 +10,7 @@ import { SwarmState } from "./swarm-state"
 export namespace SwarmAdmin {
   const stale = 15 * 60 * 1000
 
-  export const Status = z.enum(["active", "blocked", "paused", "completed", "failed", "stopped", "deleted"])
+  export const Status = z.enum(["active", "blocked", "paused", "completed", "failed", "stopped"])
   export type Status = z.infer<typeof Status>
 
   export const Attention = z.enum(["blocked_task", "failed_task", "stale_worker", "no_consensus"])
@@ -41,7 +41,7 @@ export namespace SwarmAdmin {
     current_phase: z.string(),
     verify_status: z.string().nullable(),
     updated_at: z.number(),
-    deleted_at: z.number().optional(),
+    archived_at: z.number().nullable(),
     task_counts: TaskCount,
     discussion_counts: DiscussionCount,
     needs_attention: z.boolean(),
@@ -201,12 +201,10 @@ export namespace SwarmAdmin {
   }
 
   function phase(info: Swarm.Info, tasks: BoardTask.Info[], disc: DiscussionInfo[]) {
-    if (info.time.deleted) return info.stage
     return info.stage
   }
 
   function state(info: Swarm.Info, count: z.infer<typeof TaskCount>) {
-    if (info.time.deleted) return Status.enum.deleted
     return info.status
   }
 
@@ -526,7 +524,7 @@ export namespace SwarmAdmin {
       current_phase: phase(info, tasks, disc),
       verify_status: verify,
       updated_at: last,
-      deleted_at: info.time.deleted,
+      archived_at: info.visibility.archived_at,
       task_counts: taskCount,
       discussion_counts: talkCount,
       needs_attention: attention.length > 0,
@@ -619,7 +617,10 @@ export namespace SwarmAdmin {
     return list
       .map((item) => item.item)
       .filter((item) => {
-        if (input?.status && input.status !== "all" && item.status !== input.status) return false
+        if (input?.status === "archived" && !item.archived_at) return false
+        if (input?.status && input.status !== "all" && input.status !== "archived" && item.status !== input.status)
+          return false
+        if (!input?.include_deleted && item.archived_at) return false
         if (input?.needs_attention && !item.needs_attention) return false
         return true
       })

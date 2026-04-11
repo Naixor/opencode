@@ -63,7 +63,7 @@ async function seed(id: string, input?: { status?: Swarm.Status; stage?: Swarm.S
 }
 
 describe("Swarm admin", () => {
-  test("safe delete hides swarms by default and preserves board files", async () => {
+  test("archive hides swarms by default and preserves board files", async () => {
     await withInstance(async () => {
       const id = "SW-delete"
       await seed(id, { done: true })
@@ -89,7 +89,9 @@ describe("Swarm admin", () => {
 
       const gone = await Swarm.remove(id)
 
-      expect(gone.time.deleted).toBeDefined()
+      expect(gone.visibility.archived_at).toBeDefined()
+      expect(gone.status).toBe("failed")
+      expect(gone.stage).toBe("idle")
       expect((await Swarm.list()).map((item) => item.id)).not.toContain(id)
       expect((await Swarm.list({ include_deleted: true })).map((item) => item.id)).toContain(id)
       expect(await Swarm.status(id, { include_deleted: true })).toMatchObject({ id })
@@ -101,11 +103,29 @@ describe("Swarm admin", () => {
     })
   })
 
-  test("cannot delete a running swarm", async () => {
+  test("cannot archive a running swarm", async () => {
     await withInstance(async () => {
       const id = "SW-running"
       await seed(id, { status: "active", stage: "executing" })
-      await expect(Swarm.remove(id)).rejects.toThrow("Cannot delete running swarm")
+      await expect(Swarm.remove(id)).rejects.toThrow("Cannot archive running swarm")
+    })
+  })
+
+  test("purge removes archived terminal swarms", async () => {
+    await withInstance(async () => {
+      const id = "SW-purge"
+      await seed(id, { done: true })
+      const info = await Swarm.load(id, { include_deleted: true })
+      if (!info) throw new Error("Expected swarm info")
+      info.workers = info.workers.map((worker) => ({ ...worker, status: "completed", updated_at: Date.now() }))
+      await Swarm.save(info)
+      await Swarm.remove(id)
+      const base = path.join(Global.Path.data, "projects", Instance.project.id, "board", id)
+
+      await Swarm.purge(id)
+
+      expect((await Swarm.list({ include_deleted: true })).map((item) => item.id)).not.toContain(id)
+      expect(await Bun.file(path.join(base, "state.json")).exists()).toBe(false)
     })
   })
 

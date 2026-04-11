@@ -263,7 +263,7 @@ const APP_HTML = `<!DOCTYPE html>
     }
 
     const canStop = (status) => status === 'active' || status === 'blocked' || status === 'paused'
-    const canDelete = (status) => status && status !== 'deleted' && status !== 'active' && status !== 'blocked' && status !== 'paused'
+    const canArchive = (status) => status && status !== 'active' && status !== 'blocked' && status !== 'paused'
 
     const renderFilters = () => {
       const tabs = [
@@ -274,7 +274,7 @@ const APP_HTML = `<!DOCTYPE html>
         ['failed', 'Failed'],
         ['completed', 'Completed'],
         ['stopped', 'Stopped'],
-        ['deleted', 'Deleted'],
+        ['archived', 'Archived'],
       ]
       return tabs.map(([value, label]) =>
         '<button class="btn' + (state.status === value ? ' active' : '') + '" data-status="' + value + '">' + label + '</button>'
@@ -355,8 +355,8 @@ const APP_HTML = `<!DOCTYPE html>
     const perform = async (kind) => {
       if (!state.id || state.busy) return
       if (kind === 'stop' && !window.confirm('Stop this swarm?')) return
-      if (kind === 'delete' && !window.confirm('Delete this swarm from default lists? This is a safe delete and keeps board data.')) return
-      if (kind === 'delete' && !window.confirm('Final confirmation: keep records but hide this swarm from default lists?')) return
+      if (kind === 'archive' && !window.confirm('Archive this swarm? This hides it from default lists without deleting board data.')) return
+      if (kind === 'purge' && !window.confirm('Purge this archived swarm? This permanently deletes its board data.')) return
       state.busy = true
       renderDetail()
       try {
@@ -374,7 +374,7 @@ const APP_HTML = `<!DOCTYPE html>
     const loadRows = async () => {
       const query = new URLSearchParams()
       if (state.status !== 'all') query.set('status', state.status)
-      if (state.status === 'deleted') query.set('include_deleted', 'true')
+      if (state.status === 'archived') query.set('include_deleted', 'true')
       const res = await fetch('/swarm/admin?' + query.toString())
       state.rows = await res.json()
       if (state.id && !state.rows.find((row) => row.swarm_id === state.id)) {
@@ -388,7 +388,7 @@ const APP_HTML = `<!DOCTYPE html>
     }
 
     const loadDetail = async (id) => {
-      const query = state.status === 'deleted' ? '?include_deleted=true' : ''
+      const query = state.status === 'archived' ? '?include_deleted=true' : ''
       const res = await fetch('/swarm/' + encodeURIComponent(id) + '/admin' + query)
       if (!res.ok) {
         detail.innerHTML = '<div class="panel"><div class="label">Error</div><div class="value">Unable to load swarm detail.</div></div>'
@@ -399,7 +399,9 @@ const APP_HTML = `<!DOCTYPE html>
       const actions =
         '<div class="toolbar">' +
           (canStop(overview.status) ? '<button class="btn warn" data-act="stop"' + (state.busy ? ' disabled' : '') + '>Stop Swarm</button>' : '') +
-          (canDelete(overview.status) ? '<button class="btn danger" data-act="delete"' + (state.busy ? ' disabled' : '') + '>Delete Swarm</button>' : '') +
+          (!overview.archived_at && canArchive(overview.status) ? '<button class="btn" data-act="archive"' + (state.busy ? ' disabled' : '') + '>Archive Swarm</button>' : '') +
+          (overview.archived_at ? '<button class="btn" data-act="unarchive"' + (state.busy ? ' disabled' : '') + '>Unarchive</button>' : '') +
+          (overview.archived_at ? '<button class="btn danger" data-act="purge"' + (state.busy ? ' disabled' : '') + '>Purge Swarm</button>' : '') +
         '</div>'
       detail.innerHTML =
         '<div class="panel">' +
@@ -726,10 +728,30 @@ export const SwarmRoutes = lazy(() =>
       },
     )
     .post(
+      "/:id/archive",
+      describeRoute({
+        summary: "Archive Swarm",
+        description: "Hide a finished Swarm from default lists without deleting board data.",
+        operationId: "swarm.archive",
+        responses: {
+          200: {
+            description: "Swarm archived",
+            content: { "application/json": { schema: resolver(Swarm.Info) } },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("param", z.object({ id: z.string() })),
+      async (c) => {
+        const info = await Swarm.remove(c.req.valid("param").id)
+        return c.json(info)
+      },
+    )
+    .post(
       "/:id/delete",
       describeRoute({
-        summary: "Safely delete Swarm",
-        description: "Hide a finished Swarm from default lists without deleting board data.",
+        summary: "Archive Swarm (legacy alias)",
+        description: "Legacy alias for archiving a finished Swarm without deleting board data.",
         operationId: "swarm.delete",
         responses: {
           200: {
@@ -743,6 +765,43 @@ export const SwarmRoutes = lazy(() =>
       async (c) => {
         const info = await Swarm.remove(c.req.valid("param").id)
         return c.json(info)
+      },
+    )
+    .post(
+      "/:id/unarchive",
+      describeRoute({
+        summary: "Unarchive Swarm",
+        description: "Restore an archived Swarm to the default lists.",
+        operationId: "swarm.unarchive",
+        responses: {
+          200: {
+            description: "Swarm unarchived",
+            content: { "application/json": { schema: resolver(Swarm.Info) } },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("param", z.object({ id: z.string() })),
+      async (c) => {
+        const info = await Swarm.unarchive(c.req.valid("param").id)
+        return c.json(info)
+      },
+    )
+    .post(
+      "/:id/purge",
+      describeRoute({
+        summary: "Purge Swarm",
+        description: "Permanently remove a terminal archived Swarm after all active work is gone.",
+        operationId: "swarm.purge",
+        responses: {
+          200: { description: "Swarm purged" },
+          ...errors(400),
+        },
+      }),
+      validator("param", z.object({ id: z.string() })),
+      async (c) => {
+        await Swarm.purge(c.req.valid("param").id)
+        return c.json(true)
       },
     )
     .get(

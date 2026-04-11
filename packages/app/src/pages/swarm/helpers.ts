@@ -5,6 +5,7 @@ export function stateTone(value: string) {
   if (value === "failed") return "border-red-500/30 bg-red-500/10 text-red-300"
   if (value === "completed") return "border-sky-500/30 bg-sky-500/10 text-sky-200"
   if (value === "deleted") return "border-zinc-500/30 bg-zinc-500/10 text-zinc-300"
+  if (value === "archived") return "border-zinc-500/30 bg-zinc-500/10 text-zinc-300"
   if (value === "stopped") return "border-orange-500/30 bg-orange-500/10 text-orange-200"
   return "border-border-weak-base bg-surface-base text-text-base"
 }

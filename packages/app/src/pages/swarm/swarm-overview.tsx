@@ -12,6 +12,7 @@ type Row = {
   current_phase: string
   verify_status: string | null
   updated_at: number
+  archived_at: number | null
   task_counts: {
     pending: number
     running: number
@@ -36,7 +37,7 @@ const tabs = [
   ["failed", "Failed"],
   ["completed", "Completed"],
   ["stopped", "Stopped"],
-  ["deleted", "Deleted"],
+  ["archived", "Archived"],
 ] as const
 
 export default function SwarmOverview() {
@@ -53,7 +54,7 @@ export default function SwarmOverview() {
       const query = new URLSearchParams()
       if (input.status !== "all") query.set("status", input.status)
       if (input.attention) query.set("needs_attention", "true")
-      if (input.status === "deleted") query.set("include_deleted", "true")
+      if (input.status === "archived") query.set("include_deleted", "true")
       const resp = await fetch(`${sdk.url}/swarm/admin?${query.toString()}`)
       if (!resp.ok) return [] as Row[]
       return (await resp.json()) as Row[]
@@ -116,6 +117,11 @@ export default function SwarmOverview() {
                   <span class={`rounded-full border px-2 py-0.5 text-11-medium ${stateTone(row.status)}`}>
                     {row.status}
                   </span>
+                  <Show when={row.archived_at}>
+                    <span class={`rounded-full border px-2 py-0.5 text-11-medium ${stateTone("archived")}`}>
+                      archived
+                    </span>
+                  </Show>
                   <Show when={row.verify_status}>
                     <span class="rounded-full border border-border-weak-base bg-surface-base px-2 py-0.5 text-11-medium text-text-weak">
                       verify {row.verify_status}
