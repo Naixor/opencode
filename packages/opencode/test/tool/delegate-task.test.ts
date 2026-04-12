@@ -18,7 +18,7 @@ const ctx = {
 
 describe("delegate-task tools", () => {
   async function withInstance(fn: () => Promise<void>) {
-    await using tmp = await tmpdir({ git: true, config: {} })
+    await using tmp = await tmpdir({ config: {} })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {

@@ -10,7 +10,6 @@ import { SecurityConfig } from "../../../src/security/config"
 describe("ContextInjectionHooks", () => {
   async function withInstance(fn: () => Promise<void>, setup?: (dir: string) => Promise<void>) {
     await using tmp = await tmpdir({
-      git: true,
       config: {},
       init: setup,
     })

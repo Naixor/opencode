@@ -1501,7 +1501,6 @@ test("project config overrides remote well-known config", async () => {
 
   try {
     await using tmp = await tmpdir({
-      git: true,
       init: async (dir) => {
         // Project config enables jira (overriding remote default)
         await Filesystem.write(
@@ -1576,7 +1575,6 @@ test("wellknown URL with trailing slash is normalized", async () => {
 
   try {
     await using tmp = await tmpdir({
-      git: true,
       init: async (dir) => {
         await Filesystem.write(
           path.join(dir, "opencode.json"),

@@ -14,13 +14,13 @@ const fwd = (...parts: string[]) => path.join(...parts).replaceAll("\\", "/")
 
 async function bootstrap() {
   return tmpdir({
-    git: true,
     init: async (dir) => {
       const unique = Math.random().toString(36).slice(2)
       const aContent = `A${unique}`
       const bContent = `B${unique}`
       await Filesystem.write(`${dir}/a.txt`, aContent)
       await Filesystem.write(`${dir}/b.txt`, bContent)
+      await $`git init`.cwd(dir).quiet()
       await $`git add .`.cwd(dir).quiet()
       await $`git commit --no-gpg-sign -m init`.cwd(dir).quiet()
       return {

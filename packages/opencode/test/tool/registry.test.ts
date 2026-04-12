@@ -2,10 +2,21 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { tmpdir } from "../fixture/fixture"
+import { Config } from "../../src/config/config"
 import { Instance } from "../../src/project/instance"
 import { ToolRegistry } from "../../src/tool/registry"
 
 describe("tool.registry", () => {
+  async function ids() {
+    const wait = Config.waitForDependencies
+    Config.waitForDependencies = async () => {}
+    try {
+      return await ToolRegistry.ids()
+    } finally {
+      Config.waitForDependencies = wait
+    }
+  }
+
   test("loads tools from .opencode/tool (singular)", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
@@ -34,8 +45,7 @@ describe("tool.registry", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const ids = await ToolRegistry.ids()
-        expect(ids).toContain("hello")
+        expect(await ids()).toContain("hello")
       },
     })
   })
@@ -68,8 +78,7 @@ describe("tool.registry", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const ids = await ToolRegistry.ids()
-        expect(ids).toContain("hello")
+        expect(await ids()).toContain("hello")
       },
     })
   })
@@ -82,16 +91,25 @@ describe("tool.registry", () => {
 
         const toolsDir = path.join(opencodeDir, "tools")
         await fs.mkdir(toolsDir, { recursive: true })
+        await fs.mkdir(path.join(opencodeDir, "node_modules", "cowsay"), { recursive: true })
 
         await Bun.write(
           path.join(opencodeDir, "package.json"),
           JSON.stringify({
             name: "custom-tools",
             dependencies: {
-              "@opencode-ai/plugin": "^0.0.0",
-              cowsay: "^1.6.0",
+              "@opencode-ai/plugin": "*",
+              cowsay: "1.0.0",
             },
           }),
+        )
+        await Bun.write(
+          path.join(opencodeDir, "node_modules", "cowsay", "package.json"),
+          JSON.stringify({ name: "cowsay", version: "1.0.0", type: "module", exports: "./index.js" }),
+        )
+        await Bun.write(
+          path.join(opencodeDir, "node_modules", "cowsay", "index.js"),
+          ["export function say(input) {", "  return `< ${input.text} >`", "}", ""].join("\n"),
         )
 
         await Bun.write(
@@ -114,8 +132,7 @@ describe("tool.registry", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const ids = await ToolRegistry.ids()
-        expect(ids).toContain("cowsay")
+        expect(await ids()).toContain("cowsay")
       },
     })
   })

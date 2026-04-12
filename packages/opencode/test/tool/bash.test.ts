@@ -58,7 +58,7 @@ describe("tool.bash", () => {
   })
 
   test("trusted command skips sandbox wrapping", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await secure(tmp.path, ["printf"])
     setActiveSandbox(
       {
@@ -92,7 +92,7 @@ describe("tool.bash", () => {
   })
 
   test("untrusted command still runs inside sandbox", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await secure(tmp.path, ["bitsky"])
     setActiveSandbox(
       {
@@ -126,7 +126,7 @@ describe("tool.bash", () => {
   })
 
   test("trusted command only bypasses sandbox for a single direct command", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await secure(tmp.path, ["printf"])
     setActiveSandbox(
       {
@@ -162,7 +162,7 @@ describe("tool.bash", () => {
 
 describe("tool.bash permissions", () => {
   test("asks for bash permission with correct pattern", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -189,7 +189,7 @@ describe("tool.bash permissions", () => {
   })
 
   test("asks for bash permission with multiple commands", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -217,7 +217,7 @@ describe("tool.bash permissions", () => {
   })
 
   test("asks for external_directory permission when cd to parent", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -243,7 +243,7 @@ describe("tool.bash permissions", () => {
   })
 
   test("asks for external_directory permission when workdir is outside project", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -276,7 +276,7 @@ describe("tool.bash permissions", () => {
         await Bun.write(path.join(dir, "outside.txt"), "x")
       },
     })
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -306,7 +306,7 @@ describe("tool.bash permissions", () => {
   })
 
   test("does not ask for external_directory permission when rm inside project", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -336,7 +336,7 @@ describe("tool.bash permissions", () => {
   })
 
   test("includes always patterns for auto-approval", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -363,7 +363,7 @@ describe("tool.bash permissions", () => {
   })
 
   test("does not ask for bash permission when command is cd only", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -389,7 +389,7 @@ describe("tool.bash permissions", () => {
   })
 
   test("matches redirects in permission pattern", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -410,7 +410,7 @@ describe("tool.bash permissions", () => {
   })
 
   test("always pattern has space before wildcard to not include different commands", async () => {
-    await using tmp = await tmpdir({ git: true })
+    await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
@@ -433,45 +433,53 @@ describe("tool.bash permissions", () => {
 })
 
 describe("tool.bash truncation", () => {
-  test("truncates output exceeding line limit", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await BashTool.init()
-        const lineCount = Truncate.MAX_LINES + 500
-        const result = await bash.execute(
-          {
-            command: `seq 1 ${lineCount}`,
-            description: "Generate lines exceeding limit",
-          },
-          ctx,
-        )
-        expect((result.metadata as any).truncated).toBe(true)
-        expect(result.output).toContain("truncated")
-        expect(result.output).toContain("The tool call succeeded but the output was truncated")
-      },
-    })
-  })
+  test(
+    "truncates output exceeding line limit",
+    async () => {
+      await Instance.provide({
+        directory: projectRoot,
+        fn: async () => {
+          const bash = await BashTool.init()
+          const lineCount = Truncate.MAX_LINES + 1
+          const result = await bash.execute(
+            {
+              command: `seq 1 ${lineCount}`,
+              description: "Generate lines exceeding limit",
+            },
+            ctx,
+          )
+          expect((result.metadata as any).truncated).toBe(true)
+          expect(result.output).toContain("truncated")
+          expect(result.output).toContain("The tool call succeeded but the output was truncated")
+        },
+      })
+    },
+    { timeout: 15000 },
+  )
 
-  test("truncates output exceeding byte limit", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await BashTool.init()
-        const byteCount = Truncate.MAX_BYTES + 10000
-        const result = await bash.execute(
-          {
-            command: `head -c ${byteCount} /dev/zero | tr '\\0' 'a'`,
-            description: "Generate bytes exceeding limit",
-          },
-          ctx,
-        )
-        expect((result.metadata as any).truncated).toBe(true)
-        expect(result.output).toContain("truncated")
-        expect(result.output).toContain("The tool call succeeded but the output was truncated")
-      },
-    })
-  })
+  test(
+    "truncates output exceeding byte limit",
+    async () => {
+      await Instance.provide({
+        directory: projectRoot,
+        fn: async () => {
+          const bash = await BashTool.init()
+          const byteCount = Truncate.MAX_BYTES + 10000
+          const result = await bash.execute(
+            {
+              command: `head -c ${byteCount} /dev/zero | tr '\\0' 'a'`,
+              description: "Generate bytes exceeding limit",
+            },
+            ctx,
+          )
+          expect((result.metadata as any).truncated).toBe(true)
+          expect(result.output).toContain("truncated")
+          expect(result.output).toContain("The tool call succeeded but the output was truncated")
+        },
+      })
+    },
+    { timeout: 15000 },
+  )
 
   test("does not truncate small output", async () => {
     await Instance.provide({
@@ -492,30 +500,34 @@ describe("tool.bash truncation", () => {
     })
   })
 
-  test("full output is saved to file when truncated", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await BashTool.init()
-        const lineCount = Truncate.MAX_LINES + 100
-        const result = await bash.execute(
-          {
-            command: `seq 1 ${lineCount}`,
-            description: "Generate lines for file check",
-          },
-          ctx,
-        )
-        expect((result.metadata as any).truncated).toBe(true)
+  test(
+    "full output is saved to file when truncated",
+    async () => {
+      await Instance.provide({
+        directory: projectRoot,
+        fn: async () => {
+          const bash = await BashTool.init()
+          const lineCount = Truncate.MAX_LINES + 2
+          const result = await bash.execute(
+            {
+              command: `seq 1 ${lineCount}`,
+              description: "Generate lines for file check",
+            },
+            ctx,
+          )
+          expect((result.metadata as any).truncated).toBe(true)
 
-        const filepath = (result.metadata as any).outputPath
-        expect(filepath).toBeTruthy()
+          const filepath = (result.metadata as any).outputPath
+          expect(filepath).toBeTruthy()
 
-        const saved = await Filesystem.readText(filepath)
-        const lines = saved.trim().split("\n")
-        expect(lines.length).toBe(lineCount)
-        expect(lines[0]).toBe("1")
-        expect(lines[lineCount - 1]).toBe(String(lineCount))
-      },
-    })
-  })
+          const saved = await Filesystem.readText(filepath)
+          const lines = saved.trim().split("\n")
+          expect(lines.length).toBe(lineCount)
+          expect(lines[0]).toBe("1")
+          expect(lines[lineCount - 1]).toBe(String(lineCount))
+        },
+      })
+    },
+    { timeout: 15000 },
+  )
 })

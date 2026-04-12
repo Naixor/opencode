@@ -7,7 +7,6 @@ import { ErrorRecoveryHooks } from "../../../src/session/hooks/error-recovery"
 describe("ErrorRecoveryHooks", () => {
   async function withInstance(fn: () => Promise<void>, config?: Record<string, unknown>) {
     await using tmp = await tmpdir({
-      git: true,
       config: config ?? {},
     })
     await Instance.provide({

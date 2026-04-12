@@ -9,7 +9,6 @@ import * as fs from "fs"
 describe("DetectionCheckingHooks", () => {
   async function withInstance(fn: (tmpPath: string) => Promise<void>, config?: Record<string, unknown>) {
     await using tmp = await tmpdir({
-      git: true,
       config: config ?? {},
     })
     await Instance.provide({
@@ -188,9 +187,7 @@ describe("DetectionCheckingHooks", () => {
           messages: [
             {
               role: "user",
-              content: [
-                { type: "text", text: "[review-mode] check this code" },
-              ],
+              content: [{ type: "text", text: "[review-mode] check this code" }],
             },
           ],
         }
@@ -211,9 +208,7 @@ describe("DetectionCheckingHooks", () => {
           messages: [
             {
               role: "user",
-              content: [
-                { type: "text", text: "/ulw refactor the auth module" },
-              ],
+              content: [{ type: "text", text: "/ulw refactor the auth module" }],
             },
           ],
         }
