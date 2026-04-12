@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
+import { Link } from "react-router"
 
 interface Suggestion {
   category: string
@@ -243,9 +244,9 @@ export function AnalyzePage() {
                       ~{formatTokens(Math.round(t.output_bytes / 4))}
                     </td>
                     <td className="px-4 py-2">
-                      <a href={`/logs/${t.llm_log_id}`} className="text-blue-400 hover:underline font-mono text-xs">
+                      <Link to={`/logs/${t.llm_log_id}`} className="text-blue-400 hover:underline font-mono text-xs">
                         {t.llm_log_id.substring(0, 12)}...
-                      </a>
+                      </Link>
                     </td>
                   </tr>
                 ))}

@@ -2,10 +2,7 @@ import path from "path"
 import { Log } from "../../util/log"
 import { HookChain } from "./index"
 import { Instance } from "../../project/instance"
-import { SecurityAccess } from "../../security/access"
-import { SecurityConfig } from "../../security/config"
-import { LLMScanner } from "../../security/llm-scanner"
-import { SecurityRedact } from "../../security/redact"
+import { InstructionPrompt } from "../instruction"
 
 export namespace ContextInjectionHooks {
   const log = Log.create({ service: "hooks.context-injection" })
@@ -26,58 +23,23 @@ export namespace ContextInjectionHooks {
     compactionTodos.clear()
   }
 
-  // --- Security helpers ---
-
-  function checkRead(filePath: string): boolean {
-    const result = SecurityAccess.checkAccess(filePath, "read", "agent")
-    if (!result.allowed) {
-      log.info("access denied for read", { filePath, reason: result.reason })
-      return false
-    }
-    return true
-  }
-
-  function checkLLM(filePath: string): boolean {
-    const result = SecurityAccess.checkAccess(filePath, "llm", "agent")
-    if (!result.allowed) {
-      log.info("access denied for llm injection", { filePath, reason: result.reason })
-      return false
-    }
-    return true
-  }
-
-  function redactProtectedSegments(content: string): string {
-    const config = SecurityConfig.getSecurityConfig()
-    const matches = LLMScanner.scanForProtectedContent(content, config)
-    if (matches.length === 0) return content
-    return SecurityRedact.redactContent(
-      content,
-      matches.map((m) => ({ start: m.start, end: m.end })),
-    )
-  }
-
-  async function safeReadFile(filePath: string): Promise<string | null> {
-    return Bun.file(filePath)
-      .text()
-      .catch(() => null)
-  }
-
   // --- directory-agents-injector (PreLLMChain, priority 100) ---
   // Scans for AGENTS.md in project root and .opencode/, injects into system prompt
 
-  async function findAgentsMd(): Promise<{ path: string; content: string } | null> {
+  async function findAgentsMd(): Promise<Array<{ path: string; content: string }>> {
     const dir = Instance.directory
     const candidates = [path.join(dir, "AGENTS.md"), path.join(dir, ".opencode", "AGENTS.md")]
+    const result: Array<{ path: string; content: string }> = []
 
     for (const candidate of candidates) {
       const exists = await Bun.file(candidate).exists()
       if (!exists) continue
-      if (!checkRead(candidate)) continue
-      if (!checkLLM(candidate)) continue
-      const content = await safeReadFile(candidate)
-      if (content) return { path: candidate, content }
+      const content = await InstructionPrompt.load(candidate)
+      if (!content) continue
+      result.push({ path: candidate, content })
     }
-    return null
+
+    return result
   }
 
   function registerDirectoryAgentsInjector(): void {
@@ -86,6 +48,8 @@ export namespace ContextInjectionHooks {
       "pre-llm",
       100,
       async (ctx) => {
+        if ((ctx.level ?? "full") !== "full") return
+
         const cached = agentsCache.get(ctx.sessionID)
         if (cached !== undefined) {
           if (cached) ctx.system.push(cached)
@@ -93,16 +57,21 @@ export namespace ContextInjectionHooks {
         }
 
         const result = await findAgentsMd()
-        if (!result) {
+        if (result.length === 0) {
           agentsCache.set(ctx.sessionID, null)
           return
         }
 
-        const redacted = redactProtectedSegments(result.content)
-        const injection = `Instructions from AGENTS.md (${result.path}):\n${redacted}`
+        const items = result.filter((item) => !InstructionPrompt.seen(ctx.system, item.path))
+        if (items.length === 0) {
+          agentsCache.set(ctx.sessionID, null)
+          return
+        }
+
+        const injection = items.map((item) => InstructionPrompt.render(item.path, item.content)).join("\n\n")
         agentsCache.set(ctx.sessionID, injection)
         ctx.system.push(injection)
-        log.info("injected AGENTS.md", { sessionID: ctx.sessionID, path: result.path })
+        log.info("injected AGENTS.md", { sessionID: ctx.sessionID, paths: items.map((item) => item.path) })
       },
       { injector: true },
     )
@@ -115,9 +84,7 @@ export namespace ContextInjectionHooks {
     const candidate = path.join(dir, "README.md")
     const exists = await Bun.file(candidate).exists()
     if (!exists) return null
-    if (!checkRead(candidate)) return null
-    if (!checkLLM(candidate)) return null
-    const content = await safeReadFile(candidate)
+    const content = await InstructionPrompt.load(candidate)
     if (!content) return null
     return { path: candidate, content }
   }
@@ -140,8 +107,7 @@ export namespace ContextInjectionHooks {
           return
         }
 
-        const redacted = redactProtectedSegments(result.content)
-        const injection = `Project README.md (${result.path}):\n${redacted}`
+        const injection = `Project README.md (${result.path}):\n${result.content}`
         readmeCache.set(ctx.sessionID, { dir: currentDir, content: injection })
         ctx.system.push(injection)
         log.info("injected README.md", { sessionID: ctx.sessionID, path: result.path })
@@ -176,15 +142,7 @@ export namespace ContextInjectionHooks {
         }
 
         for (const file of files) {
-          if (!checkRead(file)) {
-            log.info("rules file access denied, skipping", { file })
-            continue
-          }
-          if (!checkLLM(file)) {
-            log.info("rules file llm-denied, skipping", { file })
-            continue
-          }
-          const content = await safeReadFile(file)
+          const content = await InstructionPrompt.load(file)
           if (content) results.push({ path: file, content })
         }
       }
@@ -212,8 +170,7 @@ export namespace ContextInjectionHooks {
         }
 
         const injections = ruleFiles.map((f) => {
-          const redacted = redactProtectedSegments(f.content)
-          return `Custom rules from ${f.path}:\n${redacted}`
+          return `Custom rules from ${f.path}:\n${f.content}`
         })
 
         rulesCache.set(ctx.sessionID, injections)

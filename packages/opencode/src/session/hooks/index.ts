@@ -19,6 +19,7 @@ export namespace HookChain {
     sessionID: z.string(),
     system: z.array(z.string()),
     agent: z.string(),
+    level: z.enum(["full", "medium", "lite"]).optional(),
     injectors: z.array(z.string()).optional(),
     model: z.string(),
     variant: z.string().optional(),

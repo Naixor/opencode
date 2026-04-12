@@ -205,6 +205,57 @@ describe("ContextInjectionHooks", () => {
       )
     })
 
+    test("existing AGENTS.md system entry is not injected twice and .opencode entry still loads", async () => {
+      await withInstance(
+        async () => {
+          const dir = Instance.directory
+          const root = path.join(dir, "AGENTS.md")
+          const ctx: HookChain.PreLLMContext = {
+            sessionID: "s1",
+            system: [`Instructions from: ${root}\n# Root Instructions`],
+            agent: "build",
+            model: "claude-sonnet-4-5-20250929",
+            messages: [],
+          }
+
+          await HookChain.execute("pre-llm", ctx)
+
+          const joined = ctx.system.join("\n\n")
+          expect(joined.match(new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"))?.length).toBe(1)
+          expect(joined).toContain(path.join(dir, ".opencode", "AGENTS.md"))
+          expect(joined).toContain("Project Rules")
+        },
+        async (dir) => {
+          await Bun.write(path.join(dir, "AGENTS.md"), "# Root Instructions")
+          await fs.mkdir(path.join(dir, ".opencode"), { recursive: true })
+          await Bun.write(path.join(dir, ".opencode", "AGENTS.md"), "# Project Rules")
+        },
+      )
+    })
+
+    test("medium prompt level skips AGENTS.md injection", async () => {
+      await withInstance(
+        async () => {
+          const ctx: HookChain.PreLLMContext = {
+            sessionID: "s1",
+            system: ["base"],
+            agent: "build",
+            level: "medium",
+            model: "claude-sonnet-4-5-20250929",
+            messages: [],
+          }
+
+          await HookChain.execute("pre-llm", ctx)
+
+          const injected = ctx.system.find((s) => s.includes("AGENTS.md"))
+          expect(injected).toBeUndefined()
+        },
+        async (dir) => {
+          await Bun.write(path.join(dir, "AGENTS.md"), "# Agents\nShould not appear.")
+        },
+      )
+    })
+
     test("empty injector config skips AGENTS.md, README.md, and rules injection", async () => {
       await withInstance(
         async () => {

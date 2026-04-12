@@ -8,6 +8,10 @@ import { Flag } from "@/flag/flag"
 import { Log } from "../util/log"
 import { Glob } from "../util/glob"
 import type { MessageV2 } from "./message-v2"
+import { SecurityAccess } from "../security/access"
+import { SecurityConfig } from "../security/config"
+import { LLMScanner } from "../security/llm-scanner"
+import { SecurityRedact } from "../security/redact"
 
 const log = Log.create({ service: "instruction" })
 
@@ -43,11 +47,49 @@ async function resolveRelative(instruction: string): Promise<string[]> {
 }
 
 export namespace InstructionPrompt {
+  const PREFIX = "Instructions from: "
   const state = Instance.state(() => {
     return {
       claims: new Map<string, Set<string>>(),
     }
   })
+
+  function allowed(filepath: string, op: "read" | "llm") {
+    const result = SecurityAccess.checkAccess(filepath, op, "agent")
+    if (!result.allowed) {
+      log.info("instruction access denied", { filepath, op, reason: result.reason })
+      return false
+    }
+    return true
+  }
+
+  function redact(content: string) {
+    const cfg = SecurityConfig.getSecurityConfig()
+    const matches = LLMScanner.scanForProtectedContent(content, cfg)
+    if (matches.length === 0) return content
+    return SecurityRedact.redactContent(
+      content,
+      matches.map((item) => ({ start: item.start, end: item.end })),
+    )
+  }
+
+  export function render(filepath: string, content: string) {
+    return PREFIX + filepath + "\n" + content
+  }
+
+  export function seen(system: string[], filepath: string) {
+    return system.some((item) => {
+      return item.includes(PREFIX + filepath + "\n") || item.includes(`Instructions from AGENTS.md (${filepath}):\n`)
+    })
+  }
+
+  export async function load(filepath: string) {
+    if (!allowed(filepath, "read")) return
+    if (!allowed(filepath, "llm")) return
+    const content = await Filesystem.readText(filepath).catch(() => "")
+    if (!content) return
+    return redact(content)
+  }
 
   function isClaimed(messageID: string, filepath: string) {
     const claimed = state().claims.get(messageID)
@@ -118,10 +160,7 @@ export namespace InstructionPrompt {
     const config = await Config.get()
     const paths = await systemPaths()
 
-    const files = Array.from(paths).map(async (p) => {
-      const content = await Filesystem.readText(p).catch(() => "")
-      return content ? "Instructions from: " + p + "\n" + content : ""
-    })
+    const files = Array.from(paths).map((p) => load(p).then((content) => (content ? render(p, content) : "")))
 
     const urls: string[] = []
     if (config.instructions) {
@@ -135,7 +174,7 @@ export namespace InstructionPrompt {
       fetch(url, { signal: AbortSignal.timeout(5000) })
         .then((res) => (res.ok ? res.text() : ""))
         .catch(() => "")
-        .then((x) => (x ? "Instructions from: " + url + "\n" + x : "")),
+        .then((x) => (x ? render(url, x) : "")),
     )
 
     return Promise.all([...files, ...fetches]).then((result) => result.filter(Boolean))
@@ -179,9 +218,9 @@ export namespace InstructionPrompt {
 
       if (found && found !== target && !system.has(found) && !already.has(found) && !isClaimed(messageID, found)) {
         claim(messageID, found)
-        const content = await Filesystem.readText(found).catch(() => undefined)
+        const content = await load(found)
         if (content) {
-          results.push({ filepath: found, content: "Instructions from: " + found + "\n" + content })
+          results.push({ filepath: found, content: render(found, content) })
         }
       }
       current = path.dirname(current)

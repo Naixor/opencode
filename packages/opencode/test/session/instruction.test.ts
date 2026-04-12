@@ -3,7 +3,12 @@ import path from "path"
 import { InstructionPrompt } from "../../src/session/instruction"
 import { Instance } from "../../src/project/instance"
 import { Global } from "../../src/global"
+import { SecurityConfig } from "../../src/security/config"
 import { tmpdir } from "../fixture/fixture"
+
+afterEach(() => {
+  SecurityConfig.resetConfig()
+})
 
 describe("InstructionPrompt.resolve", () => {
   test("returns empty when AGENTS.md is at project root (already in systemPaths)", async () => {
@@ -65,6 +70,107 @@ describe("InstructionPrompt.resolve", () => {
 
         const results = await InstructionPrompt.resolve([], filepath, "test-message-2")
         expect(results).toEqual([])
+      },
+    })
+  })
+
+  test("skips protected subdirectory AGENTS.md", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "subdir", "AGENTS.md"), "# Secret Instructions")
+        await Bun.write(path.join(dir, "subdir", "nested", "file.ts"), "const x = 1")
+        await Bun.write(
+          path.join(dir, ".opencode-security.json"),
+          JSON.stringify({
+            version: "1.0",
+            rules: [
+              {
+                pattern: "**/subdir/**",
+                type: "directory",
+                deniedOperations: ["read", "llm"],
+                allowedRoles: [],
+              },
+            ],
+          }),
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await SecurityConfig.loadSecurityConfig(tmp.path)
+        const results = await InstructionPrompt.resolve([], path.join(tmp.path, "subdir", "nested", "file.ts"), "msg-1")
+        expect(results).toEqual([])
+      },
+    })
+  })
+
+  test("redacts protected segments from subdirectory AGENTS.md", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "subdir", "AGENTS.md"),
+          ["# Instructions", "Public", "// @security-start", "secret-token", "// @security-end"].join("\n"),
+        )
+        await Bun.write(path.join(dir, "subdir", "nested", "file.ts"), "const x = 1")
+        await Bun.write(
+          path.join(dir, ".opencode-security.json"),
+          JSON.stringify({
+            version: "1.0",
+            segments: {
+              markers: [
+                {
+                  start: "@security-start",
+                  end: "@security-end",
+                  deniedOperations: ["llm"],
+                  allowedRoles: [],
+                },
+              ],
+            },
+          }),
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await SecurityConfig.loadSecurityConfig(tmp.path)
+        const results = await InstructionPrompt.resolve([], path.join(tmp.path, "subdir", "nested", "file.ts"), "msg-2")
+        expect(results).toHaveLength(1)
+        expect(results[0].content).toContain("Public")
+        expect(results[0].content).not.toContain("secret-token")
+      },
+    })
+  })
+})
+
+describe("InstructionPrompt.system", () => {
+  test("skips protected root AGENTS.md", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "AGENTS.md"), "# Secret Root")
+        await Bun.write(
+          path.join(dir, ".opencode-security.json"),
+          JSON.stringify({
+            version: "1.0",
+            rules: [
+              {
+                pattern: "**/AGENTS.md",
+                type: "file",
+                deniedOperations: ["read", "llm"],
+                allowedRoles: [],
+              },
+            ],
+          }),
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await SecurityConfig.loadSecurityConfig(tmp.path)
+        const result = await InstructionPrompt.system()
+        expect(result.some((item) => item.includes("AGENTS.md"))).toBe(false)
       },
     })
   })
