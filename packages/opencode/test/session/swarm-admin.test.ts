@@ -4,7 +4,9 @@ import { SharedBoard, BoardTask, BoardSignal } from "../../src/board"
 import { BoardArtifact } from "../../src/board/artifact"
 import { Discussion } from "../../src/board/discussion"
 import { Global } from "../../src/global"
+import { Identifier } from "../../src/id/id"
 import { Instance } from "../../src/project/instance"
+import { Session } from "../../src/session"
 import { SwarmAdmin } from "../../src/session/swarm-admin"
 import { Swarm } from "../../src/session/swarm"
 import { SwarmState } from "../../src/session/swarm-state"
@@ -282,6 +284,79 @@ describe("Swarm admin", () => {
         consensus_state: "no_consensus",
       })
       expect(detail.discussions[0]?.raw[0]?.entries.length).toBeGreaterThan(0)
+    })
+  })
+
+  test("surfaces a stalled conductor as blocked attention", async () => {
+    await withInstance(async (dir) => {
+      const now = Date.now()
+      const ses = await Session.create({ title: "Swarm conductor" })
+      const user = Identifier.ascending("message")
+      const msg = Identifier.ascending("message")
+      await Session.updateMessage({
+        id: user,
+        role: "user",
+        sessionID: ses.id,
+        time: { created: now - 3_000 },
+        agent: "conductor",
+        model: { providerID: "openai", modelID: "gpt-5.4" },
+      })
+      await Session.updateMessage({
+        id: msg,
+        role: "assistant",
+        sessionID: ses.id,
+        time: { created: now - 2_000 },
+        parentID: user,
+        modelID: "gpt-5.4",
+        providerID: "openai",
+        mode: "conductor",
+        agent: "conductor",
+        path: { cwd: dir, root: dir },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+      await Session.updatePart({
+        id: Identifier.ascending("part"),
+        sessionID: ses.id,
+        messageID: msg,
+        type: "tool",
+        callID: "call-read",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { filePath: "/tmp/claude-code" },
+          time: { start: now - 2_000 },
+        },
+      })
+      await Swarm.save({
+        id: "SW-stalled-admin",
+        goal: "Inspect a sibling repo before creating tasks",
+        conductor: ses.id,
+        workers: [],
+        config: {
+          max_workers: 4,
+          auto_escalate: true,
+          verify_on_complete: true,
+          wait_timeout_seconds: 1,
+        },
+        status: "active",
+        stage: "planning",
+        reason: null,
+        resume: { stage: null },
+        visibility: { archived_at: null },
+        time: { created: now - 3_000, updated: now - 3_000 },
+      })
+
+      const detail = await SwarmAdmin.get("SW-stalled-admin")
+
+      expect(detail.overview.status).toBe("blocked")
+      expect(detail.plan_empty).toBe(true)
+      expect(detail.risk_summary).toContain("blocked agents")
+      expect(detail.agents[0]).toMatchObject({
+        id: "conductor",
+        status: "blocked",
+      })
+      expect(detail.agents[0]?.reason).toContain("conductor stalled on read")
     })
   })
 

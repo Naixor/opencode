@@ -5,6 +5,8 @@ import { SwarmState } from "../../src/session/swarm-state"
 import { Swarm } from "../../src/session/swarm"
 import { BoardTask } from "../../src/board"
 import { Discussion } from "../../src/board/discussion"
+import { Session } from "../../src/session"
+import { Identifier } from "../../src/id/id"
 
 describe("SwarmState", () => {
   test("requires schema version 3", () => {
@@ -1242,6 +1244,74 @@ describe("SwarmState", () => {
         expect(info.status).toBe("blocked")
         expect(info.workers[0]?.status).toBe("blocked")
         expect(info.workers[0]?.reason).toContain("wait timeout")
+      },
+    })
+  })
+
+  test("blocks planning swarms when the conductor stalls on a tool call", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const now = Date.now()
+        const ses = await Session.create({ title: "Swarm conductor" })
+        const user = Identifier.ascending("message")
+        const msg = Identifier.ascending("message")
+        await Session.updateMessage({
+          id: user,
+          role: "user",
+          sessionID: ses.id,
+          time: { created: now - 3_000 },
+          agent: "conductor",
+          model: { providerID: "openai", modelID: "gpt-5.4" },
+        })
+        await Session.updateMessage({
+          id: msg,
+          role: "assistant",
+          sessionID: ses.id,
+          time: { created: now - 2_000 },
+          parentID: user,
+          modelID: "gpt-5.4",
+          providerID: "openai",
+          mode: "conductor",
+          agent: "conductor",
+          path: { cwd: tmp.path, root: tmp.path },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        })
+        await Session.updatePart({
+          id: Identifier.ascending("part"),
+          sessionID: ses.id,
+          messageID: msg,
+          type: "tool",
+          callID: "call-read",
+          tool: "read",
+          state: {
+            status: "running",
+            input: { filePath: "/tmp/claude-code" },
+            time: { start: now - 2_000 },
+          },
+        })
+        await Swarm.save({
+          id: "SW-conductor-stall",
+          goal: "Compare another repo before dispatching workers",
+          conductor: ses.id,
+          workers: [],
+          config: { max_workers: 4, auto_escalate: true, verify_on_complete: true, wait_timeout_seconds: 1 },
+          status: "active",
+          stage: "planning",
+          reason: null,
+          resume: { stage: null },
+          visibility: { archived_at: null },
+          time: { created: now - 3_000, updated: now - 3_000 },
+        })
+
+        const info = await Swarm.status("SW-conductor-stall")
+
+        expect(info.status).toBe("blocked")
+        expect(info.stage).toBe("planning")
+        expect(info.reason).toContain("conductor stalled on read")
+        expect(info.reason).toContain("/tmp/claude-code")
       },
     })
   })

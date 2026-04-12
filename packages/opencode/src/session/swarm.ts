@@ -10,6 +10,7 @@ import { Instance } from "../project/instance"
 import { SharedBoard, BoardSignal } from "../board"
 import { Discussion } from "../board/discussion"
 import { Session } from "."
+import { MessageV2 } from "./message-v2"
 import { SessionPrompt } from "./prompt"
 import { SessionStatus } from "./status"
 import { SessionMetadata } from "./session-metadata"
@@ -321,6 +322,12 @@ export namespace Swarm {
         changed = true
       }
     }
+    const stuck = await stall(info, now)
+    if (stuck && (info.status !== "blocked" || info.reason !== stuck)) {
+      info.status = "blocked"
+      info.reason = stuck
+      changed = true
+    }
     if (info.workers.some((worker) => worker.status === "blocked") && info.status === "active") {
       info.status = "blocked"
       info.reason = info.reason ?? "worker blocked"
@@ -331,6 +338,42 @@ export namespace Swarm {
       await save(info)
     }
     return info
+  }
+
+  function note(part: MessageV2.ToolPart) {
+    const input = part.state.input
+    const path =
+      typeof input.filePath === "string"
+        ? input.filePath
+        : typeof input.path === "string"
+          ? input.path
+          : typeof input.url === "string"
+            ? input.url
+            : undefined
+    return path ? `${part.tool} ${path}` : part.tool
+  }
+
+  async function stall(info: Info, now: number) {
+    if (info.status !== "active") return
+    if (info.workers.length > 0) return
+    if (info.stage !== "planning") return
+    if (!info.conductor.startsWith("ses_")) return
+    if (SessionStatus.get(info.conductor).type !== "idle") return
+    const msgs = await MessageV2.filterCompacted(MessageV2.stream({ sessionID: info.conductor }))
+    const last = msgs
+      .toReversed()
+      .find((msg): msg is MessageV2.WithParts & { info: MessageV2.Assistant } => msg.info.role === "assistant")
+    if (!last || last.info.finish || last.info.error) return
+    const part = last.parts
+      .toReversed()
+      .find(
+        (part): part is MessageV2.ToolPart =>
+          part.type === "tool" && (part.state.status === "pending" || part.state.status === "running"),
+      )
+    if (!part) return
+    const time = part.state.status === "running" ? part.state.time.start : last.info.time.created
+    if (now - time < info.config.wait_timeout_seconds * 1000) return
+    return `conductor stalled on ${note(part)} after ${info.config.wait_timeout_seconds}s`
   }
 
   export async function pause(id: string): Promise<Info> {

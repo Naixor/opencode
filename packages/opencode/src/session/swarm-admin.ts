@@ -592,27 +592,32 @@ export namespace SwarmAdmin {
       const recent = sigs
         .filter((sig) => sig.from === item.session_id || sig.from === item.role || sig.from === item.agent)
         .toSorted((a, b) => b.timestamp - a.timestamp)[0]
+      const swarm = item.id === "conductor" && info.status === "blocked" ? (info.reason ?? "swarm blocked") : undefined
       const reason =
-        current?.blocked_reason ?? (recent?.type === "failed" || recent?.type === "blocked" ? sum(recent) : undefined)
+        current?.blocked_reason ??
+        (recent?.type === "failed" || recent?.type === "blocked" ? sum(recent) : undefined) ??
+        swarm
       const recent_activity_at = [
         ...(current ? [current.updated_at] : []),
         ...(recent ? [recent.timestamp] : []),
       ].reduce((max, value) => (value > max ? value : max), 0)
       const state =
-        current?.status === "failed" || item.status === "failed"
-          ? "failed"
-          : reason
-            ? "blocked"
-            : current?.status === "completed" || item.status === "completed"
-              ? "completed"
-              : item.status === "queued" ||
-                  item.status === "starting" ||
-                  item.status === "cancelled" ||
-                  item.status === "stopped"
-                ? item.status
-                : SessionStatus.get(item.session_id).type === "idle" || item.status === "waiting"
-                  ? "waiting"
-                  : "running"
+        item.id === "conductor" && info.status === "blocked"
+          ? "blocked"
+          : current?.status === "failed" || item.status === "failed"
+            ? "failed"
+            : reason
+              ? "blocked"
+              : current?.status === "completed" || item.status === "completed"
+                ? "completed"
+                : item.status === "queued" ||
+                    item.status === "starting" ||
+                    item.status === "cancelled" ||
+                    item.status === "stopped"
+                  ? item.status
+                  : SessionStatus.get(item.session_id).type === "idle" || item.status === "waiting"
+                    ? "waiting"
+                    : "running"
       return AgentInfo.parse({
         id: item.id,
         label: item.label,
@@ -625,7 +630,7 @@ export namespace SwarmAdmin {
           ? sum(recent)
           : current
             ? `${current.summary} is ${current.status.replace("_", " ")}`
-            : null,
+            : (reason ?? null),
         reason: reason ?? null,
         task_ids,
         discussion_channels: disc

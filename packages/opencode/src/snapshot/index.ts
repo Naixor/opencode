@@ -138,15 +138,15 @@ export namespace Snapshot {
       for (const file of item.files) {
         if (files.has(file)) continue
         log.info("reverting", { file, hash: item.hash })
+        const rel = path.relative(Instance.worktree, file).replaceAll("\\", "/")
         const result =
-          await $`git -c core.longpaths=true -c core.symlinks=true --git-dir ${git} --work-tree ${Instance.worktree} checkout ${item.hash} -- ${file}`
+          await $`git -c core.longpaths=true -c core.symlinks=true --git-dir ${git} --work-tree ${Instance.worktree} checkout ${item.hash} -- ${rel}`
             .quiet()
             .cwd(Instance.worktree)
             .nothrow()
         if (result.exitCode !== 0) {
-          const relativePath = path.relative(Instance.worktree, file)
           const checkTree =
-            await $`git -c core.longpaths=true -c core.symlinks=true --git-dir ${git} --work-tree ${Instance.worktree} ls-tree ${item.hash} -- ${relativePath}`
+            await $`git -c core.longpaths=true -c core.symlinks=true --git-dir ${git} --work-tree ${Instance.worktree} ls-tree ${item.hash} -- ${rel}`
               .quiet()
               .cwd(Instance.worktree)
               .nothrow()

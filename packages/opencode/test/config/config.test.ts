@@ -1,18 +1,21 @@
-import { test, expect, describe, mock, afterEach } from "bun:test"
+import { test, expect, describe, mock, afterEach, spyOn } from "bun:test"
 import { Config } from "../../src/config/config"
 import { Instance } from "../../src/project/instance"
 import { Auth } from "../../src/auth"
+import { BunProc } from "../../src/bun"
 import { tmpdir } from "../fixture/fixture"
 import path from "path"
 import fs from "fs/promises"
 import { pathToFileURL } from "url"
 import { Global } from "../../src/global"
 import { Filesystem } from "../../src/util/filesystem"
+import { PackageRegistry } from "../../src/bun/registry"
 
 // Get managed config directory from environment (set in preload.ts)
 const managedConfigDir = process.env.OPENCODE_TEST_MANAGED_CONFIG_DIR!
 
 afterEach(async () => {
+  mock.restore()
   await fs.rm(managedConfigDir, { force: true, recursive: true }).catch(() => {})
 })
 
@@ -652,6 +655,9 @@ test("installs dependencies in writable OPENCODE_CONFIG_DIR", async () => {
 
   const prev = process.env.OPENCODE_CONFIG_DIR
   process.env.OPENCODE_CONFIG_DIR = tmp.extra
+  const run = spyOn(BunProc, "run").mockImplementation(
+    async () => undefined as unknown as Awaited<ReturnType<typeof BunProc.run>>,
+  )
 
   try {
     await Instance.provide({
@@ -664,10 +670,30 @@ test("installs dependencies in writable OPENCODE_CONFIG_DIR", async () => {
 
     expect(await Filesystem.exists(path.join(tmp.extra, "package.json"))).toBe(true)
     expect(await Filesystem.exists(path.join(tmp.extra, ".gitignore"))).toBe(true)
+    expect(run).toHaveBeenCalledWith(["install"], { cwd: tmp.extra })
   } finally {
     if (prev === undefined) delete process.env.OPENCODE_CONFIG_DIR
     else process.env.OPENCODE_CONFIG_DIR = prev
   }
+})
+
+test("local installs skip registry freshness checks once deps are pinned to *", async () => {
+  await using tmp = await tmpdir<string>({
+    init: async (dir) => {
+      const cfg = path.join(dir, "configdir")
+      await fs.mkdir(path.join(cfg, "node_modules"), { recursive: true })
+      await Filesystem.write(
+        path.join(cfg, "package.json"),
+        JSON.stringify({ dependencies: { "@opencode-ai/plugin": "*" } }),
+      )
+      return cfg
+    },
+  })
+
+  const outdated = spyOn(PackageRegistry, "isOutdated").mockResolvedValue(true)
+
+  expect(await Config.needsInstall(tmp.extra)).toBe(false)
+  expect(outdated).not.toHaveBeenCalled()
 })
 
 test("resolves scoped npm plugins in config", async () => {
