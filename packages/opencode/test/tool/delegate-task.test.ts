@@ -70,6 +70,7 @@ describe("delegate-task tools", () => {
             description: "test task",
             prompt: "do something",
             run_in_background: false,
+            prepare_only: false,
           },
           {
             ...ctx,
@@ -89,6 +90,7 @@ describe("delegate-task tools", () => {
             description: "test task",
             prompt: "do something",
             run_in_background: false,
+            prepare_only: false,
             category: "quick",
             subagent_type: "explore",
           },
@@ -107,6 +109,7 @@ describe("delegate-task tools", () => {
             description: "test task",
             prompt: "do something",
             run_in_background: false,
+            prepare_only: false,
             subagent_type: "nonexistent-agent-xyz",
           },
           ctx,
@@ -132,17 +135,20 @@ describe("delegate-task tools", () => {
         expect(valid.subagent_type).toBeUndefined()
         expect(valid.session_id).toBeUndefined()
         expect(valid.load_skills).toBeUndefined()
+        expect(valid.prepare_only).toBe(false)
 
         // Valid with all fields
         const full = schema.parse({
           description: "test",
           prompt: "do something",
           run_in_background: true,
+          prepare_only: true,
           category: "quick",
           session_id: "s1",
           load_skills: ["git-master"],
         })
         expect(full.run_in_background).toBe(true)
+        expect(full.prepare_only).toBe(true)
         expect(full.category).toBe("quick")
         expect(full.load_skills).toEqual(["git-master"])
       })

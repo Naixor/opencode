@@ -20,6 +20,8 @@ import { SwarmCleanup } from "./swarm-cleanup"
 
 export namespace Swarm {
   const log = Log.create({ service: "swarm" })
+  const launch_ttl = 30_000
+  const launches = new Map<string, { at: number; info: Promise<Info> }>()
 
   export const WorkerStatus = SwarmState.WorkerStatus
 
@@ -257,7 +259,14 @@ export namespace Swarm {
     log.info("replaced session", { swarmID, old, next })
   }
 
-  export async function launch(input: { goal: string; config?: Partial<Info["config"]> }): Promise<Info> {
+  function prune(now: number) {
+    for (const [key, item] of launches) {
+      if (now - item.at < launch_ttl) continue
+      launches.delete(key)
+    }
+  }
+
+  async function create(input: { goal: string; config?: Partial<Info["config"]> }): Promise<Info> {
     await SwarmCleanup.assertReady()
     const id = `SW-${crypto.randomUUID()}`
     await SharedBoard.init(id)
@@ -299,6 +308,73 @@ export namespace Swarm {
 
     Bus.publish(Event.Created, { swarm: info })
     monitor(id).catch((e) => log.warn("monitor setup failed", { error: e }))
+    return info
+  }
+
+  export async function launch(input: {
+    goal: string
+    config?: Partial<Info["config"]>
+    dedupe_key?: string
+  }): Promise<Info> {
+    const key = input.dedupe_key?.trim()
+    if (!key) return create(input)
+    const now = Date.now()
+    prune(now)
+    const item = launches.get(key)
+    if (item && now - item.at < launch_ttl) return item.info
+    const info = create(input).catch((err) => {
+      launches.delete(key)
+      throw err
+    })
+    launches.set(key, { at: now, info })
+    return info
+  }
+
+  export async function enlist(input: {
+    swarm_id: string
+    session_id: string
+    agent: string
+    role?: string
+    task_id?: string
+    status: "queued" | "running"
+    discussion?: boolean
+  }): Promise<Info> {
+    const next = await SwarmState.mutate(input.swarm_id, {
+      actor: "coordinator",
+      reason: input.status === "queued" ? "prepare swarm worker" : "start swarm worker",
+      fn: (state) => {
+        const now = Date.now()
+        const prev = state.workers[input.session_id]
+        const keep = input.status === "queued" && prev && prev.status !== "queued"
+        const status = keep ? prev.status : input.status
+        state.workers[input.session_id] = {
+          id: input.session_id,
+          session_id: input.session_id,
+          agent: input.agent,
+          role: input.role ?? prev?.role ?? null,
+          task_id: input.task_id ?? prev?.task_id ?? null,
+          status,
+          updated_at: now,
+          reason: keep ? prev.reason : null,
+          evidence: prev?.evidence ?? [],
+        }
+        const workers = Object.values(state.workers)
+        const active = workers.some((item) => ["starting", "running", "waiting"].includes(item.status))
+        const queued = workers.some((item) => item.status === "queued")
+        state.swarm.status = "active"
+        state.swarm.stage = active
+          ? input.discussion || state.swarm.stage === "discussing"
+            ? "discussing"
+            : "executing"
+          : queued
+            ? "dispatching"
+            : "planning"
+        state.swarm.reason = active ? null : queued ? "awaiting worker confirmation" : state.swarm.reason
+        state.swarm.time.updated = now
+      },
+    })
+    const info = fromState(next)
+    Bus.publish(Event.Updated, { swarm: info })
     return info
   }
 

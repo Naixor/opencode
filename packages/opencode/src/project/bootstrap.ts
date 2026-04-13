@@ -51,7 +51,7 @@ export async function InstanceBootstrap() {
   } else if (sandboxResult.status === "failed") {
     Log.Default.warn("sandbox init failed, continuing without sandbox", { error: sandboxResult.error })
     Bus.publish(TuiEvent.ToastShow, {
-      message: `Sandbox init failed: ${sandboxResult.error}`,
+      message: `Sandbox init failed: ${sandboxResult.error}. Run 'opencode doctor' for details.`,
       variant: "warning",
       duration: 5000,
     })
@@ -68,7 +68,7 @@ export async function InstanceBootstrap() {
       })
     } else if (result.status === "failed") {
       Bus.publish(TuiEvent.ToastShow, {
-        message: `Sandbox policy refresh failed: ${result.error}`,
+        message: `Sandbox policy refresh failed: ${result.error}. Run 'opencode doctor' for details.`,
         variant: "warning",
         duration: 5000,
       })

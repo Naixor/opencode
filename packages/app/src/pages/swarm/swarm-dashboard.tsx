@@ -198,6 +198,8 @@ export default function SwarmDashboard() {
       type: state.type,
     }),
   )
+  const queued = createMemo(() => (data()?.agents ?? []).filter((agent) => agent.status === "queued"))
+  const activeAgents = createMemo(() => (data()?.agents ?? []).filter((agent) => agent.status !== "queued"))
 
   function jump(target: string) {
     requestAnimationFrame(() => {
@@ -456,6 +458,30 @@ export default function SwarmDashboard() {
 
             <Show when={state.tab === "conductor"}>
               <div class="space-y-4">
+                <Show when={queued().length > 0}>
+                  <section class="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4">
+                    <div class="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+                      <div>
+                        <div class="text-11-medium uppercase tracking-[0.18em] text-sky-100">
+                          Prepared Worker Roster
+                        </div>
+                        <div class="mt-2 max-w-3xl text-13-regular text-sky-50">
+                          These workers are registered but not started yet. Review this roster before confirming the
+                          first execution batch.
+                        </div>
+                      </div>
+                      <div class="rounded-full border border-sky-400/30 bg-background-base px-3 py-1 text-11-medium uppercase tracking-[0.18em] text-sky-200">
+                        {queued().length} queued
+                      </div>
+                    </div>
+                    <div class="mt-4 grid gap-3 xl:grid-cols-2">
+                      <For each={queued()}>
+                        {(agent) => <AgentCard agent={agent} jumpTask={jumpTask} jumpDiscussion={jumpDiscussion} />}
+                      </For>
+                    </div>
+                  </section>
+                </Show>
+
                 <section class="rounded-2xl border border-border-weak-base bg-surface-base p-4">
                   <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div>
@@ -631,70 +657,28 @@ export default function SwarmDashboard() {
               <section class="rounded-2xl border border-border-weak-base bg-surface-base p-4">
                 <div class="text-11-medium uppercase tracking-[0.18em] text-text-weak">Agents</div>
                 <div class="mt-4 space-y-3">
-                  <For each={item().agents}>
-                    {(agent) => (
-                      <div id={`agent-${agent.id}`} class={`rounded-xl border p-4 ${stateTone(agent.status)}`}>
-                        <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                          <div class="space-y-2">
-                            <div class="flex flex-wrap items-center gap-2">
-                              <div class="text-14-medium text-text-strong">{agent.label}</div>
-                              <span class={`rounded-full border px-2 py-0.5 text-11-medium ${stateTone(agent.status)}`}>
-                                {agent.status}
-                              </span>
-                            </div>
-                            <div class="text-12-regular text-text-base">{agent.session_id}</div>
-                            <div class="text-12-regular text-text-base">
-                              Recent activity {ago(agent.recent_activity_at)}
-                            </div>
-                            <Show when={agent.recent_progress}>
-                              <div class="max-w-2xl text-13-regular text-text-base">{agent.recent_progress}</div>
-                            </Show>
-                            <Show when={agent.reason}>
-                              <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-12-regular text-amber-100">
-                                {agent.reason}
-                              </div>
-                            </Show>
-                          </div>
-                          <div class="flex flex-col items-start gap-2 xl:items-end">
-                            <div class="text-12-regular text-text-base">Tasks {agent.task_count}</div>
-                            <Show when={agent.current_task}>
-                              <button class="text-12-medium text-sky-200" onClick={() => jumpTask(agent.current_task!)}>
-                                {agent.current_task}
-                              </button>
-                            </Show>
-                            <Show when={agent.task_ids.length > 0}>
-                              <div class="flex flex-wrap justify-end gap-2">
-                                <For each={agent.task_ids}>
-                                  {(task) => (
-                                    <button
-                                      class="rounded-full border border-border-weak-base px-2 py-0.5 text-11-medium text-text-base"
-                                      onClick={() => jumpTask(task)}
-                                    >
-                                      {task}
-                                    </button>
-                                  )}
-                                </For>
-                              </div>
-                            </Show>
-                            <Show when={agent.discussion_channels.length > 0}>
-                              <div class="flex flex-wrap justify-end gap-2">
-                                <For each={agent.discussion_channels}>
-                                  {(channel) => (
-                                    <button
-                                      class="rounded-full border border-border-weak-base px-2 py-0.5 text-11-medium text-text-base"
-                                      onClick={() => jumpDiscussion(channel)}
-                                    >
-                                      {channel}
-                                    </button>
-                                  )}
-                                </For>
-                              </div>
-                            </Show>
-                          </div>
-                        </div>
+                  <Show when={queued().length > 0}>
+                    <div class="space-y-3">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="text-12-medium uppercase tracking-[0.18em] text-text-weak">Queued Roster</div>
+                        <div class="text-12-regular text-text-weak">Registered, waiting for human confirmation</div>
                       </div>
-                    )}
-                  </For>
+                      <For each={queued()}>
+                        {(agent) => <AgentCard agent={agent} jumpTask={jumpTask} jumpDiscussion={jumpDiscussion} />}
+                      </For>
+                    </div>
+                  </Show>
+                  <Show when={activeAgents().length > 0}>
+                    <div class="space-y-3">
+                      <div class="text-12-medium uppercase tracking-[0.18em] text-text-weak">Running And Completed</div>
+                      <For each={activeAgents()}>
+                        {(agent) => <AgentCard agent={agent} jumpTask={jumpTask} jumpDiscussion={jumpDiscussion} />}
+                      </For>
+                    </div>
+                  </Show>
+                  <Show when={item().agents.length === 0}>
+                    <EmptyCopy text="No workers registered for this swarm yet." />
+                  </Show>
                 </div>
               </section>
             </Show>
@@ -874,6 +858,77 @@ function Summary(props: {
         <Show when={props.refs.length === 0}>
           <span class="text-12-regular text-text-weak">None</span>
         </Show>
+      </div>
+    </div>
+  )
+}
+
+function AgentCard(props: {
+  agent: Detail["agents"][number]
+  jumpTask: (value: string) => void
+  jumpDiscussion: (value: string) => void
+}) {
+  return (
+    <div id={`agent-${props.agent.id}`} class={`rounded-xl border p-4 ${stateTone(props.agent.status)}`}>
+      <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="text-14-medium text-text-strong">{props.agent.label}</div>
+            <span class={`rounded-full border px-2 py-0.5 text-11-medium ${stateTone(props.agent.status)}`}>
+              {props.agent.status}
+            </span>
+          </div>
+          <div class="text-12-regular text-text-base">{props.agent.session_id}</div>
+          <div class="text-12-regular text-text-base">
+            {props.agent.recent_activity_at
+              ? `Recent activity ${ago(props.agent.recent_activity_at)}`
+              : "No execution activity yet"}
+          </div>
+          <Show when={props.agent.recent_progress}>
+            <div class="max-w-2xl text-13-regular text-text-base">{props.agent.recent_progress}</div>
+          </Show>
+          <Show when={props.agent.reason}>
+            <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-12-regular text-amber-100">
+              {props.agent.reason}
+            </div>
+          </Show>
+        </div>
+        <div class="flex flex-col items-start gap-2 xl:items-end">
+          <div class="text-12-regular text-text-base">Tasks {props.agent.task_count}</div>
+          <Show when={props.agent.current_task}>
+            <button class="text-12-medium text-sky-200" onClick={() => props.jumpTask(props.agent.current_task!)}>
+              {props.agent.current_task}
+            </button>
+          </Show>
+          <Show when={props.agent.task_ids.length > 0}>
+            <div class="flex flex-wrap justify-end gap-2">
+              <For each={props.agent.task_ids}>
+                {(task) => (
+                  <button
+                    class="rounded-full border border-border-weak-base px-2 py-0.5 text-11-medium text-text-base"
+                    onClick={() => props.jumpTask(task)}
+                  >
+                    {task}
+                  </button>
+                )}
+              </For>
+            </div>
+          </Show>
+          <Show when={props.agent.discussion_channels.length > 0}>
+            <div class="flex flex-wrap justify-end gap-2">
+              <For each={props.agent.discussion_channels}>
+                {(channel) => (
+                  <button
+                    class="rounded-full border border-border-weak-base px-2 py-0.5 text-11-medium text-text-base"
+                    onClick={() => props.jumpDiscussion(channel)}
+                  >
+                    {channel}
+                  </button>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
       </div>
     </div>
   )

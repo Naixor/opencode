@@ -41,7 +41,7 @@ export namespace SwarmState {
   }
 
   export const WorkerNext: Record<WorkerStatus, readonly WorkerStatus[]> = {
-    queued: ["queued", "starting", "cancelled", "stopped"],
+    queued: ["queued", "starting", "running", "cancelled", "stopped"],
     starting: ["starting", "running", "blocked", "failed", "cancelled", "stopped"],
     running: ["running", "waiting", "blocked", "completed", "failed", "cancelled", "stopped"],
     waiting: ["waiting", "blocked", "completed", "failed", "cancelled", "stopped"],
@@ -86,8 +86,12 @@ export namespace SwarmState {
       if (!worker.task_id) continue
       const task = snapshot.tasks[worker.task_id]
       if (!task) continue
-      if (["queued", "starting", "running", "waiting"].includes(worker.status)) {
+      if (["starting", "running", "waiting"].includes(worker.status)) {
         task.status = "in_progress"
+        task.reason = null
+        continue
+      }
+      if (worker.status === "queued") {
         task.reason = null
         continue
       }

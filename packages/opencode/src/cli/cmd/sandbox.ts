@@ -8,7 +8,7 @@ import { SecurityAccess } from "../../security/access"
 
 const DoctorCommand = cmd({
   command: "doctor",
-  describe: "diagnose sandbox environment",
+  describe: "diagnose sandbox environment only",
   builder: (yargs) => yargs,
   async handler() {
     const checks = await runDoctorChecks()

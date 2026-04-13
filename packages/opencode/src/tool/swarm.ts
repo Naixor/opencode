@@ -10,10 +10,11 @@ export const SwarmLaunchTool = Tool.define("swarm_launch", {
     goal: z.string().describe("The goal for the Swarm to accomplish"),
     max_workers: z.number().optional().describe("Maximum concurrent workers (default: 4)"),
   }),
-  async execute(params): Promise<{ title: string; metadata: SwarmMeta; output: string }> {
+  async execute(params, ctx): Promise<{ title: string; metadata: SwarmMeta; output: string }> {
     const info = await Swarm.launch({
       goal: params.goal,
       config: params.max_workers ? { max_workers: params.max_workers } : undefined,
+      dedupe_key: `tool:${ctx.sessionID}:${ctx.messageID}:${JSON.stringify({ goal: params.goal, max_workers: params.max_workers ?? null })}`,
     })
     return {
       title: `Swarm launched: ${info.id}`,

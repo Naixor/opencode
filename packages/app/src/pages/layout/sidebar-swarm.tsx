@@ -1,5 +1,6 @@
 import { A, useParams } from "@solidjs/router"
-import { createResource, createSignal, For, Show } from "solid-js"
+import { createResource, For, Show } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useSDK } from "@/context/sdk"
 
 interface SwarmInfo {
@@ -29,19 +30,32 @@ export function SidebarSwarm() {
     return (await resp.json()) as SwarmInfo[]
   })
 
-  const [goal, setGoal] = createSignal("")
-  const [open, setOpen] = createSignal(false)
+  const [state, setState] = createStore({
+    goal: "",
+    open: false,
+    pending: false,
+    key: "",
+  })
 
   async function launch() {
-    const text = goal()
-    if (!text) return
-    await fetch(`${sdk.url}/swarm`, {
+    const text = state.goal.trim()
+    if (!text || state.pending) return
+    const key = state.key || crypto.randomUUID()
+    setState("pending", true)
+    setState("key", key)
+    const resp = await fetch(`${sdk.url}/swarm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ goal: text }),
+      body: JSON.stringify({ goal: text, dedupe_key: key }),
     }).catch(() => {})
-    setGoal("")
-    setOpen(false)
+    setState("pending", false)
+    if (!resp?.ok) {
+      setState("key", "")
+      return
+    }
+    setState("goal", "")
+    setState("open", false)
+    setState("key", "")
     refetch()
   }
 
@@ -59,24 +73,28 @@ export function SidebarSwarm() {
         </A>
         <button
           class="text-icon-base hover:text-text-strong text-xs"
-          onClick={() => setOpen(!open())}
+          onClick={() => !state.pending && setState("open", !state.open)}
           aria-label="New Swarm"
         >
           +
         </button>
       </div>
 
-      <Show when={open()}>
+      <Show when={state.open}>
         <div class="flex gap-1 px-1">
           <input
             class="flex-1 px-2 py-1 text-xs rounded bg-surface-base border border-border-weak-base focus:outline-none focus:border-border-interactive-base"
             placeholder="Goal..."
-            value={goal()}
-            onInput={(e) => setGoal(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && launch()}
+            value={state.goal}
+            onInput={(e) => setState("goal", e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !e.repeat && launch()}
           />
-          <button class="px-2 py-1 text-xs rounded bg-surface-interactive-base text-text-on-fill" onClick={launch}>
-            Go
+          <button
+            class="px-2 py-1 text-xs rounded bg-surface-interactive-base text-text-on-fill disabled:opacity-50"
+            disabled={state.pending}
+            onClick={launch}
+          >
+            {state.pending ? "..." : "Go"}
           </button>
         </div>
       </Show>
@@ -106,7 +124,7 @@ export function SidebarSwarm() {
         )}
       </For>
 
-      <Show when={(swarms() ?? []).length === 0 && !open()}>
+      <Show when={(swarms() ?? []).length === 0 && !state.open}>
         <div class="px-2 text-xs text-text-weak">No swarms</div>
       </Show>
     </div>

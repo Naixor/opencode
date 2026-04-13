@@ -475,6 +475,7 @@ export const SwarmRoutes = lazy(() =>
         "json",
         z.object({
           goal: z.string(),
+          dedupe_key: z.string().optional(),
           config: z
             .object({
               max_workers: z.number().optional(),
@@ -486,7 +487,7 @@ export const SwarmRoutes = lazy(() =>
       ),
       async (c) => {
         const body = c.req.valid("json")
-        const info = await Swarm.launch({ goal: body.goal, config: body.config })
+        const info = await Swarm.launch({ goal: body.goal, config: body.config, dedupe_key: body.dedupe_key })
         return c.json(info)
       },
     )

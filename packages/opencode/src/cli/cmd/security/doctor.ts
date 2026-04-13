@@ -5,7 +5,7 @@ import { Instance } from "../../../project/instance"
 
 export const SecurityDoctorCommand = cmd({
   command: "doctor",
-  describe: "diagnose security configuration for errors and conflicts",
+  describe: "diagnose security configuration only",
   handler: async () => {
     await bootstrap(process.cwd(), async () => {
       const diagnostics = await runSecurityDoctor(Instance.directory)

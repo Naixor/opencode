@@ -40,6 +40,7 @@ import { StopCommand } from "./cli/cmd/stop"
 import { FeishuAuthCommand } from "./cli/cmd/feishu-auth"
 import { registerAllHooks } from "./session/hooks/register"
 import { SwarmCleanupCommand } from "./cli/cmd/swarm-cleanup"
+import { DoctorCommand } from "./cli/cmd/doctor"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -152,6 +153,7 @@ let cli = yargs(hideBin(process.argv))
   .command(PrCommand)
   .command(SessionCommand)
   .command(DbCommand)
+  .command(DoctorCommand)
   .command(SecurityCommand)
   .command(SandboxCommand)
   .command(ManagerCommand)

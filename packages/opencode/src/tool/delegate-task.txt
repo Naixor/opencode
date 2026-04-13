@@ -12,6 +12,7 @@ Parameters:
 - description: A short (3-5 words) description of the task
 - prompt: The detailed task for the agent to perform
 - run_in_background: If true, returns task_id immediately without waiting. Use background_output to check status later
+- prepare_only: Swarm only. Create and register the worker session now, but do not start execution yet
 - category: Optional task category for model routing (e.g., 'quick', 'deep', 'ultrabrain'). Cannot be used with subagent_type
 - subagent_type: Optional agent type to use. Cannot be used with category
 - session_id: Optional existing session to continue
@@ -19,6 +20,7 @@ Parameters:
 
 Usage notes:
 - Use run_in_background=true for long-running tasks that don't block your workflow
+- In Swarm mode, use prepare_only=true to register workers first, review the roster, then reuse session_id to start them later
 - Categories route to appropriate models (e.g., 'quick' uses fast/cheap models)
 - Specify subagent_type for a specific agent, or category for automatic model selection
 - Sub-agents cannot call delegate_task (prevents recursion)

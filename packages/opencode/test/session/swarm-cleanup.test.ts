@@ -46,4 +46,52 @@ describe("SwarmCleanup", () => {
       },
     })
   })
+
+  test("dedupes repeated launch requests with the same key", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await SwarmCleanup.run({ dry_run: false, confirm: "purge-legacy-swarms" })
+        const a = await Swarm.launch({ goal: "Ready for v3", dedupe_key: "launch-1" })
+        const b = await Swarm.launch({ goal: "Ready for v3", dedupe_key: "launch-1" })
+        expect(b.id).toBe(a.id)
+        expect((await Swarm.list()).map((item) => item.id)).toEqual([a.id])
+      },
+    })
+  })
+
+  test("queues prepared workers before execution starts", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await SwarmCleanup.run({ dry_run: false, confirm: "purge-legacy-swarms" })
+        const info = await Swarm.launch({ goal: "Ready for v3" })
+        const queued = await Swarm.enlist({
+          swarm_id: info.id,
+          session_id: "SE-worker-1",
+          agent: "atlas",
+          task_id: "T-1",
+          status: "queued",
+        })
+        expect(queued.stage).toBe("dispatching")
+        expect(queued.reason).toBe("awaiting worker confirmation")
+        expect(queued.workers[0]?.status).toBe("queued")
+        expect(queued.workers[0]?.task_id).toBe("T-1")
+
+        const running = await Swarm.enlist({
+          swarm_id: info.id,
+          session_id: "SE-worker-1",
+          agent: "atlas",
+          task_id: "T-1",
+          status: "running",
+        })
+        expect(running.stage).toBe("executing")
+        expect(running.reason).toBeNull()
+        expect(running.workers[0]?.status).toBe("running")
+        expect(running.workers[0]?.task_id).toBe("T-1")
+      },
+    })
+  })
 })

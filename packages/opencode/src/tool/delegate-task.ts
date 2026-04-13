@@ -29,6 +29,10 @@ const delegateParameters = z.object({
     .boolean()
     .default(false)
     .describe("If true, returns task_id immediately without waiting for completion"),
+  prepare_only: z
+    .boolean()
+    .default(false)
+    .describe("Swarm only: create and register the worker session without starting execution yet"),
   category: z
     .string()
     .optional()
@@ -99,6 +103,13 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
 
       // For Swarm workers, allow conductor to specify agent; default to sisyphus
       const isSwarm = !!params.swarm_id && caller?.name === "conductor"
+      if (params.prepare_only && !isSwarm) {
+        return {
+          title: "Error",
+          metadata: { error: true },
+          output: "prepare_only is only supported for Swarm worker preparation.",
+        }
+      }
 
       // Resolve agent
       const agentName = isSwarm ? (params.subagent_type ?? "sisyphus") : (params.subagent_type ?? "explore")
@@ -313,33 +324,46 @@ export const DelegateTaskTool = Tool.define("delegate_task", async (ctx) => {
 
       // Register worker in Swarm if applicable
       if (isSwarm && params.swarm_id) {
-        import("../session/swarm")
-          .then(({ Swarm }) =>
-            Swarm.load(params.swarm_id!).then(async (info) => {
-              if (!info) return
-              info.workers.push({
-                session_id: session.id,
-                agent: agent.name,
-                role: params.role_name,
-                task_id: params.task_id ?? "",
-                status: "running",
-                updated_at: Date.now(),
-                reason: null,
-                evidence: [],
-              })
-              info.status = "active"
-              info.stage = "executing"
-              info.time.updated = Date.now()
-              await Swarm.save(info)
-            }),
-          )
-          .catch((e) => log.warn("failed to register swarm worker", { error: e }))
+        const { Swarm } = await import("../session/swarm")
+        await Swarm.enlist({
+          swarm_id: params.swarm_id,
+          session_id: session.id,
+          agent: agent.name,
+          role: params.role_name,
+          task_id: params.prepare_only ? undefined : params.task_id,
+          status: params.prepare_only ? "queued" : "running",
+          discussion: Boolean(params.discussion_channel),
+        })
 
         // Register participant in Discussion tracker
         if (params.discussion_channel && params.role_name) {
           import("../board/discussion")
             .then(({ Discussion }) => Discussion.join(params.swarm_id!, params.discussion_channel!, params.role_name!))
             .catch((e) => log.warn("failed to join discussion", { error: e }))
+        }
+      }
+
+      if (params.prepare_only) {
+        const output = [
+          note,
+          `Prepared worker session: ${session.id}`,
+          `Agent: ${agent.name}`,
+          params.role_name ? `Role: ${params.role_name}` : null,
+          params.task_id ? `Planned task: ${params.task_id}` : null,
+          "Status: queued",
+          "Execution has not started yet.",
+        ]
+          .filter(Boolean)
+          .join("\n")
+
+        return {
+          title: params.description,
+          metadata: {
+            sessionId: session.id,
+            prepared: true,
+            model: categoryModel ?? agent.model,
+          },
+          output,
         }
       }
 
