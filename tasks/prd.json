@@ -181,8 +181,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added authoritative `work_item.checkpoint` and `work_item.failure` JSON persistence, taught `DeliveryStore.updateItem()` to preserve checkpoint state while snapshotting verify/commit failures, and required a decided `destructive_cleanup` decision before `DeliveryStore.allowCleanup()` can unlock destructive cleanup."
     },
     {
       "id": "US-013",

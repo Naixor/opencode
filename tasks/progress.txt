@@ -8,6 +8,7 @@
 - Use `DeliveryStore.recordDecision()` for structured consensus activity; keep proposal-time `participants`, `candidate_outcomes`, and `input_context` on the authoritative `decision` row so later review, objection, and final decision actions append to one log.
 - Non-confirmation decisions resolve inside `DeliveryStore.recordDecision()`: all listed participants must have recorded outcomes before consensus or conductor arbitration can decide the row, and the terminal `decision` action `context` stores JSON `{ reason, updates }` for downstream consumers.
 - Route open-question lifecycle changes through `DeliveryStore.updateQuestion()`; it is responsible for clearing `blocking` on resolved/deferred/cancelled questions, syncing the linked `Decision`, and re-blocking deferred questions when the affected work-item gate becomes current.
+- Work-item recovery state lives in `work_item.checkpoint` and `work_item.failure`; keep successful progress in `checkpoint`, let `updateItem()` snapshot verify/commit failures into `failure`, and only flip `destructive_cleanup_allowed` through `DeliveryStore.allowCleanup()` with a decided `destructive_cleanup` decision.
 
 ## 2026-04-14 00:17:26 CST - US-001
 - Added authoritative SQLite schema for `swarm_run` and `role_spec`, plus shared `RunStatus` and `RunPhase` validators for delivery state.
@@ -107,4 +108,13 @@
   - Keep deferred questions attached to the future `WorkItem` ids that should re-check them; `sync()` only re-arms deferred blockers when the affected gate becomes current.
   - `resolveAssignment()` now passes through `waiting_user -> answered -> resolved` inside one transaction so confirmation-backed questions still respect the shared lifecycle rules.
   - Blocking questions pause affected work items through store-driven status and gate recomputation, while resolved or downgraded questions release the same items without requiring a second manual refresh.
+---
+
+## 2026-04-14 02:11:03 CST - US-012
+- Added authoritative `work_item.checkpoint` and `work_item.failure` persistence for recovery metadata, plus store logic that snapshots verify/commit failures without erasing the last successful checkpoint.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/migration/20260413180918_add-work-item-checkpoints/migration.sql`, `packages/opencode/migration/20260413180918_add-work-item-checkpoints/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep recovery state split between `checkpoint` (last good progress) and `failure` (latest verify/commit failure evidence) so later resume logic can read both without reconstructing history from logs.
+  - Let `DeliveryStore.updateItem()` auto-capture verify/commit failures from status and verification transitions; callers should update `checkpoint` before risky work instead of overwriting it after a failure.
+  - Destructive cleanup is opt-in state on `checkpoint`; future cleanup or recovery flows should call `DeliveryStore.allowCleanup()` and require a decided `destructive_cleanup` decision that applies to the work item.
 ---

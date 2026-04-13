@@ -65,6 +65,33 @@ describe("delivery schema", () => {
           updated_at: null,
         },
         small_mr_required: true,
+        checkpoint: {
+          last_successful_phase: "implement",
+          verification_result: "typecheck passed",
+          produced_files: ["packages/opencode/src/delivery/store.ts"],
+          pending_actions: ["Run bun test"],
+          rollback_suggestions: ["Revert the delivery store change if regressions appear"],
+          destructive_cleanup_allowed: false,
+          cleanup_decision_id: null,
+          updated_at: 42,
+        },
+        failure: {
+          phase: "commit",
+          result: "Pre-commit checks failed before the local commit step",
+          verification: {
+            status: "failed",
+            required: true,
+            commands: ["bun run typecheck", "bun run build"],
+            result: "build failed",
+            updated_at: 84,
+          },
+          produced_files: ["packages/opencode/src/delivery/store.ts"],
+          pending_actions: ["Repair build failure"],
+          rollback_suggestions: ["Keep the current worktree and inspect the failing build output"],
+          destructive_cleanup_allowed: false,
+          cleanup_decision_id: null,
+          recorded_at: 85,
+        },
       })
       .run()
 
@@ -154,6 +181,33 @@ describe("delivery schema", () => {
         updated_at: null,
       },
       small_mr_required: true,
+      checkpoint: {
+        last_successful_phase: "implement",
+        verification_result: "typecheck passed",
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Run bun test"],
+        rollback_suggestions: ["Revert the delivery store change if regressions appear"],
+        destructive_cleanup_allowed: false,
+        cleanup_decision_id: null,
+        updated_at: 42,
+      },
+      failure: {
+        phase: "commit",
+        result: "Pre-commit checks failed before the local commit step",
+        verification: {
+          status: "failed",
+          required: true,
+          commands: ["bun run typecheck", "bun run build"],
+          result: "build failed",
+          updated_at: 84,
+        },
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Repair build failure"],
+        rollback_suggestions: ["Keep the current worktree and inspect the failing build output"],
+        destructive_cleanup_allowed: false,
+        cleanup_decision_id: null,
+        recorded_at: 85,
+      },
     })
     expect(question).toEqual({
       id: "OQ-1",
@@ -237,6 +291,8 @@ describe("delivery schema", () => {
       "verification",
       "small_mr_required",
       "gate",
+      "checkpoint",
+      "failure",
     ])
     expect(decision.map((item) => item.name)).toEqual([
       "id",
@@ -312,6 +368,37 @@ describe("delivery schema", () => {
         commands: ["bun run typecheck"],
         result: "ok",
         updated_at: Date.now(),
+      }).success,
+    ).toBe(true)
+    expect(
+      Delivery.Checkpoint.safeParse({
+        last_successful_phase: "verify",
+        verification_result: "bun test passed",
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Create local commit"],
+        rollback_suggestions: ["Leave the current worktree intact until cleanup is approved"],
+        destructive_cleanup_allowed: false,
+        cleanup_decision_id: null,
+        updated_at: Date.now(),
+      }).success,
+    ).toBe(true)
+    expect(
+      Delivery.Failure.safeParse({
+        phase: "commit",
+        result: "Pre-commit checks failed",
+        verification: {
+          status: "failed",
+          required: true,
+          commands: ["bun run build"],
+          result: "build failed",
+          updated_at: Date.now(),
+        },
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Fix the build"],
+        rollback_suggestions: ["Do not clean the worktree without approval"],
+        destructive_cleanup_allowed: false,
+        cleanup_decision_id: null,
+        recorded_at: Date.now(),
       }).success,
     ).toBe(true)
     expect(Delivery.canTransitionVerification("pending", "running")).toBe(true)

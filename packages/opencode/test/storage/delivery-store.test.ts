@@ -427,6 +427,80 @@ describe("delivery store", () => {
     })
   })
 
+  test("preserves checkpoints and failure evidence when verification fails", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    step("SW-1:implement")
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      checkpoint: {
+        last_successful_phase: "implement",
+        verification_result: "bun run build passed",
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Run bun test"],
+        rollback_suggestions: ["Inspect the failing verify step before touching the worktree"],
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "verify started",
+        updated_at: 10,
+      },
+    })
+
+    const out = DeliveryStore.updateItem("SW-1:verify", {
+      status: "failed",
+      verification: {
+        status: "failed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "bun test failed",
+        updated_at: 11,
+      },
+    })
+
+    expect(out).toMatchObject({
+      id: "SW-1:verify",
+      status: "failed",
+      checkpoint: {
+        last_successful_phase: "implement",
+        verification_result: "bun run build passed",
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Run bun test"],
+        rollback_suggestions: ["Inspect the failing verify step before touching the worktree"],
+      },
+      failure: {
+        phase: "verify",
+        result: "bun test failed",
+        verification: {
+          status: "failed",
+        },
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Run bun test"],
+        rollback_suggestions: ["Inspect the failing verify step before touching the worktree"],
+        destructive_cleanup_allowed: false,
+        cleanup_decision_id: null,
+      },
+    })
+  })
+
   test("allows same-role scheduling adjustments without confirmation", () => {
     DeliveryStore.launch({
       id: "SW-1",
@@ -607,6 +681,54 @@ describe("delivery store", () => {
       gate: {
         status: "blocked",
         reason: expect.stringContaining("Question OQ-1 is still deferred"),
+      },
+    })
+  })
+
+  test("requires an explicit decided cleanup decision before destructive cleanup is allowed", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    DeliveryStore.createDecision({
+      id: "DE-1",
+      kind: "destructive_cleanup",
+      summary: "Approve cleanup after a failed pre-commit step",
+      source: "conductor",
+      status: "proposed",
+      requires_user_confirmation: true,
+      applies_to: ["SW-1:commit"],
+    })
+    DeliveryStore.createDecision({
+      id: "DE-2",
+      kind: "scope_change",
+      summary: "A different decision kind should not unlock cleanup",
+      source: "conductor",
+      status: "decided",
+      requires_user_confirmation: false,
+      applies_to: ["SW-1:commit"],
+      decided_by: "conductor",
+      decided_at: 12,
+    })
+
+    expect(() => DeliveryStore.allowCleanup({ item_id: "SW-1:commit", decision_id: "DE-1" })).toThrow("must be decided")
+    expect(() => DeliveryStore.allowCleanup({ item_id: "SW-1:commit", decision_id: "DE-2" })).toThrow(
+      "not a destructive cleanup approval",
+    )
+
+    DeliveryStore.updateDecision("DE-1", {
+      status: "decided",
+      decided_by: "user",
+      decided_at: 42,
+    })
+
+    expect(DeliveryStore.allowCleanup({ item_id: "SW-1:commit", decision_id: "DE-1" })).toMatchObject({
+      id: "SW-1:commit",
+      checkpoint: {
+        destructive_cleanup_allowed: true,
+        cleanup_decision_id: "DE-1",
       },
     })
   })

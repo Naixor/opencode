@@ -38,6 +38,31 @@ export namespace Delivery {
   })
   export type Verification = z.infer<typeof Verification>
 
+  export const Checkpoint = z.object({
+    last_successful_phase: RunPhase.nullable().default(null),
+    verification_result: z.string().nullable().default(null),
+    produced_files: z.array(z.string()).default([]),
+    pending_actions: z.array(z.string()).default([]),
+    rollback_suggestions: z.array(z.string()).default([]),
+    destructive_cleanup_allowed: z.boolean().default(false),
+    cleanup_decision_id: z.string().nullable().default(null),
+    updated_at: z.number().nullable().default(null),
+  })
+  export type Checkpoint = z.infer<typeof Checkpoint>
+
+  export const Failure = z.object({
+    phase: RunPhase,
+    result: z.string().trim().min(1),
+    verification: Verification,
+    produced_files: z.array(z.string()).default([]),
+    pending_actions: z.array(z.string()).default([]),
+    rollback_suggestions: z.array(z.string()).default([]),
+    destructive_cleanup_allowed: z.boolean().default(false),
+    cleanup_decision_id: z.string().nullable().default(null),
+    recorded_at: z.number(),
+  })
+  export type Failure = z.infer<typeof Failure>
+
   const rules = {
     plan: {
       enter: ["run is active"],

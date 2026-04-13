@@ -116,7 +116,10 @@ export namespace DeliveryStore {
       | "verification"
       | "small_mr_required"
     >
-  >
+  > & {
+    checkpoint?: Partial<Delivery.Checkpoint>
+    failure?: Delivery.Failure | null
+  }
   export type AssignmentItem = { id: string } & ItemPatch
   export type AssignmentInput = {
     run_id: string
@@ -326,12 +329,31 @@ export namespace DeliveryStore {
     return Delivery.Verification.parse(value)
   }
 
+  function checkpoint(prev: Item, value: ItemPatch["checkpoint"] | ItemCreate["checkpoint"] | undefined) {
+    if (value === undefined) return undefined
+    return Delivery.Checkpoint.parse({
+      ...prev.checkpoint,
+      ...value,
+      updated_at: value.updated_at ?? Date.now(),
+    })
+  }
+
+  function failure(value: ItemPatch["failure"] | undefined) {
+    if (value === undefined) return undefined
+    if (value === null) return null
+    return Delivery.Failure.parse(value)
+  }
+
   function clean(value: string | null | undefined) {
     return (value ?? "").trim().replace(/\s+/g, " ")
   }
 
   function gate(phase: Delivery.RunPhase, value?: Delivery.Gate | Partial<Delivery.Gate>) {
     return Delivery.gate(phase, value)
+  }
+
+  function failed(value: Delivery.VerificationStatus) {
+    return ["failed", "repair_required", "cancelled"].includes(value)
   }
 
   function done(item: Item) {
@@ -344,7 +366,51 @@ export namespace DeliveryStore {
   function broke(item: Item) {
     if (item.status === "failed") return true
     if (!item.verification.required) return false
-    return ["failed", "repair_required", "cancelled"].includes(item.verification.status)
+    return failed(item.verification.status)
+  }
+
+  function authorize(db: Database.TxOrDb, item: Item, value: Delivery.Checkpoint) {
+    if (!value.destructive_cleanup_allowed) {
+      return Delivery.Checkpoint.parse({
+        ...value,
+        cleanup_decision_id: null,
+      })
+    }
+    if (!value.cleanup_decision_id) {
+      throw new Error(`WorkItem ${item.id} requires a destructive cleanup decision before cleanup is allowed`)
+    }
+    const row = decision(db, value.cleanup_decision_id)
+    if (row.kind !== "destructive_cleanup") {
+      throw new Error(`Decision ${row.id} is not a destructive cleanup approval`)
+    }
+    if (row.status !== "decided") {
+      throw new Error(`Decision ${row.id} must be decided before cleanup is allowed`)
+    }
+    if (!row.applies_to.includes(item.id)) {
+      throw new Error(`Decision ${row.id} does not apply to work item ${item.id}`)
+    }
+    return Delivery.Checkpoint.parse(value)
+  }
+
+  function evidence(item: Item, proof: Delivery.Verification | undefined, status: Item["status"] | undefined) {
+    if (!["verify", "commit"].includes(item.phase_gate)) return undefined
+    if (!(proof && failed(proof.status)) && !(item.phase_gate === "commit" && status === "failed")) return undefined
+    return Delivery.Failure.parse({
+      phase: item.phase_gate,
+      result:
+        clean(proof?.result) ||
+        clean(item.verification.result) ||
+        (item.phase_gate === "commit"
+          ? "Pre-commit work failed before destructive cleanup was attempted"
+          : `Verification failed during ${item.phase_gate}`),
+      verification: proof ?? item.verification,
+      produced_files: [...item.checkpoint.produced_files],
+      pending_actions: [...item.checkpoint.pending_actions],
+      rollback_suggestions: [...item.checkpoint.rollback_suggestions],
+      destructive_cleanup_allowed: false,
+      cleanup_decision_id: null,
+      recorded_at: Date.now(),
+    })
   }
 
   function sort(items: Item[]) {
@@ -556,6 +622,8 @@ export namespace DeliveryStore {
         updated_at: null,
       },
       small_mr_required: true,
+      checkpoint: Delivery.Checkpoint.parse({}),
+      failure: null,
     })) satisfies ItemCreate[]
   }
 
@@ -684,6 +752,8 @@ export namespace DeliveryStore {
     const prev = item(db, id)
     if (input.owner_role_id !== undefined) role(db, input.owner_role_id)
     const proof = verify(input.verification)
+    const mark = checkpoint(prev, input.checkpoint)
+    const trace = input.failure === null ? null : (failure(input.failure) ?? evidence(prev, proof, input.status))
     const next = {
       ...(input.title === undefined ? {} : { title: input.title }),
       ...(input.status === undefined ? {} : { status: Delivery.WorkStatus.parse(input.status) }),
@@ -694,6 +764,8 @@ export namespace DeliveryStore {
       ...(input.gate === undefined ? {} : { gate: gate(input.phase_gate ?? prev.phase_gate, input.gate) }),
       ...(proof === undefined ? {} : { verification: proof }),
       ...(input.small_mr_required === undefined ? {} : { small_mr_required: input.small_mr_required }),
+      ...(mark === undefined ? {} : { checkpoint: authorize(db, prev, mark) }),
+      ...(trace === undefined ? {} : { failure: trace }),
     } satisfies ItemPatch
     if (Object.keys(next).length === 0) return prev
     if (next.status !== undefined && !Delivery.canTransitionWorkStatus(prev.status, next.status)) {
@@ -975,6 +1047,10 @@ export namespace DeliveryStore {
   export function createItem(input: ItemCreate) {
     return Database.use((db) => {
       const phase = input.phase_gate === undefined ? "plan" : Delivery.WorkPhaseGate.parse(input.phase_gate)
+      const base = {
+        checkpoint: Delivery.Checkpoint.parse(input.checkpoint ?? {}),
+        failure: input.failure === undefined || input.failure === null ? null : Delivery.Failure.parse(input.failure),
+      }
       db.insert(WorkItemTable)
         .values({
           ...input,
@@ -982,6 +1058,26 @@ export namespace DeliveryStore {
           phase_gate: phase,
           gate: gate(phase, input.gate),
           verification: Delivery.Verification.parse(input.verification),
+          checkpoint: authorize(
+            db,
+            {
+              id: input.id,
+              swarm_run_id: input.swarm_run_id,
+              title: input.title,
+              status: input.status ?? "pending",
+              owner_role_id: input.owner_role_id,
+              blocked_by: input.blocked_by,
+              scope: input.scope,
+              phase_gate: phase,
+              verification: Delivery.Verification.parse(input.verification),
+              small_mr_required: input.small_mr_required ?? true,
+              gate: gate(phase, input.gate),
+              checkpoint: Delivery.Checkpoint.parse({}),
+              failure: null,
+            },
+            base.checkpoint,
+          ),
+          failure: base.failure,
         })
         .run()
       sync(db, input.swarm_run_id)
@@ -992,6 +1088,17 @@ export namespace DeliveryStore {
   export function updateItem(id: string, input: ItemPatch) {
     return Database.transaction((db) => {
       return patchItem(db, id, input)
+    })
+  }
+
+  export function allowCleanup(input: { item_id: string; decision_id: string }) {
+    return Database.transaction((db) => {
+      return patchItem(db, input.item_id, {
+        checkpoint: {
+          destructive_cleanup_allowed: true,
+          cleanup_decision_id: input.decision_id,
+        },
+      })
     })
   }
 

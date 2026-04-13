@@ -58,14 +58,19 @@ export const WorkItemTable = sqliteTable(
     blocked_by: text({ mode: "json" }).notNull().$type<string[]>(),
     scope: text({ mode: "json" }).notNull().$type<string[]>(),
     phase_gate: text().notNull().$type<Delivery.WorkPhaseGate>().default("plan"),
-    gate: text({ mode: "json" })
-      .notNull()
-      .$type<Delivery.Gate>()
-      .$default(() => Delivery.gate("plan")),
     verification: text({ mode: "json" }).notNull().$type<Delivery.Verification>(),
     small_mr_required: integer({ mode: "boolean" })
       .notNull()
       .$default(() => true),
+    gate: text({ mode: "json" })
+      .notNull()
+      .$type<Delivery.Gate>()
+      .$default(() => Delivery.gate("plan")),
+    checkpoint: text({ mode: "json" })
+      .notNull()
+      .$type<Delivery.Checkpoint>()
+      .$default(() => Delivery.Checkpoint.parse({})),
+    failure: text({ mode: "json" }).$type<Delivery.Failure | null>(),
   },
   (table) => [
     index("work_item_swarm_run_idx").on(table.swarm_run_id),
