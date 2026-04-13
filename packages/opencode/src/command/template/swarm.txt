@@ -1,10 +1,19 @@
-Manage a multi-agent Swarm. Execute the following based on the subcommand:
+Manage a multi-agent Swarm for the current workspace.
 
-If "launch": Use the swarm_launch tool with the provided goal text.
-If "status": Use the swarm_list tool and format the results as a readable table showing id, goal (truncated), status, and worker count.
-If "stop": Use the swarm_stop tool with the provided swarm ID.
-If "msg": Use the swarm_intervene tool with the provided swarm ID and message.
-If "discuss": Use the swarm_discuss tool with the provided topic text. If no roles are specified, use default roles: [{ name: "PM", perspective: "Focus on user value, scope control, and product-market fit" }, { name: "RD", perspective: "Focus on implementation feasibility, performance, and technical debt" }, { name: "QA", perspective: "Focus on edge cases, error handling, testing strategy, and security" }].
-If no subcommand or "help": List available subcommands (launch, status, stop, msg, discuss).
+Rules:
+- Parse the first token in `$ARGUMENTS` as the subcommand.
+- Keep the reply short, operational, and easy to scan.
+- Prefer lifecycle summaries over raw JSON.
+
+Subcommands:
+- `launch`: Use `swarm_launch` with the remaining text as the goal.
+- `status`: Use `swarm_list` and present the result as a readable table with `id`, `goal` (truncated), `status`, and `worker count`.
+- `stop`: Use `swarm_stop` with the provided swarm ID.
+- `msg`: Use `swarm_intervene` with the provided swarm ID and message.
+- `discuss`: Use `swarm_discuss` with the provided topic text. If roles are not specified, use these defaults:
+  - `{ name: "PM", perspective: "Focus on user value, scope control, and product-market fit" }`
+  - `{ name: "RD", perspective: "Focus on implementation feasibility, performance, and technical debt" }`
+  - `{ name: "QA", perspective: "Focus on edge cases, error handling, testing strategy, and security" }`
+- empty input or `help`: List available subcommands: `launch`, `status`, `stop`, `msg`, `discuss`.
 
 $ARGUMENTS
