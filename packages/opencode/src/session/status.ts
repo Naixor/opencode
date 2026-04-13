@@ -54,6 +54,10 @@ export namespace SessionStatus {
     )
   }
 
+  export function peek(sessionID: string) {
+    return state()[sessionID]
+  }
+
   export function list() {
     return state()
   }
@@ -68,7 +72,7 @@ export namespace SessionStatus {
       Bus.publish(Event.Idle, {
         sessionID,
       })
-      delete state()[sessionID]
+      state()[sessionID] = status
       return
     }
     state()[sessionID] = status

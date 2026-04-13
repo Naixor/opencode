@@ -7,6 +7,7 @@ import { Global } from "../../src/global"
 import { Identifier } from "../../src/id/id"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
+import { SessionStatus } from "../../src/session/status"
 import { SwarmAdmin } from "../../src/session/swarm-admin"
 import { Swarm } from "../../src/session/swarm"
 import { SwarmState } from "../../src/session/swarm-state"
@@ -328,6 +329,7 @@ describe("Swarm admin", () => {
           time: { start: now - 2_000 },
         },
       })
+      SessionStatus.set(ses.id, { type: "idle" })
       await Swarm.save({
         id: "SW-stalled-admin",
         goal: "Inspect a sibling repo before creating tasks",

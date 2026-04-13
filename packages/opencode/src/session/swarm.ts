@@ -434,7 +434,8 @@ export namespace Swarm {
     if (info.workers.length > 0) return
     if (info.stage !== "planning") return
     if (!info.conductor.startsWith("ses_")) return
-    if (SessionStatus.get(info.conductor).type !== "idle") return
+    const status = SessionStatus.peek(info.conductor)
+    if (!status || status.type !== "idle") return
     const msgs = await MessageV2.filterCompacted(MessageV2.stream({ sessionID: info.conductor }))
     const last = msgs
       .toReversed()
