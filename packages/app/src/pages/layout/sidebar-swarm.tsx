@@ -102,7 +102,7 @@ export function SidebarSwarm() {
       <For each={active()}>
         {(s) => (
           <A
-            href={`/${params.dir}/swarm/${s.id}`}
+            href={`/${params.dir}/swarm/${s.id}/run`}
             class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface-base-hover text-14-regular"
           >
             <span class={`px-1.5 py-0.5 rounded text-[10px] ${colors[s.status] ?? colors.paused}`}>{s.status}</span>
@@ -115,7 +115,7 @@ export function SidebarSwarm() {
       <For each={done()}>
         {(s) => (
           <A
-            href={`/${params.dir}/swarm/${s.id}`}
+            href={`/${params.dir}/swarm/${s.id}/run`}
             class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-surface-base-hover text-14-regular opacity-50"
           >
             <span class={`px-1.5 py-0.5 rounded text-[10px] ${colors[s.status] ?? colors.paused}`}>{s.status}</span>

@@ -175,6 +175,16 @@ import type {
   SwarmArchiveResponses,
   SwarmDeleteErrors,
   SwarmDeleteResponses,
+  SwarmDeliveryAnswerQuestionErrors,
+  SwarmDeliveryAnswerQuestionResponses,
+  SwarmDeliveryCancelQuestionErrors,
+  SwarmDeliveryCancelQuestionResponses,
+  SwarmDeliveryConfirmAssignmentErrors,
+  SwarmDeliveryConfirmAssignmentResponses,
+  SwarmDeliveryDeferQuestionErrors,
+  SwarmDeliveryDeferQuestionResponses,
+  SwarmDeliveryDetailErrors,
+  SwarmDeliveryDetailResponses,
   SwarmDiscussErrors,
   SwarmDiscussionResponses,
   SwarmDiscussResponses,
@@ -4028,6 +4038,210 @@ export class Admin extends HeyApiClient {
   }
 }
 
+export class Delivery extends HeyApiClient {
+  /**
+   * Get Swarm delivery detail
+   *
+   * Get the authoritative SQLite delivery read model for a swarm run.
+   */
+  public detail<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmDeliveryDetailResponses, SwarmDeliveryDetailErrors, ThrowOnError>({
+      url: "/swarm/{id}/delivery",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Confirm delivery assignment change
+   *
+   * Resolve a major delivery role-change confirmation through the shared delivery workflows.
+   */
+  public confirmAssignment<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      directory?: string
+      workspace?: string
+      decision_id?: string
+      answer?: "confirm" | "reject"
+      decided_by?: string
+      decided_at?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "decision_id" },
+            { in: "body", key: "answer" },
+            { in: "body", key: "decided_by" },
+            { in: "body", key: "decided_at" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SwarmDeliveryConfirmAssignmentResponses,
+      SwarmDeliveryConfirmAssignmentErrors,
+      ThrowOnError
+    >({
+      url: "/swarm/{id}/delivery/confirm-assignment",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Answer delivery question
+   *
+   * Answer an open delivery question through the shared delivery workflows.
+   */
+  public answerQuestion<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      question_id: string
+      directory?: string
+      workspace?: string
+      option?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "path", key: "question_id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "option" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SwarmDeliveryAnswerQuestionResponses,
+      SwarmDeliveryAnswerQuestionErrors,
+      ThrowOnError
+    >({
+      url: "/swarm/{id}/delivery/questions/{question_id}/answer",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Defer delivery question
+   *
+   * Defer an open delivery question through the shared delivery workflows.
+   */
+  public deferQuestion<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      question_id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "path", key: "question_id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SwarmDeliveryDeferQuestionResponses,
+      SwarmDeliveryDeferQuestionErrors,
+      ThrowOnError
+    >({
+      url: "/swarm/{id}/delivery/questions/{question_id}/defer",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Cancel delivery question
+   *
+   * Cancel an open delivery question through the shared delivery workflows.
+   */
+  public cancelQuestion<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string
+      question_id: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "path", key: "question_id" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SwarmDeliveryCancelQuestionResponses,
+      SwarmDeliveryCancelQuestionErrors,
+      ThrowOnError
+    >({
+      url: "/swarm/{id}/delivery/questions/{question_id}/cancel",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Alignment extends HeyApiClient {
   /**
    * Approve alignment role changes
@@ -4191,6 +4405,7 @@ export class Swarm extends HeyApiClient {
       directory?: string
       workspace?: string
       goal?: string
+      dedupe_key?: string
       config?: {
         max_workers?: number
         auto_escalate?: boolean
@@ -4207,6 +4422,7 @@ export class Swarm extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "goal" },
+            { in: "body", key: "dedupe_key" },
             { in: "body", key: "config" },
           ],
         },
@@ -4672,6 +4888,11 @@ export class Swarm extends HeyApiClient {
   private _admin?: Admin
   get admin(): Admin {
     return (this._admin ??= new Admin({ client: this.client }))
+  }
+
+  private _delivery?: Delivery
+  get delivery(): Delivery {
+    return (this._delivery ??= new Delivery({ client: this.client }))
   }
 
   private _alignment?: Alignment

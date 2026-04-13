@@ -6494,6 +6494,7 @@ export type SwarmListResponse = SwarmListResponses[keyof SwarmListResponses]
 export type SwarmLaunchData = {
   body?: {
     goal: string
+    dedupe_key?: string
     config?: {
       max_workers?: number
       auto_escalate?: boolean
@@ -7055,6 +7056,2444 @@ export type SwarmAdminDetailResponses = {
 }
 
 export type SwarmAdminDetailResponse = SwarmAdminDetailResponses[keyof SwarmAdminDetailResponses]
+
+export type SwarmDeliveryDetailData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/delivery"
+}
+
+export type SwarmDeliveryDetailErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmDeliveryDetailError = SwarmDeliveryDetailErrors[keyof SwarmDeliveryDetailErrors]
+
+export type SwarmDeliveryDetailResponses = {
+  /**
+   * Swarm delivery detail
+   */
+  200: {
+    run: {
+      id: string
+      goal: string
+      status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+      phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      phases: Array<"plan" | "implement" | "verify" | "commit" | "retrospective">
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      audit: Array<
+        | {
+            kind: "phase"
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+            gate: {
+              status: "pending" | "ready" | "blocked"
+              reason?: string | null
+              enter?: Array<string>
+              exit?: Array<string>
+              fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "assignment"
+            run_id: string
+            item_ids?: Array<string>
+            role_ids?: Array<string>
+            summary: string
+            created_at: number
+          }
+        | {
+            kind: "decision"
+            decision_id: string
+            status: "proposed" | "decided" | "superseded" | "cancelled"
+            summary: string
+            outcome?: string | null
+            applies_to?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "question"
+            question_id: string
+            status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+            blocking: boolean
+            summary: string
+            affects?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "verification"
+            item_id: string
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            verification: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "commit"
+            item_id: string
+            commit: {
+              status?: "committed"
+              staged_scope: Array<string>
+              proof: {
+                status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+                required?: boolean
+                commands?: Array<string>
+                result?: string | null
+                updated_at?: number | null
+              }
+              hash?: string | null
+              message?: string | null
+              recorded_at: number
+            }
+            created_at: number
+          }
+        | {
+            kind: "retrospective"
+            outcome: "completed" | "failed"
+            summary: string
+            memory_ids?: Array<string>
+            created_at: number
+          }
+      >
+      retrospective: {
+        summary: string
+        outcome: "completed" | "failed"
+        work_items?: Array<{
+          id: string
+          title: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+          owner_role_id: string
+        }>
+        decisions?: Array<{
+          id: string
+          kind: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          question_id?: string | null
+          requires_user_confirmation?: boolean
+        }>
+        verification?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          result?: string | null
+          required?: boolean
+          updated_at?: number | null
+        }>
+        failures?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+        }>
+        escalations?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        collaboration_issues?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        memories?: Array<{
+          content: string
+          categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
+          tags?: Array<string>
+          citations?: Array<string>
+          impact?: "low" | "high"
+          status: "written" | "pending_confirmation" | "filtered" | "duplicate"
+          memory_id?: string | null
+          reason?: string | null
+        }>
+        created_at: number
+      } | null
+      created_at: number
+      updated_at: number
+      owner_session_id: string
+    }
+    items: Array<{
+      id: string
+      swarm_run_id: string
+      title: string
+      status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+      owner_role_id: string
+      blocked_by: Array<string>
+      scope: Array<string>
+      phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      verification: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      }
+      small_mr_required: boolean
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      checkpoint: {
+        last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        verification_result?: string | null
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        updated_at?: number | null
+      }
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      failure: {
+        phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        result: string
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        recorded_at: number
+      } | null
+    }>
+    decisions: Array<{
+      id: string
+      kind: string
+      summary: string
+      source: string
+      status: "proposed" | "decided" | "superseded" | "cancelled"
+      requires_user_confirmation: boolean
+      applies_to: Array<string>
+      participants: Array<string>
+      candidate_outcomes: Array<string>
+      input_context: string
+      actions: Array<{
+        kind: "proposal" | "review" | "objection" | "decision"
+        role: string
+        outcome?: string | null
+        context?: string | null
+        created_at: number
+      }>
+      related_question_id: string | null
+      decided_by: string | null
+      decided_at: number | null
+    }>
+    questions: Array<{
+      id: string
+      title: string
+      context: string
+      options: Array<string>
+      recommended_option: string | null
+      status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+      deadline_policy: string | null
+      blocking: boolean
+      affects: Array<string>
+      related_decision_id: string | null
+      raised_by: string
+    }>
+    gate: {
+      status: "pending" | "ready" | "blocked"
+      reason?: string | null
+      enter?: Array<string>
+      exit?: Array<string>
+      fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+      updated_at?: number | null
+    }
+    current_item_id: string | null
+    blockers: Array<{
+      id: string
+      kind: "decision" | "question" | "work_item" | "small_mr"
+      status: string | null
+      summary: string
+      affects?: Array<string>
+    }>
+    small_mr: {
+      required: boolean
+      status: "pending" | "ready" | "blocked"
+      reason: string | null
+      active?: Array<string>
+    }
+    audit: Array<
+      | {
+          kind: "phase"
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+          gate: {
+            status: "pending" | "ready" | "blocked"
+            reason?: string | null
+            enter?: Array<string>
+            exit?: Array<string>
+            fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "assignment"
+          run_id: string
+          item_ids?: Array<string>
+          role_ids?: Array<string>
+          summary: string
+          created_at: number
+        }
+      | {
+          kind: "decision"
+          decision_id: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          outcome?: string | null
+          applies_to?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "question"
+          question_id: string
+          status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+          blocking: boolean
+          summary: string
+          affects?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "verification"
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "commit"
+          item_id: string
+          commit: {
+            status?: "committed"
+            staged_scope: Array<string>
+            proof: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            hash?: string | null
+            message?: string | null
+            recorded_at: number
+          }
+          created_at: number
+        }
+      | {
+          kind: "retrospective"
+          outcome: "completed" | "failed"
+          summary: string
+          memory_ids?: Array<string>
+          created_at: number
+        }
+    >
+    state: Array<{
+      item: {
+        id: string
+        swarm_run_id: string
+        title: string
+        status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+        owner_role_id: string
+        blocked_by: Array<string>
+        scope: Array<string>
+        phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        small_mr_required: boolean
+        gate: {
+          status: "pending" | "ready" | "blocked"
+          reason?: string | null
+          enter?: Array<string>
+          exit?: Array<string>
+          fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          updated_at?: number | null
+        }
+        checkpoint: {
+          last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          verification_result?: string | null
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          updated_at?: number | null
+        }
+        commit: {
+          status?: "committed"
+          staged_scope: Array<string>
+          proof: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          hash?: string | null
+          message?: string | null
+          recorded_at: number
+        } | null
+        failure: {
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          recorded_at: number
+        } | null
+      }
+      proof: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      } | null
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      verified: boolean
+      committed: boolean
+      completed: boolean
+    }>
+    completed: Array<string>
+    pending: Array<string>
+  }
+}
+
+export type SwarmDeliveryDetailResponse = SwarmDeliveryDetailResponses[keyof SwarmDeliveryDetailResponses]
+
+export type SwarmDeliveryConfirmAssignmentData = {
+  body?: {
+    decision_id: string
+    answer: "confirm" | "reject"
+    decided_by: string
+    decided_at?: number
+  }
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/delivery/confirm-assignment"
+}
+
+export type SwarmDeliveryConfirmAssignmentErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SwarmDeliveryConfirmAssignmentError =
+  SwarmDeliveryConfirmAssignmentErrors[keyof SwarmDeliveryConfirmAssignmentErrors]
+
+export type SwarmDeliveryConfirmAssignmentResponses = {
+  /**
+   * Updated swarm delivery detail
+   */
+  200: {
+    run: {
+      id: string
+      goal: string
+      status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+      phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      phases: Array<"plan" | "implement" | "verify" | "commit" | "retrospective">
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      audit: Array<
+        | {
+            kind: "phase"
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+            gate: {
+              status: "pending" | "ready" | "blocked"
+              reason?: string | null
+              enter?: Array<string>
+              exit?: Array<string>
+              fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "assignment"
+            run_id: string
+            item_ids?: Array<string>
+            role_ids?: Array<string>
+            summary: string
+            created_at: number
+          }
+        | {
+            kind: "decision"
+            decision_id: string
+            status: "proposed" | "decided" | "superseded" | "cancelled"
+            summary: string
+            outcome?: string | null
+            applies_to?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "question"
+            question_id: string
+            status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+            blocking: boolean
+            summary: string
+            affects?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "verification"
+            item_id: string
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            verification: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "commit"
+            item_id: string
+            commit: {
+              status?: "committed"
+              staged_scope: Array<string>
+              proof: {
+                status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+                required?: boolean
+                commands?: Array<string>
+                result?: string | null
+                updated_at?: number | null
+              }
+              hash?: string | null
+              message?: string | null
+              recorded_at: number
+            }
+            created_at: number
+          }
+        | {
+            kind: "retrospective"
+            outcome: "completed" | "failed"
+            summary: string
+            memory_ids?: Array<string>
+            created_at: number
+          }
+      >
+      retrospective: {
+        summary: string
+        outcome: "completed" | "failed"
+        work_items?: Array<{
+          id: string
+          title: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+          owner_role_id: string
+        }>
+        decisions?: Array<{
+          id: string
+          kind: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          question_id?: string | null
+          requires_user_confirmation?: boolean
+        }>
+        verification?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          result?: string | null
+          required?: boolean
+          updated_at?: number | null
+        }>
+        failures?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+        }>
+        escalations?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        collaboration_issues?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        memories?: Array<{
+          content: string
+          categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
+          tags?: Array<string>
+          citations?: Array<string>
+          impact?: "low" | "high"
+          status: "written" | "pending_confirmation" | "filtered" | "duplicate"
+          memory_id?: string | null
+          reason?: string | null
+        }>
+        created_at: number
+      } | null
+      created_at: number
+      updated_at: number
+      owner_session_id: string
+    }
+    items: Array<{
+      id: string
+      swarm_run_id: string
+      title: string
+      status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+      owner_role_id: string
+      blocked_by: Array<string>
+      scope: Array<string>
+      phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      verification: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      }
+      small_mr_required: boolean
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      checkpoint: {
+        last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        verification_result?: string | null
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        updated_at?: number | null
+      }
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      failure: {
+        phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        result: string
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        recorded_at: number
+      } | null
+    }>
+    decisions: Array<{
+      id: string
+      kind: string
+      summary: string
+      source: string
+      status: "proposed" | "decided" | "superseded" | "cancelled"
+      requires_user_confirmation: boolean
+      applies_to: Array<string>
+      participants: Array<string>
+      candidate_outcomes: Array<string>
+      input_context: string
+      actions: Array<{
+        kind: "proposal" | "review" | "objection" | "decision"
+        role: string
+        outcome?: string | null
+        context?: string | null
+        created_at: number
+      }>
+      related_question_id: string | null
+      decided_by: string | null
+      decided_at: number | null
+    }>
+    questions: Array<{
+      id: string
+      title: string
+      context: string
+      options: Array<string>
+      recommended_option: string | null
+      status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+      deadline_policy: string | null
+      blocking: boolean
+      affects: Array<string>
+      related_decision_id: string | null
+      raised_by: string
+    }>
+    gate: {
+      status: "pending" | "ready" | "blocked"
+      reason?: string | null
+      enter?: Array<string>
+      exit?: Array<string>
+      fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+      updated_at?: number | null
+    }
+    current_item_id: string | null
+    blockers: Array<{
+      id: string
+      kind: "decision" | "question" | "work_item" | "small_mr"
+      status: string | null
+      summary: string
+      affects?: Array<string>
+    }>
+    small_mr: {
+      required: boolean
+      status: "pending" | "ready" | "blocked"
+      reason: string | null
+      active?: Array<string>
+    }
+    audit: Array<
+      | {
+          kind: "phase"
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+          gate: {
+            status: "pending" | "ready" | "blocked"
+            reason?: string | null
+            enter?: Array<string>
+            exit?: Array<string>
+            fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "assignment"
+          run_id: string
+          item_ids?: Array<string>
+          role_ids?: Array<string>
+          summary: string
+          created_at: number
+        }
+      | {
+          kind: "decision"
+          decision_id: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          outcome?: string | null
+          applies_to?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "question"
+          question_id: string
+          status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+          blocking: boolean
+          summary: string
+          affects?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "verification"
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "commit"
+          item_id: string
+          commit: {
+            status?: "committed"
+            staged_scope: Array<string>
+            proof: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            hash?: string | null
+            message?: string | null
+            recorded_at: number
+          }
+          created_at: number
+        }
+      | {
+          kind: "retrospective"
+          outcome: "completed" | "failed"
+          summary: string
+          memory_ids?: Array<string>
+          created_at: number
+        }
+    >
+    state: Array<{
+      item: {
+        id: string
+        swarm_run_id: string
+        title: string
+        status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+        owner_role_id: string
+        blocked_by: Array<string>
+        scope: Array<string>
+        phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        small_mr_required: boolean
+        gate: {
+          status: "pending" | "ready" | "blocked"
+          reason?: string | null
+          enter?: Array<string>
+          exit?: Array<string>
+          fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          updated_at?: number | null
+        }
+        checkpoint: {
+          last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          verification_result?: string | null
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          updated_at?: number | null
+        }
+        commit: {
+          status?: "committed"
+          staged_scope: Array<string>
+          proof: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          hash?: string | null
+          message?: string | null
+          recorded_at: number
+        } | null
+        failure: {
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          recorded_at: number
+        } | null
+      }
+      proof: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      } | null
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      verified: boolean
+      committed: boolean
+      completed: boolean
+    }>
+    completed: Array<string>
+    pending: Array<string>
+  }
+}
+
+export type SwarmDeliveryConfirmAssignmentResponse =
+  SwarmDeliveryConfirmAssignmentResponses[keyof SwarmDeliveryConfirmAssignmentResponses]
+
+export type SwarmDeliveryAnswerQuestionData = {
+  body?: {
+    option: string
+  }
+  path: {
+    id: string
+    question_id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/delivery/questions/{question_id}/answer"
+}
+
+export type SwarmDeliveryAnswerQuestionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SwarmDeliveryAnswerQuestionError =
+  SwarmDeliveryAnswerQuestionErrors[keyof SwarmDeliveryAnswerQuestionErrors]
+
+export type SwarmDeliveryAnswerQuestionResponses = {
+  /**
+   * Updated swarm delivery detail
+   */
+  200: {
+    run: {
+      id: string
+      goal: string
+      status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+      phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      phases: Array<"plan" | "implement" | "verify" | "commit" | "retrospective">
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      audit: Array<
+        | {
+            kind: "phase"
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+            gate: {
+              status: "pending" | "ready" | "blocked"
+              reason?: string | null
+              enter?: Array<string>
+              exit?: Array<string>
+              fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "assignment"
+            run_id: string
+            item_ids?: Array<string>
+            role_ids?: Array<string>
+            summary: string
+            created_at: number
+          }
+        | {
+            kind: "decision"
+            decision_id: string
+            status: "proposed" | "decided" | "superseded" | "cancelled"
+            summary: string
+            outcome?: string | null
+            applies_to?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "question"
+            question_id: string
+            status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+            blocking: boolean
+            summary: string
+            affects?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "verification"
+            item_id: string
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            verification: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "commit"
+            item_id: string
+            commit: {
+              status?: "committed"
+              staged_scope: Array<string>
+              proof: {
+                status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+                required?: boolean
+                commands?: Array<string>
+                result?: string | null
+                updated_at?: number | null
+              }
+              hash?: string | null
+              message?: string | null
+              recorded_at: number
+            }
+            created_at: number
+          }
+        | {
+            kind: "retrospective"
+            outcome: "completed" | "failed"
+            summary: string
+            memory_ids?: Array<string>
+            created_at: number
+          }
+      >
+      retrospective: {
+        summary: string
+        outcome: "completed" | "failed"
+        work_items?: Array<{
+          id: string
+          title: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+          owner_role_id: string
+        }>
+        decisions?: Array<{
+          id: string
+          kind: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          question_id?: string | null
+          requires_user_confirmation?: boolean
+        }>
+        verification?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          result?: string | null
+          required?: boolean
+          updated_at?: number | null
+        }>
+        failures?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+        }>
+        escalations?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        collaboration_issues?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        memories?: Array<{
+          content: string
+          categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
+          tags?: Array<string>
+          citations?: Array<string>
+          impact?: "low" | "high"
+          status: "written" | "pending_confirmation" | "filtered" | "duplicate"
+          memory_id?: string | null
+          reason?: string | null
+        }>
+        created_at: number
+      } | null
+      created_at: number
+      updated_at: number
+      owner_session_id: string
+    }
+    items: Array<{
+      id: string
+      swarm_run_id: string
+      title: string
+      status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+      owner_role_id: string
+      blocked_by: Array<string>
+      scope: Array<string>
+      phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      verification: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      }
+      small_mr_required: boolean
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      checkpoint: {
+        last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        verification_result?: string | null
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        updated_at?: number | null
+      }
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      failure: {
+        phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        result: string
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        recorded_at: number
+      } | null
+    }>
+    decisions: Array<{
+      id: string
+      kind: string
+      summary: string
+      source: string
+      status: "proposed" | "decided" | "superseded" | "cancelled"
+      requires_user_confirmation: boolean
+      applies_to: Array<string>
+      participants: Array<string>
+      candidate_outcomes: Array<string>
+      input_context: string
+      actions: Array<{
+        kind: "proposal" | "review" | "objection" | "decision"
+        role: string
+        outcome?: string | null
+        context?: string | null
+        created_at: number
+      }>
+      related_question_id: string | null
+      decided_by: string | null
+      decided_at: number | null
+    }>
+    questions: Array<{
+      id: string
+      title: string
+      context: string
+      options: Array<string>
+      recommended_option: string | null
+      status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+      deadline_policy: string | null
+      blocking: boolean
+      affects: Array<string>
+      related_decision_id: string | null
+      raised_by: string
+    }>
+    gate: {
+      status: "pending" | "ready" | "blocked"
+      reason?: string | null
+      enter?: Array<string>
+      exit?: Array<string>
+      fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+      updated_at?: number | null
+    }
+    current_item_id: string | null
+    blockers: Array<{
+      id: string
+      kind: "decision" | "question" | "work_item" | "small_mr"
+      status: string | null
+      summary: string
+      affects?: Array<string>
+    }>
+    small_mr: {
+      required: boolean
+      status: "pending" | "ready" | "blocked"
+      reason: string | null
+      active?: Array<string>
+    }
+    audit: Array<
+      | {
+          kind: "phase"
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+          gate: {
+            status: "pending" | "ready" | "blocked"
+            reason?: string | null
+            enter?: Array<string>
+            exit?: Array<string>
+            fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "assignment"
+          run_id: string
+          item_ids?: Array<string>
+          role_ids?: Array<string>
+          summary: string
+          created_at: number
+        }
+      | {
+          kind: "decision"
+          decision_id: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          outcome?: string | null
+          applies_to?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "question"
+          question_id: string
+          status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+          blocking: boolean
+          summary: string
+          affects?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "verification"
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "commit"
+          item_id: string
+          commit: {
+            status?: "committed"
+            staged_scope: Array<string>
+            proof: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            hash?: string | null
+            message?: string | null
+            recorded_at: number
+          }
+          created_at: number
+        }
+      | {
+          kind: "retrospective"
+          outcome: "completed" | "failed"
+          summary: string
+          memory_ids?: Array<string>
+          created_at: number
+        }
+    >
+    state: Array<{
+      item: {
+        id: string
+        swarm_run_id: string
+        title: string
+        status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+        owner_role_id: string
+        blocked_by: Array<string>
+        scope: Array<string>
+        phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        small_mr_required: boolean
+        gate: {
+          status: "pending" | "ready" | "blocked"
+          reason?: string | null
+          enter?: Array<string>
+          exit?: Array<string>
+          fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          updated_at?: number | null
+        }
+        checkpoint: {
+          last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          verification_result?: string | null
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          updated_at?: number | null
+        }
+        commit: {
+          status?: "committed"
+          staged_scope: Array<string>
+          proof: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          hash?: string | null
+          message?: string | null
+          recorded_at: number
+        } | null
+        failure: {
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          recorded_at: number
+        } | null
+      }
+      proof: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      } | null
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      verified: boolean
+      committed: boolean
+      completed: boolean
+    }>
+    completed: Array<string>
+    pending: Array<string>
+  }
+}
+
+export type SwarmDeliveryAnswerQuestionResponse =
+  SwarmDeliveryAnswerQuestionResponses[keyof SwarmDeliveryAnswerQuestionResponses]
+
+export type SwarmDeliveryDeferQuestionData = {
+  body?: never
+  path: {
+    id: string
+    question_id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/delivery/questions/{question_id}/defer"
+}
+
+export type SwarmDeliveryDeferQuestionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SwarmDeliveryDeferQuestionError = SwarmDeliveryDeferQuestionErrors[keyof SwarmDeliveryDeferQuestionErrors]
+
+export type SwarmDeliveryDeferQuestionResponses = {
+  /**
+   * Updated swarm delivery detail
+   */
+  200: {
+    run: {
+      id: string
+      goal: string
+      status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+      phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      phases: Array<"plan" | "implement" | "verify" | "commit" | "retrospective">
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      audit: Array<
+        | {
+            kind: "phase"
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+            gate: {
+              status: "pending" | "ready" | "blocked"
+              reason?: string | null
+              enter?: Array<string>
+              exit?: Array<string>
+              fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "assignment"
+            run_id: string
+            item_ids?: Array<string>
+            role_ids?: Array<string>
+            summary: string
+            created_at: number
+          }
+        | {
+            kind: "decision"
+            decision_id: string
+            status: "proposed" | "decided" | "superseded" | "cancelled"
+            summary: string
+            outcome?: string | null
+            applies_to?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "question"
+            question_id: string
+            status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+            blocking: boolean
+            summary: string
+            affects?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "verification"
+            item_id: string
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            verification: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "commit"
+            item_id: string
+            commit: {
+              status?: "committed"
+              staged_scope: Array<string>
+              proof: {
+                status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+                required?: boolean
+                commands?: Array<string>
+                result?: string | null
+                updated_at?: number | null
+              }
+              hash?: string | null
+              message?: string | null
+              recorded_at: number
+            }
+            created_at: number
+          }
+        | {
+            kind: "retrospective"
+            outcome: "completed" | "failed"
+            summary: string
+            memory_ids?: Array<string>
+            created_at: number
+          }
+      >
+      retrospective: {
+        summary: string
+        outcome: "completed" | "failed"
+        work_items?: Array<{
+          id: string
+          title: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+          owner_role_id: string
+        }>
+        decisions?: Array<{
+          id: string
+          kind: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          question_id?: string | null
+          requires_user_confirmation?: boolean
+        }>
+        verification?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          result?: string | null
+          required?: boolean
+          updated_at?: number | null
+        }>
+        failures?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+        }>
+        escalations?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        collaboration_issues?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        memories?: Array<{
+          content: string
+          categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
+          tags?: Array<string>
+          citations?: Array<string>
+          impact?: "low" | "high"
+          status: "written" | "pending_confirmation" | "filtered" | "duplicate"
+          memory_id?: string | null
+          reason?: string | null
+        }>
+        created_at: number
+      } | null
+      created_at: number
+      updated_at: number
+      owner_session_id: string
+    }
+    items: Array<{
+      id: string
+      swarm_run_id: string
+      title: string
+      status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+      owner_role_id: string
+      blocked_by: Array<string>
+      scope: Array<string>
+      phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      verification: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      }
+      small_mr_required: boolean
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      checkpoint: {
+        last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        verification_result?: string | null
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        updated_at?: number | null
+      }
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      failure: {
+        phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        result: string
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        recorded_at: number
+      } | null
+    }>
+    decisions: Array<{
+      id: string
+      kind: string
+      summary: string
+      source: string
+      status: "proposed" | "decided" | "superseded" | "cancelled"
+      requires_user_confirmation: boolean
+      applies_to: Array<string>
+      participants: Array<string>
+      candidate_outcomes: Array<string>
+      input_context: string
+      actions: Array<{
+        kind: "proposal" | "review" | "objection" | "decision"
+        role: string
+        outcome?: string | null
+        context?: string | null
+        created_at: number
+      }>
+      related_question_id: string | null
+      decided_by: string | null
+      decided_at: number | null
+    }>
+    questions: Array<{
+      id: string
+      title: string
+      context: string
+      options: Array<string>
+      recommended_option: string | null
+      status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+      deadline_policy: string | null
+      blocking: boolean
+      affects: Array<string>
+      related_decision_id: string | null
+      raised_by: string
+    }>
+    gate: {
+      status: "pending" | "ready" | "blocked"
+      reason?: string | null
+      enter?: Array<string>
+      exit?: Array<string>
+      fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+      updated_at?: number | null
+    }
+    current_item_id: string | null
+    blockers: Array<{
+      id: string
+      kind: "decision" | "question" | "work_item" | "small_mr"
+      status: string | null
+      summary: string
+      affects?: Array<string>
+    }>
+    small_mr: {
+      required: boolean
+      status: "pending" | "ready" | "blocked"
+      reason: string | null
+      active?: Array<string>
+    }
+    audit: Array<
+      | {
+          kind: "phase"
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+          gate: {
+            status: "pending" | "ready" | "blocked"
+            reason?: string | null
+            enter?: Array<string>
+            exit?: Array<string>
+            fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "assignment"
+          run_id: string
+          item_ids?: Array<string>
+          role_ids?: Array<string>
+          summary: string
+          created_at: number
+        }
+      | {
+          kind: "decision"
+          decision_id: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          outcome?: string | null
+          applies_to?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "question"
+          question_id: string
+          status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+          blocking: boolean
+          summary: string
+          affects?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "verification"
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "commit"
+          item_id: string
+          commit: {
+            status?: "committed"
+            staged_scope: Array<string>
+            proof: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            hash?: string | null
+            message?: string | null
+            recorded_at: number
+          }
+          created_at: number
+        }
+      | {
+          kind: "retrospective"
+          outcome: "completed" | "failed"
+          summary: string
+          memory_ids?: Array<string>
+          created_at: number
+        }
+    >
+    state: Array<{
+      item: {
+        id: string
+        swarm_run_id: string
+        title: string
+        status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+        owner_role_id: string
+        blocked_by: Array<string>
+        scope: Array<string>
+        phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        small_mr_required: boolean
+        gate: {
+          status: "pending" | "ready" | "blocked"
+          reason?: string | null
+          enter?: Array<string>
+          exit?: Array<string>
+          fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          updated_at?: number | null
+        }
+        checkpoint: {
+          last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          verification_result?: string | null
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          updated_at?: number | null
+        }
+        commit: {
+          status?: "committed"
+          staged_scope: Array<string>
+          proof: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          hash?: string | null
+          message?: string | null
+          recorded_at: number
+        } | null
+        failure: {
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          recorded_at: number
+        } | null
+      }
+      proof: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      } | null
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      verified: boolean
+      committed: boolean
+      completed: boolean
+    }>
+    completed: Array<string>
+    pending: Array<string>
+  }
+}
+
+export type SwarmDeliveryDeferQuestionResponse =
+  SwarmDeliveryDeferQuestionResponses[keyof SwarmDeliveryDeferQuestionResponses]
+
+export type SwarmDeliveryCancelQuestionData = {
+  body?: never
+  path: {
+    id: string
+    question_id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{id}/delivery/questions/{question_id}/cancel"
+}
+
+export type SwarmDeliveryCancelQuestionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SwarmDeliveryCancelQuestionError =
+  SwarmDeliveryCancelQuestionErrors[keyof SwarmDeliveryCancelQuestionErrors]
+
+export type SwarmDeliveryCancelQuestionResponses = {
+  /**
+   * Updated swarm delivery detail
+   */
+  200: {
+    run: {
+      id: string
+      goal: string
+      status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+      phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      phases: Array<"plan" | "implement" | "verify" | "commit" | "retrospective">
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      audit: Array<
+        | {
+            kind: "phase"
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+            gate: {
+              status: "pending" | "ready" | "blocked"
+              reason?: string | null
+              enter?: Array<string>
+              exit?: Array<string>
+              fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "assignment"
+            run_id: string
+            item_ids?: Array<string>
+            role_ids?: Array<string>
+            summary: string
+            created_at: number
+          }
+        | {
+            kind: "decision"
+            decision_id: string
+            status: "proposed" | "decided" | "superseded" | "cancelled"
+            summary: string
+            outcome?: string | null
+            applies_to?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "question"
+            question_id: string
+            status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+            blocking: boolean
+            summary: string
+            affects?: Array<string>
+            created_at: number
+          }
+        | {
+            kind: "verification"
+            item_id: string
+            phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+            verification: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            created_at: number
+          }
+        | {
+            kind: "commit"
+            item_id: string
+            commit: {
+              status?: "committed"
+              staged_scope: Array<string>
+              proof: {
+                status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+                required?: boolean
+                commands?: Array<string>
+                result?: string | null
+                updated_at?: number | null
+              }
+              hash?: string | null
+              message?: string | null
+              recorded_at: number
+            }
+            created_at: number
+          }
+        | {
+            kind: "retrospective"
+            outcome: "completed" | "failed"
+            summary: string
+            memory_ids?: Array<string>
+            created_at: number
+          }
+      >
+      retrospective: {
+        summary: string
+        outcome: "completed" | "failed"
+        work_items?: Array<{
+          id: string
+          title: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+          owner_role_id: string
+        }>
+        decisions?: Array<{
+          id: string
+          kind: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          question_id?: string | null
+          requires_user_confirmation?: boolean
+        }>
+        verification?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          result?: string | null
+          required?: boolean
+          updated_at?: number | null
+        }>
+        failures?: Array<{
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+        }>
+        escalations?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        collaboration_issues?: Array<{
+          summary: string
+          related_ids?: Array<string>
+        }>
+        memories?: Array<{
+          content: string
+          categories: Array<"style" | "pattern" | "tool" | "domain" | "workflow" | "correction" | "context">
+          tags?: Array<string>
+          citations?: Array<string>
+          impact?: "low" | "high"
+          status: "written" | "pending_confirmation" | "filtered" | "duplicate"
+          memory_id?: string | null
+          reason?: string | null
+        }>
+        created_at: number
+      } | null
+      created_at: number
+      updated_at: number
+      owner_session_id: string
+    }
+    items: Array<{
+      id: string
+      swarm_run_id: string
+      title: string
+      status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+      owner_role_id: string
+      blocked_by: Array<string>
+      scope: Array<string>
+      phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+      verification: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      }
+      small_mr_required: boolean
+      gate: {
+        status: "pending" | "ready" | "blocked"
+        reason?: string | null
+        enter?: Array<string>
+        exit?: Array<string>
+        fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        updated_at?: number | null
+      }
+      checkpoint: {
+        last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+        verification_result?: string | null
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        updated_at?: number | null
+      }
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      failure: {
+        phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        result: string
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        produced_files?: Array<string>
+        pending_actions?: Array<string>
+        rollback_suggestions?: Array<string>
+        destructive_cleanup_allowed?: boolean
+        cleanup_decision_id?: string | null
+        recorded_at: number
+      } | null
+    }>
+    decisions: Array<{
+      id: string
+      kind: string
+      summary: string
+      source: string
+      status: "proposed" | "decided" | "superseded" | "cancelled"
+      requires_user_confirmation: boolean
+      applies_to: Array<string>
+      participants: Array<string>
+      candidate_outcomes: Array<string>
+      input_context: string
+      actions: Array<{
+        kind: "proposal" | "review" | "objection" | "decision"
+        role: string
+        outcome?: string | null
+        context?: string | null
+        created_at: number
+      }>
+      related_question_id: string | null
+      decided_by: string | null
+      decided_at: number | null
+    }>
+    questions: Array<{
+      id: string
+      title: string
+      context: string
+      options: Array<string>
+      recommended_option: string | null
+      status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+      deadline_policy: string | null
+      blocking: boolean
+      affects: Array<string>
+      related_decision_id: string | null
+      raised_by: string
+    }>
+    gate: {
+      status: "pending" | "ready" | "blocked"
+      reason?: string | null
+      enter?: Array<string>
+      exit?: Array<string>
+      fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+      updated_at?: number | null
+    }
+    current_item_id: string | null
+    blockers: Array<{
+      id: string
+      kind: "decision" | "question" | "work_item" | "small_mr"
+      status: string | null
+      summary: string
+      affects?: Array<string>
+    }>
+    small_mr: {
+      required: boolean
+      status: "pending" | "ready" | "blocked"
+      reason: string | null
+      active?: Array<string>
+    }
+    audit: Array<
+      | {
+          kind: "phase"
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          status: "pending" | "active" | "blocked" | "completed" | "failed" | "cancelled"
+          gate: {
+            status: "pending" | "ready" | "blocked"
+            reason?: string | null
+            enter?: Array<string>
+            exit?: Array<string>
+            fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "assignment"
+          run_id: string
+          item_ids?: Array<string>
+          role_ids?: Array<string>
+          summary: string
+          created_at: number
+        }
+      | {
+          kind: "decision"
+          decision_id: string
+          status: "proposed" | "decided" | "superseded" | "cancelled"
+          summary: string
+          outcome?: string | null
+          applies_to?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "question"
+          question_id: string
+          status: "open" | "waiting_user" | "answered" | "resolved" | "deferred" | "cancelled"
+          blocking: boolean
+          summary: string
+          affects?: Array<string>
+          created_at: number
+        }
+      | {
+          kind: "verification"
+          item_id: string
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          created_at: number
+        }
+      | {
+          kind: "commit"
+          item_id: string
+          commit: {
+            status?: "committed"
+            staged_scope: Array<string>
+            proof: {
+              status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+              required?: boolean
+              commands?: Array<string>
+              result?: string | null
+              updated_at?: number | null
+            }
+            hash?: string | null
+            message?: string | null
+            recorded_at: number
+          }
+          created_at: number
+        }
+      | {
+          kind: "retrospective"
+          outcome: "completed" | "failed"
+          summary: string
+          memory_ids?: Array<string>
+          created_at: number
+        }
+    >
+    state: Array<{
+      item: {
+        id: string
+        swarm_run_id: string
+        title: string
+        status: "pending" | "ready" | "in_progress" | "verifying" | "completed" | "blocked" | "failed" | "cancelled"
+        owner_role_id: string
+        blocked_by: Array<string>
+        scope: Array<string>
+        phase_gate: "plan" | "implement" | "verify" | "commit" | "retrospective"
+        verification: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        small_mr_required: boolean
+        gate: {
+          status: "pending" | "ready" | "blocked"
+          reason?: string | null
+          enter?: Array<string>
+          exit?: Array<string>
+          fallback?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          updated_at?: number | null
+        }
+        checkpoint: {
+          last_successful_phase?: "plan" | "implement" | "verify" | "commit" | "retrospective" | null
+          verification_result?: string | null
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          updated_at?: number | null
+        }
+        commit: {
+          status?: "committed"
+          staged_scope: Array<string>
+          proof: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          hash?: string | null
+          message?: string | null
+          recorded_at: number
+        } | null
+        failure: {
+          phase: "plan" | "implement" | "verify" | "commit" | "retrospective"
+          result: string
+          verification: {
+            status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+            required?: boolean
+            commands?: Array<string>
+            result?: string | null
+            updated_at?: number | null
+          }
+          produced_files?: Array<string>
+          pending_actions?: Array<string>
+          rollback_suggestions?: Array<string>
+          destructive_cleanup_allowed?: boolean
+          cleanup_decision_id?: string | null
+          recorded_at: number
+        } | null
+      }
+      proof: {
+        status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+        required?: boolean
+        commands?: Array<string>
+        result?: string | null
+        updated_at?: number | null
+      } | null
+      commit: {
+        status?: "committed"
+        staged_scope: Array<string>
+        proof: {
+          status: "pending" | "running" | "passed" | "failed" | "repair_required" | "cancelled" | "skipped"
+          required?: boolean
+          commands?: Array<string>
+          result?: string | null
+          updated_at?: number | null
+        }
+        hash?: string | null
+        message?: string | null
+        recorded_at: number
+      } | null
+      verified: boolean
+      committed: boolean
+      completed: boolean
+    }>
+    completed: Array<string>
+    pending: Array<string>
+  }
+}
+
+export type SwarmDeliveryCancelQuestionResponse =
+  SwarmDeliveryCancelQuestionResponses[keyof SwarmDeliveryCancelQuestionResponses]
 
 export type SwarmAlignmentData = {
   body?: never

@@ -35,6 +35,7 @@ const Home = lazy(() => import("@/pages/home"))
 const Session = lazy(() => import("@/pages/session"))
 const SwarmDashboard = lazy(() => import("@/pages/swarm/swarm-dashboard"))
 const SwarmOverview = lazy(() => import("@/pages/swarm/swarm-overview"))
+const SwarmRun = lazy(() => import("@/pages/swarm/swarm-run"))
 const Loading = () => <div class="size-full" />
 
 const HomeRoute = () => (
@@ -56,6 +57,12 @@ const SessionIndexRoute = () => <Navigate href="session" />
 const SwarmRoute = () => (
   <Suspense fallback={<Loading />}>
     <SwarmDashboard />
+  </Suspense>
+)
+
+const SwarmRunRoute = () => (
+  <Suspense fallback={<Loading />}>
+    <SwarmRun />
   </Suspense>
 )
 
@@ -185,6 +192,7 @@ export function AppInterface(props: {
                 <Route path="/" component={SessionIndexRoute} />
                 <Route path="/session/:id?" component={SessionRoute} />
                 <Route path="/swarm" component={SwarmOverviewRoute} />
+                <Route path="/swarm/:id/run" component={SwarmRunRoute} />
                 <Route path="/swarm/:id" component={SwarmRoute} />
               </Route>
             </Router>

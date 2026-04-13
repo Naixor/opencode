@@ -1,15 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Delivery } from "../../src/delivery/schema"
+import { WorkItemTable } from "../../src/delivery/delivery.sql"
 import { DeliveryStore } from "../../src/delivery/store"
+import { Memory } from "../../src/memory/memory"
+import { MemoryStorage } from "../../src/memory/storage"
+import { Database, eq } from "../../src/storage/db"
 import { resetDatabase } from "../fixture/db"
 
 describe("delivery store", () => {
   beforeEach(async () => {
     await resetDatabase()
+    await MemoryStorage.clear()
   })
 
   afterEach(async () => {
     await resetDatabase()
+    await MemoryStorage.clear()
   })
 
   test("routes delivery CRUD through the shared store", () => {
@@ -211,7 +217,7 @@ describe("delivery store", () => {
       raised_by: "conductor",
     })
 
-    expect(() => DeliveryStore.updateRun("SR-1", { status: "completed" })).toThrow("DeliveryTransitionError")
+    expect(() => DeliveryStore.updateRun("SR-1", { status: "completed" })).toThrow("requires retrospective output")
     expect(() => DeliveryStore.updateRun("SR-1", { phase: "commit" })).toThrow("DeliveryTransitionError")
     expect(() => DeliveryStore.updateItem("WI-1", { status: "completed" })).toThrow("DeliveryTransitionError")
     expect(() =>
@@ -427,6 +433,52 @@ describe("delivery store", () => {
     })
   })
 
+  test("enforces single-thread small-MR execution through commit", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    DeliveryStore.updateItem("SW-1:plan", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:plan", { status: "verifying" })
+    DeliveryStore.updateItem("SW-1:plan", { status: "completed" })
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+
+    expect(() => DeliveryStore.updateItem("SW-1:implement", { small_mr_required: false })).toThrow(
+      "must keep small_mr_required=true",
+    )
+
+    DeliveryStore.createItem({
+      id: "SW-1:implement:2",
+      swarm_run_id: "SW-1",
+      title: "Implement a second path",
+      status: "ready",
+      owner_role_id: "builder",
+      blocked_by: [],
+      scope: ["Ship staged swarm delivery"],
+      phase_gate: "implement",
+      verification: {
+        status: "pending",
+        required: true,
+        commands: ["bun run typecheck", "bun run build"],
+        result: null,
+        updated_at: null,
+      },
+      small_mr_required: true,
+    })
+
+    expect(DeliveryStore.evaluateRun("SW-1").run).toMatchObject({
+      status: "blocked",
+      gate: {
+        status: "blocked",
+        reason: expect.stringContaining(
+          "Small-MR execution allows only one active implementation path through commit in P1",
+        ),
+      },
+    })
+  })
+
   test("preserves checkpoints and failure evidence when verification fails", () => {
     DeliveryStore.launch({
       id: "SW-1",
@@ -497,6 +549,888 @@ describe("delivery store", () => {
         rollback_suggestions: ["Inspect the failing verify step before touching the worktree"],
         destructive_cleanup_allowed: false,
         cleanup_decision_id: null,
+      },
+    })
+  })
+
+  test("resumes interrupted planning from authoritative delivery state", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    DeliveryStore.updateItem("SW-1:plan", { status: "in_progress" })
+
+    const out = DeliveryStore.resume("SW-1")
+
+    expect(out.run).toMatchObject({
+      id: "SW-1",
+      phase: "plan",
+      status: "active",
+      gate: {
+        status: "pending",
+        reason: "Waiting for plan exit rules",
+      },
+    })
+    expect(DeliveryStore.getItem("SW-1:plan")).toMatchObject({
+      status: "ready",
+    })
+    expect(out.decisions).toEqual([])
+    expect(out.questions).toEqual([])
+    expect(out.completed).toEqual([])
+    expect(out.pending).toContain("SW-1:plan")
+    expect(out.expired).toEqual([])
+  })
+
+  test("stops behind a recovery question when implementation state is inconsistent", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    DeliveryStore.updateItem("SW-1:plan", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:plan", { status: "verifying" })
+    DeliveryStore.updateItem("SW-1:plan", { status: "completed" })
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    DeliveryStore.updateItem("SW-1:implement", {
+      checkpoint: {
+        last_successful_phase: "implement",
+        verification_result: "stale implement checkpoint",
+      },
+    })
+    DeliveryStore.updateItem("SW-1:implement", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:implement", { status: "failed" })
+
+    const out = DeliveryStore.resume("SW-1")
+
+    expect(out.expired).toEqual(["SW-1:implement"])
+    expect(out.run).toMatchObject({
+      status: "blocked",
+      gate: {
+        status: "blocked",
+        reason: expect.stringContaining("Question OQ-"),
+      },
+    })
+    expect(out.decisions).toHaveLength(1)
+    expect(out.questions).toHaveLength(1)
+    expect(out.decisions[0]).toMatchObject({
+      kind: "recovery_review",
+      source: "resume",
+      status: "proposed",
+    })
+    expect(out.questions[0]).toMatchObject({
+      status: "open",
+      blocking: true,
+      raised_by: "system",
+    })
+    expect(DeliveryStore.getItem("SW-1:implement")).toMatchObject({
+      checkpoint: expect.objectContaining({
+        last_successful_phase: null,
+        verification_result: null,
+        updated_at: expect.any(Number),
+      }),
+    })
+  })
+
+  test("keeps verification failure evidence when a run resumes", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    step("SW-1:implement")
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      checkpoint: {
+        last_successful_phase: "implement",
+        verification_result: "bun run build passed",
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Run bun test"],
+        rollback_suggestions: ["Inspect the failing verify step before touching the worktree"],
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "verify started",
+        updated_at: 10,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "failed",
+      verification: {
+        status: "failed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "bun test failed",
+        updated_at: 11,
+      },
+    })
+
+    const out = DeliveryStore.resume("SW-1")
+
+    expect(out.run).toMatchObject({
+      phase: "verify",
+      status: "blocked",
+      gate: {
+        status: "blocked",
+        reason: expect.stringContaining("Phase verify failed"),
+      },
+    })
+    expect(out.expired).toEqual([])
+    expect(out.decisions).toEqual([])
+    expect(out.questions).toEqual([])
+    expect(DeliveryStore.getItem("SW-1:verify")).toMatchObject({
+      status: "failed",
+      checkpoint: {
+        last_successful_phase: "implement",
+        verification_result: "bun run build passed",
+      },
+      failure: {
+        phase: "verify",
+        result: "bun test failed",
+      },
+    })
+  })
+
+  test("resumes pre-commit interruptions from the last verified checkpoint", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    step("SW-1:implement")
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "verify in progress",
+        updated_at: 10,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", { status: "verifying" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "bun test passed",
+        updated_at: 11,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "commit" })
+    DeliveryStore.updateItem("SW-1:commit", {
+      checkpoint: {
+        last_successful_phase: "verify",
+        verification_result: "bun test passed",
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Create local commit"],
+        rollback_suggestions: ["Inspect staged scope before rerunning commit"],
+      },
+    })
+    DeliveryStore.updateItem("SW-1:commit", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:commit", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "pre-commit verification started",
+        updated_at: 11,
+      },
+    })
+
+    const out = DeliveryStore.resume("SW-1")
+
+    expect(out.run).toMatchObject({
+      phase: "commit",
+      status: "active",
+      gate: {
+        status: "pending",
+        reason: "Waiting for commit exit rules",
+      },
+    })
+    expect(DeliveryStore.getItem("SW-1:commit")).toMatchObject({
+      status: "ready",
+      checkpoint: {
+        last_successful_phase: "verify",
+        verification_result: "bun test passed",
+        produced_files: ["packages/opencode/src/delivery/store.ts"],
+        pending_actions: ["Create local commit"],
+        rollback_suggestions: ["Inspect staged scope before rerunning commit"],
+      },
+      verification: {
+        status: "pending",
+        result: "pre-commit verification started",
+      },
+    })
+    expect(out.completed).toEqual(["SW-1:plan", "SW-1:implement", "SW-1:verify"])
+    expect(out.pending).toContain("SW-1:commit")
+    expect(out.expired).toEqual([])
+  })
+
+  test("requires local commit writeback before the commit phase can complete", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    step("SW-1:implement")
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "bun test running",
+        updated_at: 10,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "bun test passed",
+        updated_at: 11,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "commit" })
+
+    expect(() =>
+      DeliveryStore.updateItem("SW-1:commit", {
+        status: "completed",
+        verification: {
+          status: "passed",
+          required: true,
+          commands: ["bun run typecheck", "bun run build", "bun test"],
+          result: "bun test passed",
+          updated_at: 12,
+        },
+      }),
+    ).toThrow("requires local commit writeback")
+  })
+
+  test("records local commit metadata on the work item and run audit", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    step("SW-1:implement")
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "bun test running",
+        updated_at: 10,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "bun test passed",
+        updated_at: 11,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "commit" })
+
+    const out = DeliveryStore.recordCommit({
+      run_id: "SW-1",
+      item_id: "SW-1:commit",
+      staged_scope: [
+        "packages/opencode/src/delivery/store.ts",
+        "packages/opencode/test/storage/delivery-store.test.ts",
+      ],
+      proof: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "bun test passed",
+        updated_at: 12,
+      },
+      commit_hash: "abc1234",
+      commit_message: "feat: US-015 - Execute local commit phase with audit writeback",
+      recorded_at: 13,
+    })
+
+    expect(out.item).toMatchObject({
+      id: "SW-1:commit",
+      status: "completed",
+      verification: {
+        status: "passed",
+        result: "bun test passed",
+      },
+      commit: {
+        status: "committed",
+        staged_scope: [
+          "packages/opencode/src/delivery/store.ts",
+          "packages/opencode/test/storage/delivery-store.test.ts",
+        ],
+        proof: {
+          status: "passed",
+          result: "bun test passed",
+        },
+        hash: "abc1234",
+        message: "feat: US-015 - Execute local commit phase with audit writeback",
+        recorded_at: 13,
+      },
+      failure: null,
+    })
+    expect(out.run).toMatchObject({
+      id: "SW-1",
+      phase: "commit",
+      status: "active",
+      gate: {
+        status: "ready",
+        reason: null,
+      },
+    })
+    expect(out.run.audit).toContainEqual(
+      expect.objectContaining({
+        kind: "commit",
+        item_id: "SW-1:commit",
+        commit: expect.objectContaining({
+          hash: "abc1234",
+          message: "feat: US-015 - Execute local commit phase with audit writeback",
+        }),
+        created_at: 13,
+      }),
+    )
+    expect(DeliveryStore.listDecisions()).toEqual([])
+    expect(DeliveryStore.listQuestions()).toEqual([])
+  })
+
+  test("records structured audit history for delivery changes", async () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    DeliveryStore.assign({
+      run_id: "SW-1",
+      items: [
+        {
+          id: "SW-1:implement",
+          scope: ["packages/opencode/src/delivery/store.ts"],
+        },
+      ],
+    })
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    DeliveryStore.updateItem("SW-1:implement", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:implement", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build"],
+        result: "build running",
+        updated_at: 10,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:implement", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build"],
+        result: "build passed",
+        updated_at: 11,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests running",
+        updated_at: 12,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests passed",
+        updated_at: 13,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "commit" })
+    DeliveryStore.recordCommit({
+      run_id: "SW-1",
+      item_id: "SW-1:commit",
+      staged_scope: ["packages/opencode/src/delivery/store.ts"],
+      proof: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests passed",
+        updated_at: 14,
+      },
+      commit_hash: "abc1234",
+      commit_message: "feat: audit history",
+      recorded_at: 15,
+    })
+    await DeliveryStore.recordRetrospective({
+      run_id: "SW-1",
+      summary: "Delivery closed cleanly after the local commit and captured one reusable workflow note.",
+      memories: [
+        {
+          content: "Record delivery retrospectives before marking a run complete.",
+          categories: ["workflow"],
+          tags: ["delivery", "retrospective"],
+          citations: ["swarm_run:SW-1"],
+          impact: "low",
+        },
+      ],
+      recorded_at: 16,
+    })
+    DeliveryStore.createQuestion({
+      id: "OQ-1",
+      title: "Need role approval",
+      context: "A reassignment changes ownership",
+      options: ["approve", "reject"],
+      recommended_option: "approve",
+      status: "waiting_user",
+      deadline_policy: "manual",
+      blocking: false,
+      affects: ["SW-1", "SW-1:implement"],
+      related_decision_id: "DE-1",
+      raised_by: "conductor",
+    })
+    DeliveryStore.createDecision({
+      id: "DE-1",
+      kind: "role_change",
+      summary: "Approve role reassignment",
+      source: "alignment",
+      status: "proposed",
+      requires_user_confirmation: true,
+      applies_to: ["SW-1", "SW-1:implement"],
+      related_question_id: "OQ-1",
+    })
+
+    const run = DeliveryStore.getRun("SW-1")
+    expect(new Set(run.audit.map((item) => item.kind))).toEqual(
+      new Set(["phase", "assignment", "decision", "question", "verification", "commit", "retrospective"]),
+    )
+  })
+
+  test("requires retrospective output before a run becomes terminal", async () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    step("SW-1:implement")
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests running",
+        updated_at: 10,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests passed",
+        updated_at: 11,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "commit" })
+    DeliveryStore.recordCommit({
+      run_id: "SW-1",
+      item_id: "SW-1:commit",
+      staged_scope: ["packages/opencode/src/delivery/store.ts"],
+      proof: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests passed",
+        updated_at: 12,
+      },
+      commit_hash: "abc1234",
+      commit_message: "feat: retrospective",
+      recorded_at: 13,
+    })
+
+    expect(() => DeliveryStore.updateRun("SW-1", { status: "completed" })).toThrow("requires retrospective output")
+
+    const out = await DeliveryStore.recordRetrospective({
+      run_id: "SW-1",
+      summary: "Delivery closed cleanly after the local commit and captured one reusable workflow note.",
+      memories: [
+        {
+          content: "Record delivery retrospectives before marking a run complete.",
+          categories: ["workflow"],
+          tags: ["delivery", "retrospective"],
+          citations: ["swarm_run:SW-1"],
+          impact: "low",
+        },
+      ],
+      collaboration_issues: [
+        {
+          summary: "No collaboration issue remained after final review.",
+          related_ids: [],
+        },
+      ],
+      recorded_at: 14,
+    })
+
+    expect(out.run).toMatchObject({
+      id: "SW-1",
+      phase: "retrospective",
+      status: "completed",
+      retrospective: {
+        outcome: "completed",
+        summary: "Delivery closed cleanly after the local commit and captured one reusable workflow note.",
+        collaboration_issues: [
+          {
+            summary: "No collaboration issue remained after final review.",
+            related_ids: [],
+          },
+        ],
+      },
+    })
+    expect(out.item).toMatchObject({
+      id: "SW-1:retrospective",
+      status: "completed",
+    })
+    expect(out.audit).toMatchObject({
+      kind: "retrospective",
+      outcome: "completed",
+    })
+  })
+
+  test("writes durable memories and leaves high-impact notes pending confirmation", async () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    step("SW-1:implement")
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests running",
+        updated_at: 10,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests passed",
+        updated_at: 11,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "commit" })
+    DeliveryStore.recordCommit({
+      run_id: "SW-1",
+      item_id: "SW-1:commit",
+      staged_scope: ["packages/opencode/src/delivery/store.ts"],
+      proof: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests passed",
+        updated_at: 12,
+      },
+      commit_hash: "abc1234",
+      commit_message: "feat: retrospective memories",
+      recorded_at: 13,
+    })
+
+    const out = await DeliveryStore.recordRetrospective({
+      run_id: "SW-1",
+      summary: "Delivery closed cleanly after the local commit and captured reusable workflow notes.",
+      memories: [
+        {
+          content: "Record delivery retrospectives before marking a run complete.",
+          categories: ["workflow"],
+          tags: ["delivery", "retrospective"],
+          citations: ["swarm_run:SW-1"],
+          impact: "low",
+        },
+        {
+          content: "Architecture changes to delivery state should stay behind explicit retrospective review.",
+          categories: ["pattern"],
+          tags: ["architecture", "delivery"],
+          citations: ["swarm_run:SW-1"],
+          impact: "high",
+        },
+        {
+          content: "Too short",
+          categories: ["context"],
+          tags: ["skip"],
+          citations: [],
+          impact: "low",
+        },
+        {
+          content: "Record delivery retrospectives before marking a run complete.",
+          categories: ["workflow"],
+          tags: ["delivery", "retrospective"],
+          citations: ["swarm_run:SW-1"],
+          impact: "low",
+        },
+      ],
+      recorded_at: 14,
+    })
+
+    expect(out.memories).toEqual([
+      expect.objectContaining({
+        content: "Record delivery retrospectives before marking a run complete.",
+        status: "written",
+      }),
+      expect.objectContaining({
+        content: "Architecture changes to delivery state should stay behind explicit retrospective review.",
+        status: "pending_confirmation",
+      }),
+      expect.objectContaining({
+        content: "Too short",
+        status: "filtered",
+      }),
+      expect.objectContaining({
+        content: "Record delivery retrospectives before marking a run complete.",
+        status: "duplicate",
+      }),
+    ])
+
+    const list = await Memory.list()
+    expect(list).toHaveLength(2)
+    expect(list.map((item) => item.status).sort()).toEqual(["confirmed", "pending"])
+    expect(list.map((item) => item.content).sort()).toEqual([
+      "Architecture changes to delivery state should stay behind explicit retrospective review.",
+      "Record delivery retrospectives before marking a run complete.",
+    ])
+  })
+
+  test("uses audit history for lookup and resume repair", () => {
+    DeliveryStore.launch({
+      id: "SW-1",
+      goal: "Ship staged swarm delivery",
+      owner_session_id: "SE-1",
+    })
+
+    const step = (id: string) => {
+      DeliveryStore.updateItem(id, { status: "in_progress" })
+      DeliveryStore.updateItem(id, { status: "verifying" })
+      return DeliveryStore.updateItem(id, { status: "completed" })
+    }
+
+    step("SW-1:plan")
+    DeliveryStore.updateRun("SW-1", { phase: "implement" })
+    DeliveryStore.updateItem("SW-1:implement", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:implement", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build"],
+        result: "build running",
+        updated_at: 10,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:implement", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build"],
+        result: "build passed",
+        updated_at: 11,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "verify" })
+    DeliveryStore.updateItem("SW-1:verify", { status: "in_progress" })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "verifying",
+      verification: {
+        status: "running",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests running",
+        updated_at: 12,
+      },
+    })
+    DeliveryStore.updateItem("SW-1:verify", {
+      status: "completed",
+      verification: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests passed",
+        updated_at: 13,
+      },
+    })
+    DeliveryStore.updateRun("SW-1", { phase: "commit" })
+    DeliveryStore.recordCommit({
+      run_id: "SW-1",
+      item_id: "SW-1:commit",
+      staged_scope: ["packages/opencode/src/delivery/store.ts"],
+      proof: {
+        status: "passed",
+        required: true,
+        commands: ["bun run typecheck", "bun run build", "bun test"],
+        result: "tests passed",
+        updated_at: 14,
+      },
+      commit_hash: "abc1234",
+      commit_message: "feat: audit repair",
+      recorded_at: 15,
+    })
+
+    Database.use((db) => {
+      db.update(WorkItemTable)
+        .set({
+          status: "ready",
+          verification: Delivery.Verification.parse({
+            status: "pending",
+            required: true,
+            commands: ["bun run typecheck", "bun run build", "bun test"],
+            result: null,
+            updated_at: null,
+          }),
+        })
+        .where(eq(WorkItemTable.id, "SW-1:verify"))
+        .run()
+      db.update(WorkItemTable)
+        .set({
+          status: "ready",
+          verification: Delivery.Verification.parse({
+            status: "pending",
+            required: true,
+            commands: ["bun run typecheck", "bun run build", "bun test"],
+            result: null,
+            updated_at: null,
+          }),
+          commit: null,
+        })
+        .where(eq(WorkItemTable.id, "SW-1:commit"))
+        .run()
+    })
+
+    const view = DeliveryStore.lookup("SW-1")
+    expect(view.completed).toEqual(["SW-1:plan", "SW-1:implement", "SW-1:verify", "SW-1:commit"])
+    expect(view.pending).toEqual(["SW-1:retrospective"])
+
+    const out = DeliveryStore.resume("SW-1")
+
+    expect(out.completed).toEqual(["SW-1:plan", "SW-1:implement", "SW-1:verify", "SW-1:commit"])
+    expect(out.pending).toEqual(["SW-1:retrospective"])
+    expect(DeliveryStore.getItem("SW-1:verify")).toMatchObject({
+      status: "completed",
+      verification: {
+        status: "passed",
+        result: "tests passed",
+      },
+    })
+    expect(DeliveryStore.getItem("SW-1:commit")).toMatchObject({
+      status: "completed",
+      commit: {
+        hash: "abc1234",
+        message: "feat: audit repair",
       },
     })
   })

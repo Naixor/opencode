@@ -1,4 +1,4 @@
-import { useParams } from "@solidjs/router"
+import { A, useParams } from "@solidjs/router"
 import { createMemo, createResource, For, Show, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useSDK } from "@/context/sdk"
@@ -306,6 +306,12 @@ export default function SwarmDashboard() {
 
                 <div class="flex flex-col items-start gap-2 xl:items-end">
                   <div class="flex flex-wrap gap-2">
+                    <A
+                      href={`/${params.dir}/swarm/${params.id}/run`}
+                      class="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-12-medium text-sky-200"
+                    >
+                      Open Run View
+                    </A>
                     <Show when={canStop()}>
                       <button
                         class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-12-medium text-amber-200"

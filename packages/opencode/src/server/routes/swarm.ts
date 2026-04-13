@@ -10,6 +10,9 @@ import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 import { SwarmAdmin } from "../../session/swarm-admin"
 import { SwarmState } from "../../session/swarm-state"
+import { Delivery } from "../../delivery/schema"
+import { DeliveryStore } from "../../delivery/store"
+import { NotFoundError } from "../../storage/db"
 
 const flag = z
   .string()
@@ -20,6 +23,75 @@ const alignmentWrite = z.object({
   swarm: z.lazy(() => Swarm.Info),
   alignment: z.lazy(() => SwarmAdmin.Alignment),
 })
+
+const deliveryConfirm = z.object({
+  decision_id: z.string(),
+  answer: z.enum(["confirm", "reject"]),
+  decided_by: z.string(),
+  decided_at: z.number().optional(),
+})
+
+const deliveryAnswer = z.object({
+  option: z.string().trim().min(1),
+})
+
+function needDecision(run_id: string, decision_id: string) {
+  const row = DeliveryStore.read(run_id).decisions.find(
+    (item) => item.id === decision_id && item.kind === "role_change" && item.requires_user_confirmation,
+  )
+  if (row) return row
+  throw new NotFoundError({
+    message: `Delivery confirmation ${decision_id} not found for run ${run_id}`,
+  })
+}
+
+function needQuestion(run_id: string, question_id: string) {
+  const row = DeliveryStore.read(run_id).questions.find((item) => item.id === question_id)
+  if (row) return row
+  throw new NotFoundError({
+    message: `Delivery question ${question_id} not found for run ${run_id}`,
+  })
+}
+
+function answer(run_id: string, question_id: string, option: string) {
+  let row = needQuestion(run_id, question_id)
+  if (row.status === "resolved" || row.status === "cancelled") return DeliveryStore.read(run_id)
+  if (row.status === "open" || row.status === "deferred") {
+    row = DeliveryStore.updateQuestion(question_id, {
+      status: "waiting_user",
+      recommended_option: option,
+    })
+  }
+  if (row.status === "waiting_user") {
+    row = DeliveryStore.updateQuestion(question_id, {
+      status: "answered",
+      recommended_option: option,
+    })
+  }
+  if (row.status === "answered") {
+    DeliveryStore.updateQuestion(question_id, {
+      status: "resolved",
+      recommended_option: option,
+    })
+  }
+  return DeliveryStore.read(run_id)
+}
+
+function defer(run_id: string, question_id: string) {
+  const row = needQuestion(run_id, question_id)
+  if (row.status === "deferred" || row.status === "resolved" || row.status === "cancelled") {
+    return DeliveryStore.read(run_id)
+  }
+  DeliveryStore.updateQuestion(question_id, { status: "deferred" })
+  return DeliveryStore.read(run_id)
+}
+
+function cancel(run_id: string, question_id: string) {
+  const row = needQuestion(run_id, question_id)
+  if (row.status === "cancelled" || row.status === "resolved") return DeliveryStore.read(run_id)
+  DeliveryStore.updateQuestion(question_id, { status: "cancelled" })
+  return DeliveryStore.read(run_id)
+}
 
 const APP_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -653,6 +725,111 @@ export const SwarmRoutes = lazy(() =>
           type: query.type,
         })
         return c.json(info)
+      },
+    )
+    .get(
+      "/:id/delivery",
+      describeRoute({
+        summary: "Get Swarm delivery detail",
+        description: "Get the authoritative SQLite delivery read model for a swarm run.",
+        operationId: "swarm.delivery.detail",
+        responses: {
+          200: {
+            description: "Swarm delivery detail",
+            content: { "application/json": { schema: resolver(Delivery.Detail) } },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("param", z.object({ id: z.string() })),
+      async (c) => {
+        return c.json(DeliveryStore.read(c.req.valid("param").id))
+      },
+    )
+    .post(
+      "/:id/delivery/confirm-assignment",
+      describeRoute({
+        summary: "Confirm delivery assignment change",
+        description: "Resolve a major delivery role-change confirmation through the shared delivery workflows.",
+        operationId: "swarm.delivery.confirmAssignment",
+        responses: {
+          200: {
+            description: "Updated swarm delivery detail",
+            content: { "application/json": { schema: resolver(Delivery.Detail) } },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ id: z.string() })),
+      validator("json", deliveryConfirm),
+      async (c) => {
+        const id = c.req.valid("param").id
+        const body = c.req.valid("json")
+        needDecision(id, body.decision_id)
+        DeliveryStore.resolveAssignment(body)
+        return c.json(DeliveryStore.read(id))
+      },
+    )
+    .post(
+      "/:id/delivery/questions/:question_id/answer",
+      describeRoute({
+        summary: "Answer delivery question",
+        description: "Answer an open delivery question through the shared delivery workflows.",
+        operationId: "swarm.delivery.answerQuestion",
+        responses: {
+          200: {
+            description: "Updated swarm delivery detail",
+            content: { "application/json": { schema: resolver(Delivery.Detail) } },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ id: z.string(), question_id: z.string() })),
+      validator("json", deliveryAnswer),
+      async (c) => {
+        const param = c.req.valid("param")
+        const body = c.req.valid("json")
+        return c.json(answer(param.id, param.question_id, body.option))
+      },
+    )
+    .post(
+      "/:id/delivery/questions/:question_id/defer",
+      describeRoute({
+        summary: "Defer delivery question",
+        description: "Defer an open delivery question through the shared delivery workflows.",
+        operationId: "swarm.delivery.deferQuestion",
+        responses: {
+          200: {
+            description: "Updated swarm delivery detail",
+            content: { "application/json": { schema: resolver(Delivery.Detail) } },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ id: z.string(), question_id: z.string() })),
+      async (c) => {
+        const param = c.req.valid("param")
+        return c.json(defer(param.id, param.question_id))
+      },
+    )
+    .post(
+      "/:id/delivery/questions/:question_id/cancel",
+      describeRoute({
+        summary: "Cancel delivery question",
+        description: "Cancel an open delivery question through the shared delivery workflows.",
+        operationId: "swarm.delivery.cancelQuestion",
+        responses: {
+          200: {
+            description: "Updated swarm delivery detail",
+            content: { "application/json": { schema: resolver(Delivery.Detail) } },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ id: z.string(), question_id: z.string() })),
+      async (c) => {
+        const param = c.req.valid("param")
+        return c.json(cancel(param.id, param.question_id))
       },
     )
     .get(

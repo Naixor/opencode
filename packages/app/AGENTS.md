@@ -14,6 +14,9 @@
 
 - Always prefer `createStore` over multiple `createSignal` calls
 - Swarm dashboard alignment UI should read the `alignment` payload from `/swarm/:id/admin`; keep gate, contract, and approval copy derived from that read model instead of reconstructing worker prompt details client-side.
+- Swarm delivery UI lives on `/:dir/swarm/:id/run` and should read the authoritative `/swarm/:id/delivery` contract; keep the admin console on `/:dir/swarm/:id` so run monitoring and admin controls stay separate.
+- Swarm run action panels should mutate through the delivery write routes and then refresh the same `/:dir/swarm/:id/run` detail resource instead of patching local decision or question state by hand.
+- Swarm run ship-status and audit panels should derive their copy from `/swarm/:id/delivery` `state`, `commit`, and `audit` fields; do not rebuild delivery history from EventSource payloads in the UI.
 
 ## Tool Calling
 

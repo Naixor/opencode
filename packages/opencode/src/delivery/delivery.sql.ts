@@ -16,6 +16,11 @@ export const SwarmRunTable = sqliteTable(
       .notNull()
       .$type<Delivery.Gate>()
       .$default(() => Delivery.gate("plan")),
+    audit: text({ mode: "json" })
+      .notNull()
+      .$type<Delivery.AuditEvent[]>()
+      .$default(() => []),
+    retrospective: text({ mode: "json" }).$type<Delivery.Retrospective | null>(),
     created_at: integer()
       .notNull()
       .$default(() => Date.now()),
@@ -70,6 +75,7 @@ export const WorkItemTable = sqliteTable(
       .notNull()
       .$type<Delivery.Checkpoint>()
       .$default(() => Delivery.Checkpoint.parse({})),
+    commit: text({ mode: "json" }).$type<Delivery.Commit | null>(),
     failure: text({ mode: "json" }).$type<Delivery.Failure | null>(),
   },
   (table) => [

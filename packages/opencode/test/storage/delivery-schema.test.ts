@@ -31,6 +31,139 @@ describe("delivery schema", () => {
         phase: "plan",
         phases: [...Delivery.Phases],
         gate: Delivery.gate("plan"),
+        audit: [
+          {
+            kind: "phase",
+            phase: "plan",
+            status: "active",
+            gate: Delivery.gate("plan"),
+            created_at: 20,
+          },
+          {
+            kind: "assignment",
+            run_id: "SR-1",
+            item_ids: ["WI-1"],
+            role_ids: ["builder"],
+            summary: "Updated assignment plan for SR-1",
+            created_at: 21,
+          },
+          {
+            kind: "decision",
+            decision_id: "DE-1",
+            status: "proposed",
+            summary: "Approve role reassignment",
+            outcome: "approve",
+            applies_to: ["SR-1", "WI-1"],
+            created_at: 22,
+          },
+          {
+            kind: "question",
+            question_id: "OQ-1",
+            status: "waiting_user",
+            blocking: true,
+            summary: "Need role approval",
+            affects: ["WI-1", "SR-1"],
+            created_at: 23,
+          },
+          {
+            kind: "verification",
+            item_id: "WI-1",
+            phase: "implement",
+            verification: {
+              status: "passed",
+              required: true,
+              commands: ["bun run typecheck", "bun run build"],
+              result: "build passed",
+              updated_at: 24,
+            },
+            created_at: 24,
+          },
+          {
+            kind: "commit",
+            item_id: "WI-1",
+            commit: {
+              status: "committed",
+              staged_scope: ["packages/opencode/src/delivery/store.ts"],
+              proof: {
+                status: "passed",
+                required: true,
+                commands: ["bun run typecheck", "bun run build"],
+                result: "build passed",
+                updated_at: 21,
+              },
+              hash: "abc1234",
+              message: "feat: ship delivery schema",
+              recorded_at: 25,
+            },
+            created_at: 25,
+          },
+          {
+            kind: "retrospective",
+            outcome: "completed",
+            summary: "Delivery finished cleanly and produced one reusable workflow memory.",
+            memory_ids: ["memory_1"],
+            created_at: 26,
+          },
+        ],
+        retrospective: {
+          summary: "Delivery finished cleanly and produced one reusable workflow memory.",
+          outcome: "completed",
+          work_items: [
+            {
+              id: "WI-1",
+              title: "Ship the delivery schema",
+              phase: "implement",
+              status: "ready",
+              owner_role_id: "builder",
+            },
+          ],
+          decisions: [
+            {
+              id: "DE-1",
+              kind: "role_change",
+              status: "proposed",
+              summary: "Approve role reassignment",
+              question_id: "OQ-1",
+              requires_user_confirmation: true,
+            },
+          ],
+          verification: [
+            {
+              item_id: "WI-1",
+              phase: "implement",
+              status: "passed",
+              result: "typecheck passed",
+              required: true,
+              updated_at: 42,
+            },
+          ],
+          failures: [],
+          escalations: [
+            {
+              summary: "No escalation was required.",
+              related_ids: [],
+            },
+          ],
+          collaboration_issues: [
+            {
+              summary: "Confirmation remained pending until the final review.",
+              related_ids: ["DE-1", "OQ-1"],
+            },
+          ],
+          memories: [
+            {
+              content: "Delivery retrospective should record durable workflow lessons after final verification.",
+              categories: ["workflow"],
+              tags: ["delivery", "retrospective"],
+              citations: ["swarm_run:SR-1"],
+              impact: "low",
+              status: "written",
+              memory_id: "memory_1",
+              reason: null,
+            },
+          ],
+          created_at: 26,
+        },
         owner_session_id: "SE-1",
       })
       .run()
@@ -74,6 +207,20 @@ describe("delivery schema", () => {
           destructive_cleanup_allowed: false,
           cleanup_decision_id: null,
           updated_at: 42,
+        },
+        commit: {
+          status: "committed",
+          staged_scope: ["packages/opencode/src/delivery/store.ts"],
+          proof: {
+            status: "passed",
+            required: true,
+            commands: ["bun run typecheck", "bun run build"],
+            result: "build passed",
+            updated_at: 21,
+          },
+          hash: "abc1234",
+          message: "feat: ship delivery schema",
+          recorded_at: 22,
         },
         failure: {
           phase: "commit",
@@ -151,6 +298,139 @@ describe("delivery schema", () => {
       phase: "plan",
       phases: [...Delivery.Phases],
       gate: Delivery.gate("plan"),
+      audit: [
+        {
+          kind: "phase",
+          phase: "plan",
+          status: "active",
+          gate: Delivery.gate("plan"),
+          created_at: 20,
+        },
+        {
+          kind: "assignment",
+          run_id: "SR-1",
+          item_ids: ["WI-1"],
+          role_ids: ["builder"],
+          summary: "Updated assignment plan for SR-1",
+          created_at: 21,
+        },
+        {
+          kind: "decision",
+          decision_id: "DE-1",
+          status: "proposed",
+          summary: "Approve role reassignment",
+          outcome: "approve",
+          applies_to: ["SR-1", "WI-1"],
+          created_at: 22,
+        },
+        {
+          kind: "question",
+          question_id: "OQ-1",
+          status: "waiting_user",
+          blocking: true,
+          summary: "Need role approval",
+          affects: ["WI-1", "SR-1"],
+          created_at: 23,
+        },
+        {
+          kind: "verification",
+          item_id: "WI-1",
+          phase: "implement",
+          verification: {
+            status: "passed",
+            required: true,
+            commands: ["bun run typecheck", "bun run build"],
+            result: "build passed",
+            updated_at: 24,
+          },
+          created_at: 24,
+        },
+        {
+          kind: "commit",
+          item_id: "WI-1",
+          commit: {
+            status: "committed",
+            staged_scope: ["packages/opencode/src/delivery/store.ts"],
+            proof: {
+              status: "passed",
+              required: true,
+              commands: ["bun run typecheck", "bun run build"],
+              result: "build passed",
+              updated_at: 21,
+            },
+            hash: "abc1234",
+            message: "feat: ship delivery schema",
+            recorded_at: 25,
+          },
+          created_at: 25,
+        },
+        {
+          kind: "retrospective",
+          outcome: "completed",
+          summary: "Delivery finished cleanly and produced one reusable workflow memory.",
+          memory_ids: ["memory_1"],
+          created_at: 26,
+        },
+      ],
+      retrospective: {
+        summary: "Delivery finished cleanly and produced one reusable workflow memory.",
+        outcome: "completed",
+        work_items: [
+          {
+            id: "WI-1",
+            title: "Ship the delivery schema",
+            phase: "implement",
+            status: "ready",
+            owner_role_id: "builder",
+          },
+        ],
+        decisions: [
+          {
+            id: "DE-1",
+            kind: "role_change",
+            status: "proposed",
+            summary: "Approve role reassignment",
+            question_id: "OQ-1",
+            requires_user_confirmation: true,
+          },
+        ],
+        verification: [
+          {
+            item_id: "WI-1",
+            phase: "implement",
+            status: "passed",
+            result: "typecheck passed",
+            required: true,
+            updated_at: 42,
+          },
+        ],
+        failures: [],
+        escalations: [
+          {
+            summary: "No escalation was required.",
+            related_ids: [],
+          },
+        ],
+        collaboration_issues: [
+          {
+            summary: "Confirmation remained pending until the final review.",
+            related_ids: ["DE-1", "OQ-1"],
+          },
+        ],
+        memories: [
+          {
+            content: "Delivery retrospective should record durable workflow lessons after final verification.",
+            categories: ["workflow"],
+            tags: ["delivery", "retrospective"],
+            citations: ["swarm_run:SR-1"],
+            impact: "low",
+            status: "written",
+            memory_id: "memory_1",
+            reason: null,
+          },
+        ],
+        created_at: 26,
+      },
       owner_session_id: "SE-1",
     })
     expect(typeof run?.created_at).toBe("number")
@@ -190,6 +470,20 @@ describe("delivery schema", () => {
         destructive_cleanup_allowed: false,
         cleanup_decision_id: null,
         updated_at: 42,
+      },
+      commit: {
+        status: "committed",
+        staged_scope: ["packages/opencode/src/delivery/store.ts"],
+        proof: {
+          status: "passed",
+          required: true,
+          commands: ["bun run typecheck", "bun run build"],
+          result: "build passed",
+          updated_at: 21,
+        },
+        hash: "abc1234",
+        message: "feat: ship delivery schema",
+        recorded_at: 22,
       },
       failure: {
         phase: "commit",
@@ -270,6 +564,8 @@ describe("delivery schema", () => {
       "updated_at",
       "owner_session_id",
       "gate",
+      "audit",
+      "retrospective",
     ])
     expect(role.map((item) => item.name)).toEqual([
       "role_id",
@@ -293,6 +589,7 @@ describe("delivery schema", () => {
       "gate",
       "checkpoint",
       "failure",
+      "commit",
     ])
     expect(decision.map((item) => item.name)).toEqual([
       "id",
@@ -401,7 +698,121 @@ describe("delivery schema", () => {
         recorded_at: Date.now(),
       }).success,
     ).toBe(true)
+    expect(
+      Delivery.Commit.safeParse({
+        status: "committed",
+        staged_scope: ["packages/opencode/src/delivery/store.ts"],
+        proof: {
+          status: "passed",
+          required: true,
+          commands: ["bun run typecheck", "bun run build", "bun test"],
+          result: "bun test passed",
+          updated_at: Date.now(),
+        },
+        hash: "abc1234",
+        message: "feat: US-015 - Execute local commit phase with audit writeback",
+        recorded_at: Date.now(),
+      }).success,
+    ).toBe(true)
+    expect(
+      Delivery.AuditEvent.safeParse({
+        kind: "retrospective",
+        outcome: "completed",
+        summary: "Delivery finished cleanly and produced one reusable workflow memory.",
+        memory_ids: ["memory_1"],
+        created_at: Date.now(),
+      }).success,
+    ).toBe(true)
+    expect(
+      Delivery.Retrospective.safeParse({
+        summary: "Delivery finished cleanly and produced one reusable workflow memory.",
+        outcome: "completed",
+        work_items: [
+          {
+            id: "WI-1",
+            title: "Ship the delivery schema",
+            phase: "implement",
+            status: "completed",
+            owner_role_id: "builder",
+          },
+        ],
+        decisions: [
+          {
+            id: "DE-1",
+            kind: "role_change",
+            status: "decided",
+            summary: "Approve role reassignment",
+            question_id: "OQ-1",
+            requires_user_confirmation: true,
+          },
+        ],
+        verification: [
+          {
+            item_id: "WI-1",
+            phase: "implement",
+            status: "passed",
+            result: "build passed",
+            required: true,
+            updated_at: Date.now(),
+          },
+        ],
+        failures: [
+          {
+            item_id: "WI-1",
+            phase: "commit",
+            result: "Pre-commit checks failed",
+          },
+        ],
+        escalations: [
+          {
+            summary: "Escalated one blocking review item.",
+            related_ids: ["DE-1"],
+          },
+        ],
+        collaboration_issues: [
+          {
+            summary: "The handoff needed one extra clarification cycle.",
+            related_ids: ["OQ-1"],
+          },
+        ],
+        memories: [
+          {
+            content: "Record delivery retrospectives before marking a run complete.",
+            categories: ["workflow"],
+            tags: ["delivery", "retrospective"],
+            citations: ["swarm_run:SW-1"],
+            impact: "low",
+            status: "written",
+            memory_id: "memory_1",
+            reason: null,
+          },
+        ],
+        created_at: Date.now(),
+      }).success,
+    ).toBe(true)
+    expect(
+      Delivery.AuditEvent.safeParse({
+        kind: "commit",
+        item_id: "SW-1:commit",
+        commit: {
+          status: "committed",
+          staged_scope: ["packages/opencode/src/delivery/store.ts"],
+          proof: {
+            status: "passed",
+            required: true,
+            commands: ["bun run typecheck", "bun run build", "bun test"],
+            result: "bun test passed",
+            updated_at: Date.now(),
+          },
+          hash: "abc1234",
+          message: "feat: US-015 - Execute local commit phase with audit writeback",
+          recorded_at: Date.now(),
+        },
+        created_at: Date.now(),
+      }).success,
+    ).toBe(true)
     expect(Delivery.canTransitionVerification("pending", "running")).toBe(true)
+    expect(Delivery.canTransitionVerification("running", "pending")).toBe(true)
     expect(Delivery.canTransitionVerification("pending", "passed")).toBe(false)
     expect(
       Delivery.DecisionAction.safeParse({

@@ -2,6 +2,7 @@ import { NamedError } from "@opencode-ai/util/error"
 import z from "zod"
 import { DecisionTable, OpenQuestionTable, RoleSpecTable, SwarmRunTable, WorkItemTable } from "./delivery.sql"
 import { Delivery } from "./schema"
+import { Memory } from "../memory/memory"
 import { Database, NotFoundError, eq } from "../storage/db"
 
 export namespace DeliveryStore {
@@ -141,6 +142,33 @@ export namespace DeliveryStore {
     decided_by: string
     decided_at?: number
   }
+
+  const CommitInput = z
+    .object({
+      run_id: z.string(),
+      item_id: z.string(),
+      staged_scope: z.array(z.string()).min(1),
+      proof: Delivery.Verification,
+      commit_hash: z.string().trim().min(1).optional(),
+      commit_message: z.string().trim().min(1).optional(),
+      recorded_at: z.number().optional(),
+    })
+    .refine((value) => value.commit_hash || value.commit_message, {
+      message: "Commit writeback requires a hash or message",
+      path: ["commit_hash"],
+    })
+  export type CommitInput = z.input<typeof CommitInput>
+
+  const RetrospectiveInput = z.object({
+    run_id: z.string(),
+    summary: z.string().trim().min(1),
+    outcome: Delivery.RetrospectiveOutcome.optional(),
+    escalations: z.array(Delivery.RetrospectiveIssue).default([]),
+    collaboration_issues: z.array(Delivery.RetrospectiveIssue).default([]),
+    memories: z.array(Delivery.RetrospectiveMemoryInput).default([]),
+    recorded_at: z.number().optional(),
+  })
+  export type RetrospectiveInput = z.input<typeof RetrospectiveInput>
 
   export type Decision = typeof DecisionTable.$inferSelect
   export type DecisionCreate = typeof DecisionTable.$inferInsert
@@ -348,6 +376,10 @@ export namespace DeliveryStore {
     return (value ?? "").trim().replace(/\s+/g, " ")
   }
 
+  function same(left: unknown, right: unknown) {
+    return JSON.stringify(left) === JSON.stringify(right)
+  }
+
   function gate(phase: Delivery.RunPhase, value?: Delivery.Gate | Partial<Delivery.Gate>) {
     return Delivery.gate(phase, value)
   }
@@ -356,11 +388,42 @@ export namespace DeliveryStore {
     return ["failed", "repair_required", "cancelled"].includes(value)
   }
 
+  function small(item: Pick<Item, "id" | "small_mr_required">) {
+    if (item.small_mr_required) return
+    throw new Error(`WorkItem ${item.id} must keep small_mr_required=true in P1`)
+  }
+
+  function active(items: Item[]) {
+    return items
+      .filter(
+        (item) =>
+          ["implement", "verify", "commit"].includes(item.phase_gate) &&
+          !["pending", "completed", "cancelled"].includes(item.status),
+      )
+      .map((item) => item.id)
+  }
+
+  function lane(items: Item[]) {
+    const ids = active(items)
+    if (ids.length < 2) return null
+    return `Small-MR execution allows only one active implementation path through commit in P1: ${ids.join(", ")}`
+  }
+
+  function shipped(item: Item) {
+    if (item.phase_gate !== "commit") return true
+    return item.commit?.status === "committed"
+  }
+
+  function terminal(value: Run["status"]) {
+    return ["completed", "failed"].includes(value)
+  }
+
   function done(item: Item) {
     if (item.status !== "completed") return false
     if (!item.verification.required) return true
     if (!item.phase_gate || !["verify", "commit"].includes(item.phase_gate)) return true
-    return item.verification.status === "passed"
+    if (item.verification.status !== "passed") return false
+    return shipped(item)
   }
 
   function broke(item: Item) {
@@ -415,6 +478,329 @@ export namespace DeliveryStore {
 
   function sort(items: Item[]) {
     return items.toSorted((a, b) => Delivery.Phases.indexOf(a.phase_gate) - Delivery.Phases.indexOf(b.phase_gate))
+  }
+
+  function roots(db: Database.TxOrDb, ids: string[]) {
+    return [
+      ...new Set(
+        ids.flatMap((id) => {
+          const row = db.select().from(SwarmRunTable).where(eq(SwarmRunTable.id, id)).get()
+          if (row) return [row.id]
+          const item = db.select().from(WorkItemTable).where(eq(WorkItemTable.id, id)).get()
+          return item ? [item.swarm_run_id] : []
+        }),
+      ),
+    ]
+  }
+
+  function push(db: Database.TxOrDb, ids: string[], input: Delivery.AuditEvent | Delivery.AuditEvent[]) {
+    const list = Array.isArray(input) ? input : [input]
+    roots(db, ids).forEach((id) => {
+      const row = run(db, id)
+      db.update(SwarmRunTable)
+        .set({
+          audit: [...row.audit, ...list],
+        })
+        .where(eq(SwarmRunTable.id, id))
+        .run()
+    })
+  }
+
+  function decisionlog(db: Database.TxOrDb, row: Decision) {
+    push(
+      db,
+      row.applies_to,
+      Delivery.AuditEvent.parse({
+        kind: "decision",
+        decision_id: row.id,
+        status: row.status,
+        summary: row.summary,
+        outcome: row.actions.at(-1)?.outcome ?? null,
+        applies_to: row.applies_to,
+        created_at: row.decided_at ?? row.actions.at(-1)?.created_at ?? Date.now(),
+      }),
+    )
+  }
+
+  function questionlog(db: Database.TxOrDb, row: Question) {
+    push(
+      db,
+      row.affects,
+      Delivery.AuditEvent.parse({
+        kind: "question",
+        question_id: row.id,
+        status: row.status,
+        blocking: row.blocking,
+        summary: row.title,
+        affects: row.affects,
+        created_at: Date.now(),
+      }),
+    )
+  }
+
+  function assignmentlog(
+    db: Database.TxOrDb,
+    input: {
+      run_id: string
+      item_ids?: string[]
+      role_ids?: string[]
+      summary: string
+      created_at?: number
+    },
+  ) {
+    push(
+      db,
+      [input.run_id, ...(input.item_ids ?? [])],
+      Delivery.AuditEvent.parse({
+        kind: "assignment",
+        run_id: input.run_id,
+        item_ids: input.item_ids ?? [],
+        role_ids: input.role_ids ?? [],
+        summary: input.summary,
+        created_at: input.created_at ?? Date.now(),
+      }),
+    )
+  }
+
+  function index(db: Database.TxOrDb, id: string) {
+    const row = run(db, id)
+    const items = sort(db.select().from(WorkItemTable).where(eq(WorkItemTable.swarm_run_id, id)).all())
+    const pass = new Map(
+      row.audit
+        .filter(
+          (item): item is Delivery.VerificationAudit =>
+            item.kind === "verification" && item.verification.status === "passed",
+        )
+        .map((item) => [item.item_id, item.verification]),
+    )
+    const ship = new Map(
+      row.audit
+        .filter((item): item is Delivery.CommitAudit => item.kind === "commit")
+        .map((item) => [item.item_id, item.commit]),
+    )
+    const state = items.map((item) => {
+      const proof = ship.get(item.id)?.proof ?? pass.get(item.id) ?? null
+      const commit = ship.get(item.id) ?? item.commit ?? null
+      const verified = item.verification.status === "passed" || proof?.status === "passed"
+      const committed = item.phase_gate === "commit" && (shipped(item) || Boolean(commit))
+      const completed = done(item) || committed || (item.phase_gate === "verify" && verified)
+      return {
+        item,
+        proof,
+        commit,
+        verified,
+        committed,
+        completed,
+      }
+    })
+    return {
+      run: row,
+      items,
+      audit: row.audit,
+      state,
+      completed: state.filter((item) => item.completed).map((item) => item.item.id),
+      pending: state.filter((item) => !item.completed).map((item) => item.item.id),
+    }
+  }
+
+  function view(db: Database.TxOrDb, id: string) {
+    const live = sync(db, id)
+    const run = live.run
+    const items = live.items
+    const ids = new Set([id, ...items.map((item) => item.id)])
+    const decisions = db
+      .select()
+      .from(DecisionTable)
+      .all()
+      .filter((item) => match(item.applies_to, ids))
+    const questions = db
+      .select()
+      .from(OpenQuestionTable)
+      .all()
+      .filter((item) => match(item.affects, ids))
+    const view = index(db, id)
+    const cur = items.find((item) => item.phase_gate === run.phase) ?? null
+    const ids2 = active(items)
+    const reason = lane(items)
+    return Delivery.Detail.parse({
+      run,
+      items,
+      decisions,
+      questions,
+      gate: run.gate,
+      current_item_id: cur?.id ?? null,
+      blockers: [
+        ...decisions
+          .filter((item) => item.status === "proposed" && item.requires_user_confirmation)
+          .map((item) => ({
+            id: item.id,
+            kind: "decision",
+            status: item.status,
+            summary: `Decision ${item.id} is awaiting confirmation`,
+            affects: item.applies_to,
+          })),
+        ...questions
+          .filter((item) => item.blocking && ["open", "waiting_user", "answered"].includes(item.status))
+          .map((item) => ({
+            id: item.id,
+            kind: "question",
+            status: item.status,
+            summary: `Question ${item.id} is still ${item.status}`,
+            affects: item.affects,
+          })),
+        ...(cur && broke(cur)
+          ? [
+              {
+                id: cur.id,
+                kind: "work_item",
+                status: cur.status,
+                summary: `Phase ${cur.phase_gate} failed${Delivery.rule(cur.phase_gate).fallback ? `; fallback ${Delivery.rule(cur.phase_gate).fallback}` : ""}`,
+                affects: [cur.id],
+              },
+            ]
+          : []),
+        ...(!cur
+          ? [
+              {
+                id: `${id}:${run.phase}`,
+                kind: "work_item",
+                status: null,
+                summary: `Waiting for ${run.phase} work item`,
+                affects: [id],
+              },
+            ]
+          : []),
+        ...(reason
+          ? [
+              {
+                id: `${id}:small_mr`,
+                kind: "small_mr",
+                status: "blocked",
+                summary: reason,
+                affects: ids2,
+              },
+            ]
+          : []),
+      ],
+      small_mr: {
+        required: items.some(
+          (item) => ["implement", "verify", "commit"].includes(item.phase_gate) && item.small_mr_required,
+        ),
+        status: reason ? "blocked" : "ready",
+        reason,
+        active: ids2,
+      },
+      audit: view.audit,
+      state: view.state,
+      completed: view.completed,
+      pending: view.pending,
+    })
+  }
+
+  function insights(input: Delivery.RetrospectiveMemoryInput[]) {
+    return input.map((item) =>
+      Delivery.RetrospectiveMemoryInput.parse({
+        ...item,
+        content: clean(item.content),
+        tags: [...new Set(item.tags.map(clean).filter(Boolean))],
+        citations: [...new Set(item.citations.map(clean).filter(Boolean))],
+      }),
+    )
+  }
+
+  function durable(item: Delivery.RetrospectiveMemoryInput) {
+    if (item.content.length < 24) return "Memory is too short to be reusable"
+    if (item.content.length > 220) return "Memory is too long to stay durable"
+    return null
+  }
+
+  function risky(item: Delivery.RetrospectiveMemoryInput) {
+    if (item.impact === "high") return true
+    return /(architecture|security|permission|auth|secret|billing|sandbox|migration|schema)/i.test(
+      `${item.content} ${item.tags.join(" ")}`,
+    )
+  }
+
+  async function remember(run: Run, input: Delivery.RetrospectiveMemoryInput[]) {
+    const note = [] as Delivery.RetrospectiveMemory[]
+    for (const item of insights(input)) {
+      const reason = durable(item)
+      if (reason) {
+        note.push(
+          Delivery.RetrospectiveMemory.parse({
+            ...item,
+            status: "filtered",
+            reason,
+          }),
+        )
+        continue
+      }
+      const hit = await Memory.findSimilar(item.content)
+      if (hit) {
+        note.push(
+          Delivery.RetrospectiveMemory.parse({
+            ...item,
+            status: "duplicate",
+            memory_id: hit.id,
+            reason: `Reused existing memory ${hit.id}`,
+          }),
+        )
+        continue
+      }
+      const pending = risky(item)
+      const row = await Memory.create({
+        content: item.content,
+        categories: item.categories,
+        scope: "personal",
+        status: pending ? "pending" : "confirmed",
+        tags: item.tags,
+        citations: [...new Set([`swarm_run:${run.id}`, ...item.citations])],
+        source: {
+          sessionID: run.owner_session_id,
+          method: "auto",
+          contextSnapshot: `Delivery retrospective for ${run.id}: ${run.goal}`,
+        },
+      })
+      Memory.markDirty(run.owner_session_id)
+      note.push(
+        Delivery.RetrospectiveMemory.parse({
+          ...item,
+          status: pending ? "pending_confirmation" : "written",
+          memory_id: row.id,
+          reason: pending ? "Human confirmation required for high-impact memory" : null,
+        }),
+      )
+    }
+    return note
+  }
+
+  function repair(db: Database.TxOrDb, id: string) {
+    const view = index(db, id)
+    view.state.forEach((item) => {
+      if (!item.completed || done(item.item)) return
+      if (item.commit) {
+        db.update(WorkItemTable)
+          .set({
+            status: "completed",
+            verification: item.commit.proof,
+            commit: item.commit,
+            failure: null,
+          })
+          .where(eq(WorkItemTable.id, item.item.id))
+          .run()
+        return
+      }
+      if (!item.proof || item.item.phase_gate !== "verify") return
+      db.update(WorkItemTable)
+        .set({
+          status: "completed",
+          verification: item.proof,
+          failure: null,
+        })
+        .where(eq(WorkItemTable.id, item.item.id))
+        .run()
+    })
+    return index(db, id)
   }
 
   function match(value: string[], ids: Set<string>) {
@@ -498,6 +884,7 @@ export namespace DeliveryStore {
       })
       .where(eq(DecisionTable.id, row.id))
       .run()
+    decisionlog(db, decision(db, row.id))
   }
 
   function sync(db: Database.TxOrDb, id: string) {
@@ -515,7 +902,9 @@ export namespace DeliveryStore {
       .from(OpenQuestionTable)
       .all()
       .filter((item) => match(item.affects, ids))
-    const wait = cur ? blocks(row, cur, decisions, questions) : []
+    const wait = [...(cur ? blocks(row, cur, decisions, questions) : []), lane(items)].filter((item): item is string =>
+      Boolean(item),
+    )
     const fail = cur ? broke(cur) : false
     const rule = Delivery.rule(row.phase)
     const now = Date.now()
@@ -601,6 +990,133 @@ export namespace DeliveryStore {
       .filter((item) => set.has(item.id))
     const seen = new Set([...runs.map((item) => item.id), ...items.map((item) => item.swarm_run_id)])
     return [...seen].map((id) => sync(db, id))
+  }
+
+  function frame(db: Database.TxOrDb, id: string) {
+    const row = run(db, id)
+    const items = sort(db.select().from(WorkItemTable).where(eq(WorkItemTable.swarm_run_id, id)).all())
+    const ids = new Set([id, ...items.map((item) => item.id)])
+    return {
+      run: row,
+      items,
+      decisions: db
+        .select()
+        .from(DecisionTable)
+        .all()
+        .filter((item) => item.status === "proposed" && match(item.applies_to, ids)),
+      questions: db
+        .select()
+        .from(OpenQuestionTable)
+        .all()
+        .filter((item) => !["resolved", "cancelled"].includes(item.status) && match(item.affects, ids)),
+    }
+  }
+
+  function issue(item: Item) {
+    if (item.phase_gate === "commit" && item.status === "completed" && !shipped(item)) {
+      return `Work item ${item.id} is marked completed without local commit writeback`
+    }
+    if (item.status === "failed" && !["verify", "commit"].includes(item.phase_gate)) {
+      return `Work item ${item.id} failed during ${item.phase_gate} without resumable checkpoint evidence`
+    }
+    if (
+      item.status === "completed" &&
+      item.verification.required &&
+      ["verify", "commit"].includes(item.phase_gate) &&
+      item.verification.status !== "passed"
+    ) {
+      return `Work item ${item.id} is marked completed without a passing ${item.phase_gate} verification result`
+    }
+    if (item.failure && item.failure.phase !== item.phase_gate) {
+      return `Work item ${item.id} stores ${item.failure.phase} failure evidence on the ${item.phase_gate} gate`
+    }
+    const last = item.checkpoint.last_successful_phase
+    if (last && Delivery.Phases.indexOf(last) >= Delivery.Phases.indexOf(item.phase_gate)) {
+      return `Work item ${item.id} has a stale checkpoint at ${last} for the ${item.phase_gate} gate`
+    }
+    return null
+  }
+
+  function reset(db: Database.TxOrDb, item: Item) {
+    if (!["in_progress", "verifying"].includes(item.status)) return
+    patchItem(
+      db,
+      item.id,
+      {
+        status: "blocked",
+        ...(item.verification.status !== "running"
+          ? {}
+          : {
+              verification: {
+                ...item.verification,
+                status: "pending",
+                result: clean(item.verification.result) || `Interrupted during ${item.phase_gate}; rerun required`,
+                updated_at: Date.now(),
+              },
+            }),
+      },
+      false,
+    )
+  }
+
+  function raise(
+    db: Database.TxOrDb,
+    id: string,
+    items: {
+      item: Item
+      reason: string
+    }[],
+  ) {
+    const did = `DE-${crypto.randomUUID()}`
+    const qid = `OQ-${crypto.randomUUID()}`
+    const ids = [id, ...items.map((item) => item.item.id)]
+    db.insert(DecisionTable)
+      .values({
+        id: did,
+        kind: "recovery_review",
+        summary:
+          items.length === 1
+            ? `Recovery review required for ${items[0]!.item.id}`
+            : `${items.length} recovery conflicts need review`,
+        source: "resume",
+        status: "proposed",
+        requires_user_confirmation: false,
+        applies_to: ids,
+        related_question_id: qid,
+      })
+      .run()
+    db.insert(OpenQuestionTable)
+      .values({
+        id: qid,
+        title:
+          items.length === 1
+            ? `Resolve recovery state for ${items[0]!.item.id}`
+            : `Resolve ${items.length} recovery conflicts for ${id}`,
+        context: JSON.stringify(
+          {
+            issues: items.map((item) => ({
+              item_id: item.item.id,
+              phase_gate: item.item.phase_gate,
+              checkpoint: item.item.checkpoint,
+              failure: item.item.failure,
+              reason: item.reason,
+            })),
+          },
+          null,
+          2,
+        ),
+        options: ["repair_state", "retry_without_checkpoint"],
+        recommended_option: "repair_state",
+        status: "open",
+        deadline_policy: "manual",
+        blocking: true,
+        affects: ids,
+        related_decision_id: did,
+        raised_by: "system",
+      })
+      .run()
+    decisionlog(db, decision(db, did))
+    questionlog(db, question(db, qid))
   }
 
   function draft(id: string, scope: string[]) {
@@ -731,7 +1247,9 @@ export namespace DeliveryStore {
       .where(eq(DecisionTable.id, row.id))
       .run()
     touch(db, row.applies_to)
-    return decision(db, row.id)
+    const next = decision(db, row.id)
+    decisionlog(db, next)
+    return next
   }
 
   function patchRole(db: Database.TxOrDb, id: string, input: RolePatch) {
@@ -768,6 +1286,13 @@ export namespace DeliveryStore {
       ...(trace === undefined ? {} : { failure: trace }),
     } satisfies ItemPatch
     if (Object.keys(next).length === 0) return prev
+    small({
+      id,
+      small_mr_required: next.small_mr_required ?? prev.small_mr_required,
+    })
+    if (prev.phase_gate === "commit" && next.status === "completed" && !shipped(prev)) {
+      throw new Error(`WorkItem ${id} requires local commit writeback before completion`)
+    }
     if (next.status !== undefined && !Delivery.canTransitionWorkStatus(prev.status, next.status)) {
       fail("item", "status", id, prev.status, next.status)
     }
@@ -775,8 +1300,22 @@ export namespace DeliveryStore {
       fail("item", "verification", id, prev.verification.status, proof.status)
     }
     db.update(WorkItemTable).set(next).where(eq(WorkItemTable.id, id)).run()
+    const row = item(db, id)
+    if (proof !== undefined && !same(prev.verification, row.verification)) {
+      push(
+        db,
+        [prev.swarm_run_id, id],
+        Delivery.AuditEvent.parse({
+          kind: "verification",
+          item_id: id,
+          phase: row.phase_gate,
+          verification: row.verification,
+          created_at: row.verification.updated_at ?? Date.now(),
+        }),
+      )
+    }
     if (sync_run) sync(db, prev.swarm_run_id)
-    return item(db, id)
+    return row
   }
 
   function review(db: Database.TxOrDb, input: AssignmentInput) {
@@ -944,6 +1483,14 @@ export namespace DeliveryStore {
     return Database.transaction((db) => sync(db, id))
   }
 
+  export function read(id: string) {
+    return Database.transaction((db) => view(db, id))
+  }
+
+  export function lookup(id: string) {
+    return Database.use((db) => index(db, id))
+  }
+
   export function createRun(input: RunCreate) {
     return Database.use((db) => {
       const phase = input.phase === undefined ? "plan" : Delivery.RunPhase.parse(input.phase)
@@ -956,6 +1503,18 @@ export namespace DeliveryStore {
           gate: gate(phase, input.gate),
         })
         .run()
+      const row = run(db, input.id)
+      push(
+        db,
+        [row.id],
+        Delivery.AuditEvent.parse({
+          kind: "phase",
+          phase: row.phase,
+          status: row.status,
+          gate: row.gate,
+          created_at: Date.now(),
+        }),
+      )
       return run(db, input.id)
     })
   }
@@ -972,6 +1531,9 @@ export namespace DeliveryStore {
         ...(input.owner_session_id === undefined ? {} : { owner_session_id: input.owner_session_id }),
       } satisfies RunPatch
       if (Object.keys(next).length === 0) return prev
+      if (next.status !== undefined && terminal(next.status) && !prev.retrospective) {
+        throw new Error(`Run ${id} requires retrospective output before status can become ${next.status}`)
+      }
       if (next.status !== undefined && !Delivery.canTransitionRunStatus(prev.status, next.status))
         fail("run", "status", id, prev.status, next.status)
       if (next.phase !== undefined && !Delivery.canTransitionRunPhase(prev.phase, next.phase))
@@ -991,6 +1553,20 @@ export namespace DeliveryStore {
       }
       db.update(SwarmRunTable).set(next).where(eq(SwarmRunTable.id, id)).run()
       sync(db, id)
+      const row = run(db, id)
+      if (next.phase !== undefined && next.phase !== prev.phase) {
+        push(
+          db,
+          [id],
+          Delivery.AuditEvent.parse({
+            kind: "phase",
+            phase: row.phase,
+            status: row.status,
+            gate: row.gate,
+            created_at: Date.now(),
+          }),
+        )
+      }
       return run(db, id)
     })
   }
@@ -1047,6 +1623,10 @@ export namespace DeliveryStore {
   export function createItem(input: ItemCreate) {
     return Database.use((db) => {
       const phase = input.phase_gate === undefined ? "plan" : Delivery.WorkPhaseGate.parse(input.phase_gate)
+      small({
+        id: input.id,
+        small_mr_required: input.small_mr_required ?? true,
+      })
       const base = {
         checkpoint: Delivery.Checkpoint.parse(input.checkpoint ?? {}),
         failure: input.failure === undefined || input.failure === null ? null : Delivery.Failure.parse(input.failure),
@@ -1073,6 +1653,7 @@ export namespace DeliveryStore {
               small_mr_required: input.small_mr_required ?? true,
               gate: gate(phase, input.gate),
               checkpoint: Delivery.Checkpoint.parse({}),
+              commit: null,
               failure: null,
             },
             base.checkpoint,
@@ -1088,6 +1669,205 @@ export namespace DeliveryStore {
   export function updateItem(id: string, input: ItemPatch) {
     return Database.transaction((db) => {
       return patchItem(db, id, input)
+    })
+  }
+
+  export function recordCommit(input: CommitInput) {
+    return Database.transaction((db) => {
+      const data = CommitInput.parse(input)
+      const view = sync(db, data.run_id)
+      if (view.run.phase !== "commit") {
+        throw new Error(`Run ${data.run_id} is not in the commit phase`)
+      }
+      if (view.run.gate.status === "blocked") {
+        throw new Error(`Run ${data.run_id} is blocked: ${view.run.gate.reason ?? "commit gate is blocked"}`)
+      }
+      const mark = view.items.find((item) => item.id === data.item_id)
+      if (!mark) throw new Error(`WorkItem ${data.item_id} does not belong to run ${data.run_id}`)
+      if (mark.phase_gate !== "commit") {
+        throw new Error(`WorkItem ${mark.id} is not the commit work item for run ${data.run_id}`)
+      }
+      if (!mark.small_mr_required) {
+        throw new Error(`WorkItem ${mark.id} must keep small_mr_required=true in P1`)
+      }
+      if (mark.commit) {
+        throw new Error(`WorkItem ${mark.id} already has local commit writeback`)
+      }
+      const step = view.items.find((item) => item.phase_gate === "verify")
+      if (!step || !done(step)) {
+        throw new Error(`Run ${data.run_id} requires passing verification before local commit writeback`)
+      }
+      if (data.proof.status !== "passed") {
+        throw new Error(`WorkItem ${mark.id} requires passed verification proof before local commit writeback`)
+      }
+      const when = data.recorded_at ?? Date.now()
+      const commit = Delivery.Commit.parse({
+        staged_scope: data.staged_scope,
+        proof: data.proof,
+        hash: data.commit_hash ?? null,
+        message: data.commit_message ?? null,
+        recorded_at: when,
+      })
+      db.update(WorkItemTable)
+        .set({
+          verification: data.proof,
+          status: "completed",
+          commit,
+          failure: null,
+        })
+        .where(eq(WorkItemTable.id, mark.id))
+        .run()
+      db.update(SwarmRunTable)
+        .set({
+          audit: [
+            ...view.run.audit,
+            Delivery.CommitAudit.parse({
+              kind: "commit",
+              item_id: mark.id,
+              commit,
+              created_at: when,
+            }),
+          ],
+        })
+        .where(eq(SwarmRunTable.id, data.run_id))
+        .run()
+      const next = sync(db, data.run_id)
+      const run = next.run
+      return {
+        run,
+        item: item(db, mark.id),
+        audit: run.audit.at(-1) ?? null,
+      }
+    })
+  }
+
+  export async function recordRetrospective(input: RetrospectiveInput) {
+    const data = RetrospectiveInput.parse(input)
+    const seed = Database.use((db) => {
+      const view = sync(db, data.run_id)
+      const outcome = data.outcome ?? (view.items.some((item) => broke(item)) ? "failed" : "completed")
+      if (!view.items.some((item) => item.phase_gate === "retrospective")) {
+        throw new Error(`Run ${data.run_id} has no retrospective work item`)
+      }
+      if (outcome === "completed" && view.items.some((item) => item.phase_gate !== "retrospective" && !done(item))) {
+        throw new Error(`Run ${data.run_id} cannot complete before earlier delivery phases finish`)
+      }
+      return {
+        run: view.run,
+        outcome,
+        when: data.recorded_at ?? Date.now(),
+      }
+    })
+    const memories = await remember(seed.run, data.memories)
+    return Database.transaction((db) => {
+      let row = sync(db, data.run_id).run
+      if (row.phase !== "retrospective") {
+        db.update(SwarmRunTable)
+          .set({
+            phase: "retrospective",
+            gate: gate("retrospective"),
+          })
+          .where(eq(SwarmRunTable.id, row.id))
+          .run()
+        row = sync(db, row.id).run
+        push(
+          db,
+          [row.id],
+          Delivery.AuditEvent.parse({
+            kind: "phase",
+            phase: row.phase,
+            status: row.status,
+            gate: row.gate,
+            created_at: seed.when,
+          }),
+        )
+      }
+      let mark = item(db, `${row.id}:retrospective`)
+      if (mark.status === "pending") mark = patchItem(db, mark.id, { status: "ready" }, false)
+      if (mark.status === "blocked") mark = patchItem(db, mark.id, { status: "ready" }, false)
+      if (mark.status === "ready") mark = patchItem(db, mark.id, { status: "in_progress" }, false)
+      if (mark.status === "in_progress") mark = patchItem(db, mark.id, { status: "verifying" }, false)
+      if (mark.status === "verifying") mark = patchItem(db, mark.id, { status: "completed" }, false)
+      if (mark.status !== "completed") {
+        throw new Error(`Run ${row.id} could not complete retrospective work item ${mark.id}`)
+      }
+      const items = sort(db.select().from(WorkItemTable).where(eq(WorkItemTable.swarm_run_id, row.id)).all())
+      const ids = new Set([row.id, ...items.map((item) => item.id)])
+      const decisions = db
+        .select()
+        .from(DecisionTable)
+        .all()
+        .filter((item) => match(item.applies_to, ids))
+      const retrospective = Delivery.Retrospective.parse({
+        summary: data.summary,
+        outcome: seed.outcome,
+        work_items: items.map((item) => ({
+          id: item.id,
+          title: item.title,
+          phase: item.phase_gate,
+          status: item.status,
+          owner_role_id: item.owner_role_id,
+        })),
+        decisions: decisions.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          status: item.status,
+          summary: item.summary,
+          question_id: item.related_question_id,
+          requires_user_confirmation: item.requires_user_confirmation,
+        })),
+        verification: items
+          .filter((item) => item.verification.updated_at !== null || item.verification.status !== "pending")
+          .map((item) => ({
+            item_id: item.id,
+            phase: item.phase_gate,
+            status: item.verification.status,
+            result: item.verification.result,
+            required: item.verification.required,
+            updated_at: item.verification.updated_at,
+          })),
+        failures: items.flatMap((item) =>
+          item.failure
+            ? [
+                {
+                  item_id: item.id,
+                  phase: item.failure.phase,
+                  result: item.failure.result,
+                },
+              ]
+            : [],
+        ),
+        escalations: data.escalations,
+        collaboration_issues: data.collaboration_issues,
+        memories,
+        created_at: seed.when,
+      })
+      db.update(SwarmRunTable)
+        .set({
+          retrospective,
+          status: seed.outcome,
+        })
+        .where(eq(SwarmRunTable.id, row.id))
+        .run()
+      push(
+        db,
+        [row.id],
+        Delivery.AuditEvent.parse({
+          kind: "retrospective",
+          outcome: seed.outcome,
+          summary: retrospective.summary,
+          memory_ids: retrospective.memories.flatMap((item) => (item.memory_id ? [item.memory_id] : [])),
+          created_at: seed.when,
+        }),
+      )
+      const next = sync(db, row.id)
+      return {
+        run: next.run,
+        item: item(db, mark.id),
+        retrospective,
+        audit: next.run.audit.at(-1) ?? null,
+        memories: retrospective.memories,
+      }
     })
   }
 
@@ -1130,6 +1910,12 @@ export namespace DeliveryStore {
         patchItem(db, id, rest, false)
       })
       if ((input.items?.length ?? 0) > 0) sync(db, input.run_id)
+      assignmentlog(db, {
+        run_id: input.run_id,
+        item_ids: input.items?.map((item) => item.id),
+        role_ids: input.roles?.map((item) => item.role_id),
+        summary: `Updated assignment plan for ${input.run_id}`,
+      })
       return {
         run: run(db, input.run_id),
         review: state,
@@ -1182,6 +1968,17 @@ export namespace DeliveryStore {
         })
         .run()
       touch(db, ids)
+      decisionlog(db, decision(db, input.decision_id))
+      questionlog(db, question(db, input.question_id))
+      assignmentlog(db, {
+        run_id: input.run_id,
+        item_ids: input.items?.map((item) => item.id),
+        role_ids: input.roles?.map((item) => item.role_id),
+        summary:
+          state.changes.length === 1
+            ? `${state.changes[0]!.message}; waiting for confirmation`
+            : `${state.changes.length} assignment changes are waiting for confirmation`,
+      })
       return {
         review: state,
         decision: decision(db, input.decision_id),
@@ -1244,6 +2041,16 @@ export namespace DeliveryStore {
         .where(eq(DecisionTable.id, row.id))
         .run()
       touch(db, [...row.applies_to, ...ask.affects])
+      decisionlog(db, decision(db, row.id))
+      questionlog(db, question(db, ask.id))
+      assignmentlog(db, {
+        run_id: roots(db, row.applies_to)[0] ?? row.id,
+        summary:
+          input.answer === "confirm"
+            ? `Applied confirmed assignment change for ${row.id}`
+            : `Rejected assignment change for ${row.id}`,
+        created_at: when,
+      })
       return {
         decision: decision(db, row.id),
         question: question(db, ask.id),
@@ -1282,7 +2089,9 @@ export namespace DeliveryStore {
         })
         .run()
       touch(db, input.applies_to)
-      return decision(db, input.id)
+      const row = decision(db, input.id)
+      decisionlog(db, row)
+      return row
     })
   }
 
@@ -1313,7 +2122,9 @@ export namespace DeliveryStore {
         fail("decision", "status", id, prev.status, next.status)
       db.update(DecisionTable).set(next).where(eq(DecisionTable.id, id)).run()
       touch(db, [...prev.applies_to, ...(next.applies_to ?? [])])
-      return decision(db, id)
+      const row = decision(db, id)
+      decisionlog(db, row)
+      return row
     })
   }
 
@@ -1365,7 +2176,9 @@ export namespace DeliveryStore {
         })
         .where(eq(DecisionTable.id, row.id))
         .run()
-      return decision(db, row.id)
+      const next = decision(db, row.id)
+      decisionlog(db, next)
+      return next
     })
   }
 
@@ -1394,7 +2207,9 @@ export namespace DeliveryStore {
         })
         .run()
       touch(db, input.affects)
-      return question(db, input.id)
+      const row = question(db, input.id)
+      questionlog(db, row)
+      return row
     })
   }
 
@@ -1414,7 +2229,61 @@ export namespace DeliveryStore {
         .run()
       const scope = input.scope && input.scope.length > 0 ? input.scope : [input.goal]
       db.insert(WorkItemTable).values(draft(input.id, scope)).run()
+      const view = sync(db, input.id)
+      push(
+        db,
+        [input.id],
+        Delivery.AuditEvent.parse({
+          kind: "phase",
+          phase: view.run.phase,
+          status: view.run.status,
+          gate: view.run.gate,
+          created_at: Date.now(),
+        }),
+      )
       return sync(db, input.id)
+    })
+  }
+
+  export function resume(id: string) {
+    return Database.transaction((db) => {
+      repair(db, id)
+      const open = frame(db, id)
+      if (open.decisions.length === 0 && open.questions.length === 0) {
+        open.items.forEach((item) => reset(db, item))
+      }
+      const next = frame(db, id)
+      const expired =
+        next.decisions.length > 0 || next.questions.length > 0
+          ? []
+          : next.items.flatMap((item) => {
+              const reason = issue(item)
+              return reason ? [{ item, reason }] : []
+            })
+      expired.forEach((item) => {
+        patchItem(
+          db,
+          item.item.id,
+          {
+            checkpoint: Delivery.Checkpoint.parse({}),
+          },
+          false,
+        )
+      })
+      if (expired.length > 0) raise(db, id, expired)
+      const view = sync(db, id)
+      const list = index(db, id)
+      const state = frame(db, id)
+      return {
+        run: view.run,
+        items: view.items,
+        audit: list.audit,
+        decisions: state.decisions,
+        questions: state.questions,
+        completed: list.completed,
+        pending: list.pending,
+        expired: expired.map((item) => item.item.id),
+      }
     })
   }
 
@@ -1445,6 +2314,7 @@ export namespace DeliveryStore {
       const row = question(db, id)
       if (["resolved", "deferred", "cancelled"].includes(row.status)) follow(db, row)
       touch(db, [...prev.affects, ...(next.affects ?? [])])
+      questionlog(db, question(db, id))
       return question(db, id)
     })
   }
