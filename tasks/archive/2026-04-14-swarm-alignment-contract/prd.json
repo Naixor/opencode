@@ -1,0 +1,267 @@
+{
+  "project": "OpenCode",
+  "branchName": "ralph/swarm-alignment-contract",
+  "sourcePrdFile": "tasks/prds/prd-swarm-alignment-contract.md",
+  "description": "Swarm Alignment Contract and Approval Gates - add persisted role alignment state, deterministic gate decisions, and user-facing approval checkpoints so Swarm can auto-run routine work without drifting on risky runs.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Define alignment state in the canonical swarm snapshot",
+      "description": "As a platform engineer, I want alignment data stored in the canonical swarm snapshot so that contract and gate state have one source of truth.",
+      "acceptanceCriteria": [
+        "Add alignment fields to canonical swarm state for the project-scoped role catalog, user-scoped confirmations, run contract, gate, role delta status, pending confirmation, and audit metadata",
+        "Initialize empty alignment state for newly created swarms",
+        "Do not add compatibility loaders for pre-alignment swarm records",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Persist role catalog and user confirmation records",
+      "description": "As a swarm operator, I want project-level role definitions and user-level confirmations stored separately so that teams share role baselines without sharing approvals.",
+      "acceptanceCriteria": [
+        "Persist project-scoped role catalog entries with `id`, `name`, `purpose`, `perspective`, `default_when`, and `version`",
+        "Persist user-scoped confirmation records separately from the role catalog",
+        "Record audit metadata when role catalog entries are created or updated",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Classify meaningful role deltas",
+      "description": "As a conductor, I want requested roles compared against the confirmed catalog so that only material role changes trigger user review.",
+      "acceptanceCriteria": [
+        "Compare requested run roles against catalog roles and classify each as `unchanged`, `added`, `removed`, or `modified`",
+        "Treat only `purpose`, `perspective`, and `default_when` as material changes",
+        "Ignore timestamps, formatting-only edits, and other metadata-only noise during delta detection",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Generate run contracts before delegation",
+      "description": "As a conductor, I want each swarm run to create a compact run contract before delegation so that alignment happens at the direction level.",
+      "acceptanceCriteria": [
+        "Define a persisted `RunContract` with `goal`, `scope`, `constraints`, `roles`, `mode`, `assumptions`, `risks`, `discussion_reason`, and `created_at`",
+        "Generate and store the run contract before any worker delegation starts",
+        "Store role references as catalog entries plus per-run overlay deltas when present",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Evaluate deterministic alignment gates",
+      "description": "As a user, I want gate decisions to come from explicit deterministic inputs so that Swarm interruptions are predictable and explainable.",
+      "acceptanceCriteria": [
+        "Define gate values `G0`, `G1`, `G2`, and `G3`",
+        "Implement deterministic gate precedence in this order: action sensitivity, material role delta, ambiguity or valid options or trade-off strength, confidence, routine versus novel scope",
+        "Allow LLM output to inform only the `confidence` input, not the final gate mapping logic",
+        "Persist the gate, the evaluated inputs, and a human-readable decision reason for each run",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Enforce discussion admission thresholds",
+      "description": "As a conductor, I want discussion mode admitted only for real direction-setting choices so that routine execution does not turn into unnecessary debate.",
+      "acceptanceCriteria": [
+        "Evaluate the three primary discussion signals: multiple valid options, meaningful trade-offs, and direction-changing consequences",
+        "Allow discussion mode only when at least two primary discussion signals are true",
+        "Treat likely benefit from role-based debate as advisory context rather than a hard requirement",
+        "Fall back to normal execution planning when the admission threshold is not met",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Run conductor preflight from alignment state",
+      "description": "As a system owner, I want the conductor to create the contract and gate before delegation so that worker planning follows approved alignment rules.",
+      "acceptanceCriteria": [
+        "Update conductor flow to generate the run contract, compute role deltas, and evaluate the gate before worker delegation begins",
+        "Proceed automatically for `G0` and `G1`, and require user confirmation for `G2` and `G3`",
+        "Update conductor prompt or hook strategy so it does not ask the user to approve every task breakdown or worker prompt",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Create user-facing alignment summaries",
+      "description": "As a user, I want one concise alignment summary for higher-risk runs so that I can confirm direction without reading internal worker prompts.",
+      "acceptanceCriteria": [
+        "Generate a user-facing alignment summary for `G2` and `G3` runs with goal, scope, constraints, selected roles, material role deltas, major assumptions, and proposed next phase",
+        "Do not include raw internal worker prompts in the summary unless explicitly requested",
+        "Store or expose the summary in a form that both CLI and web consumers can read",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Pause and resume runs on confirmation gates",
+      "description": "As a user, I want risky runs to pause until I confirm them so that Swarm cannot continue past a direction checkpoint without my approval.",
+      "acceptanceCriteria": [
+        "When the evaluated gate is `G2` or `G3`, record pending confirmation state and pause the run before delegation continues",
+        "Clear pending confirmation and resume delegation when run-level confirmation is recorded",
+        "Skip confirmation when there is no material role delta and the gate is below `G2`",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Auto-write approved role changes back to the catalog",
+      "description": "As a user, I want approved role changes saved back to the long-lived catalog so that I do not need to re-approve the same updates on future runs.",
+      "acceptanceCriteria": [
+        "When a user approves a modified role for a run, write the approved `purpose`, `perspective`, and `default_when` values back to the long-lived role catalog",
+        "Do not rewrite catalog entries for `unchanged` roles",
+        "Record the run and user that caused each catalog writeback",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Pause on mid-run gate escalation",
+      "description": "As a user, I want Swarm to stop when a later phase becomes riskier than the original contract so that I can re-approve the new direction.",
+      "acceptanceCriteria": [
+        "Re-evaluate alignment gate when later phases introduce new risk inputs",
+        "Pause the run before further delegation when the new gate is higher than the current gate",
+        "Persist the new gate, the escalation reason, and a fresh pending confirmation requirement before the run can continue",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Expose alignment read state in swarm APIs",
+      "description": "As a client developer, I want alignment state available in swarm read models so that web and CLI surfaces can explain why a run proceeded or paused.",
+      "acceptanceCriteria": [
+        "Expose run contract, gate, selected roles, role delta status, pending confirmation state, and alignment summary in server-side swarm read models",
+        "Provide read paths suitable for both web and CLI consumers",
+        "Regenerate the JavaScript SDK after the route schema changes",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Add alignment confirmation write routes",
+      "description": "As a user, I want server-side endpoints for role approval and run confirmation so that the UI and CLI can resume or update alignment state safely.",
+      "acceptanceCriteria": [
+        "Add a server-side write path for role approval that updates confirmation state and catalog writeback according to the alignment rules",
+        "Add a server-side write path for run-level confirmation that clears pending confirmation and resumes the paused run",
+        "Regenerate the JavaScript SDK after the route schema changes",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Show alignment summaries in CLI flow",
+      "description": "As a CLI user, I want alignment decisions shown in the terminal so that I can understand non-blocking and blocking gates without reading internal prompts.",
+      "acceptanceCriteria": [
+        "Show a concise non-blocking alignment summary for `G1` runs in the CLI flow",
+        "Use the alignment summary instead of raw worker prompts when asking for `G2` or `G3` confirmation in CLI surfaces",
+        "Include the proposed next phase or pause reason in the CLI output",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Add a web alignment panel",
+      "description": "As a web user, I want a dedicated alignment panel so that I can see the current gate, role deltas, and pending approvals at a glance.",
+      "acceptanceCriteria": [
+        "Add a web panel that shows current gate, mode, selected roles, role delta summary, run contract summary, and pending confirmation state",
+        "Explain why auto-running `G0` or `G1` runs proceeded without blocking",
+        "Do not display raw internal worker prompts by default",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Add unit coverage for gate and discussion policy",
+      "description": "As a maintainer, I want deterministic unit coverage for gate and discussion decisions so that future changes do not make Swarm too interruptive or too permissive.",
+      "acceptanceCriteria": [
+        "Add tests for unchanged confirmed roles plus low risk producing `G0` or `G1`",
+        "Add tests for material role deltas producing `G2`",
+        "Add tests for sensitive or high-risk actions producing `G3`",
+        "Add tests for `0/3`, `1/3`, `2/3`, and `3/3` primary discussion signals mapping to the expected execution or discussion mode",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Add integration coverage for approval and escalation flows",
+      "description": "As a maintainer, I want integration coverage for approval writeback and mid-run escalation so that alignment state stays reliable across real swarm transitions.",
+      "acceptanceCriteria": [
+        "Add integration tests for role approval auto-writeback and audit metadata",
+        "Add integration tests for mid-run gate escalation pausing the run and requiring fresh confirmation",
+        "Add integration tests showing alignment state is readable by server-side consumers after approval and escalation transitions",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

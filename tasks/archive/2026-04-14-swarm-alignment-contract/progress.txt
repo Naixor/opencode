@@ -1,0 +1,171 @@
+## Codebase Patterns
+- Canonical swarm snapshot schema changes must update `SwarmState.Alignment`, `SwarmState.Example`, and `SwarmState.create()` together; current rollout rejects older snapshot schema versions instead of adding compatibility loaders.
+- Shared swarm alignment persistence lives in `board/alignment.json`; keep `alignment.catalog.roles` project-scoped and `alignment.confirmations.users` user-scoped inside that file.
+- `SwarmState.classify()` only treats `purpose`, `perspective`, and `default_when` as material role changes, and it normalizes whitespace before comparing requested roles to the catalog.
+- Catalog-backed run roles keep overlay fields `null`; `SwarmState.classify()` should treat those nulls as inherited catalog values so unchanged roles do not become false-positive modifications.
+- `delegate_task` is the first guaranteed pre-worker checkpoint for swarm runs, so run-contract persistence belongs there before worker sessions are created or registered.
+- `SwarmState.decide()` owns deterministic gate mapping, and the caller should pass the explicit input object through unchanged so stored gate state explains why the run auto-ran or paused.
+- `SwarmState.admit()` uses a strict 2-of-3 threshold across the primary discussion signals; `role_benefit` is supporting context and should never unlock discussion mode by itself.
+- `SwarmState.preflight()` is the canonical place to bundle contract drafting, role delta classification, gate evaluation, and pending-confirmation decisions before any swarm delegation proceeds.
+- Persist readable approval copy in `alignment.summary` and reuse `SwarmState.renderSummary()` for user-facing gate output instead of exposing worker prompts.
+- Persist approved high-risk runs in `alignment.run_confirmation`; reuse that approval only while the stored contract and gate still match, and keep `Swarm.resume()` blocked until pending run confirmation is cleared.
+- Use `SwarmState.writeback()` for approved role changes so only `modified` or `added` deltas update the shared catalog, while unchanged roles stay untouched and user confirmation state stays in sync.
+- `SwarmState.preflight()` can accept later-phase gate overrides; when the new gate outranks the stored gate, clear stale run confirmation and surface an explicit escalation reason in the fresh pending confirmation.
+- Reuse `SwarmAdmin.Alignment` for server reads: expose it directly at `/swarm/:id/alignment` for CLI consumers and embed it into `SwarmAdmin.Detail` so web panels read the same alignment snapshot.
+- Use `SwarmState.renderDecision()` for CLI-facing alignment copy when you need gate, reason, and stored summary together without exposing worker prompts.
+- The app swarm dashboard should render alignment UI from `detail.alignment` in `/swarm/:id/admin`; keep the panel derived from that shared read model so web and CLI explain the same gate and approval state.
+- Keep deterministic gate and discussion policy coverage in `packages/opencode/test/session/swarm-state.test.ts`, where `SwarmState.decide()`, `admit()`, and `preflight()` can be asserted directly as pure helpers.
+- Use `SwarmAdmin.readAlignment()` and `SwarmAdmin.get()` to verify approval writeback and escalation transitions, because those are the server-side read models consumed by CLI and web surfaces after alignment state changes.
+
+## 2026-04-11 20:27:22 CST - US-017
+- Added integration coverage in `packages/opencode/test/session/swarm-admin.test.ts` for approved role writeback, catalog audit metadata, mid-run gate escalation, and post-transition server-side alignment reads through `SwarmAdmin.readAlignment()` and `SwarmAdmin.get()`.
+- Files changed: `packages/opencode/test/session/swarm-admin.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Approval integration tests should assert both the shared catalog audit metadata in `board/alignment.json` and the read-model view returned by `SwarmAdmin`, otherwise writeback regressions can hide behind read-only checks.
+  - Escalation coverage is most useful when it starts from an already approved lower gate, then re-runs `SwarmState.preflight()` with stronger risk input and confirms `run_confirmation` is cleared before the admin read model is queried.
+  - Focused `swarm-admin.test.ts` integration coverage and `bun run --cwd packages/opencode typecheck` both passed for this story.
+---
+
+## 2026-04-11 20:24:38 CST - US-016
+- Added explicit gate and discussion truth-table coverage in `packages/opencode/test/session/swarm-state.test.ts` for low-risk `G0`/`G1`, material-delta `G2`, sensitive `G3`, and the `0/3` through `3/3` discussion admission thresholds.
+- Files changed: `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - The pure alignment helpers already encode the policy contract, so the clearest regression tests are direct table-style assertions in `swarm-state.test.ts` instead of orchestration-heavy tool tests.
+  - A low-risk `G1` case is easiest to model with unchanged roles plus low confidence, while `G2` and `G3` stay best expressed through material deltas and explicit sensitive-action overrides.
+  - `bun run --cwd packages/opencode typecheck` now passes alongside the focused swarm-state test file.
+---
+
+## 2026-04-11 20:22:36 CST - US-015
+- Added a dedicated alignment panel to `packages/app/src/pages/swarm/swarm-dashboard.tsx` that shows gate, mode, selected roles, role delta summary, contract details, pending approval state, and the non-blocking explanation for `G0`/`G1` runs without exposing worker prompts.
+- Files changed: `packages/app/src/pages/swarm/swarm-dashboard.tsx`, `packages/app/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - The dashboard already gets `alignment` from the admin detail payload, so new swarm UI should extend that typed read model instead of adding extra client fetches.
+  - Gate-specific explainer copy belongs in the web panel because `G0` and `G1` need a user-facing reason for auto-run even when there is no blocking approval dialog.
+  - `bun run --cwd packages/app typecheck` and `bun run --cwd packages/app test:unit` passed; browser-tool verification could not run because the local browser extension host was offline (`browser_status.hostConnected=false`), so manual browser re-check is still advisable.
+---
+
+## 2026-04-11 20:18:57 CST - US-014
+- Added `SwarmState.renderDecision()` in `packages/opencode/src/session/swarm-state.ts` and wired `packages/opencode/src/tool/delegate-task.ts` to show alignment gate summaries for non-blocking `G1` runs and blocking `G2`/`G3` pauses before any raw worker output.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/tool/delegate-task.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/test/tool/delegate-task.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - CLI alignment copy should come from persisted alignment state after preflight, not from ad-hoc prompt text, so the gate summary matches the same contract seen by API and web readers.
+  - `delegate_task` can prepend a non-blocking alignment note for `G1` runs without changing worker execution by caching the rendered decision before session launch.
+  - `bun run --cwd packages/opencode typecheck` remains blocked by the same pre-existing untouched files from `US-013`; focused swarm-state and delegate-task tests passed for this story.
+---
+
+## 2026-04-11 20:15:33 CST - US-013
+- Added alignment write routes in `packages/opencode/src/server/routes/swarm.ts`, finished `Swarm.approveRoles()` in `packages/opencode/src/session/swarm.ts`, and regenerated `packages/sdk/js/src/v2/gen/*` so clients can approve role deltas or confirm a paused run through the server.
+- Files changed: `packages/opencode/src/server/routes/swarm.ts`, `packages/opencode/src/session/swarm.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/sdk/js/src/v2/gen/*`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Alignment write endpoints can reuse `Swarm.Info` plus `SwarmAdmin.Alignment` as a shared response envelope, which keeps CLI and web clients on the same post-write shape.
+  - `Swarm.approveRoles()` should re-run `SwarmState.preflight()` against the freshly written catalog so the run gate and pending confirmation state immediately reflect approved role writeback.
+  - `bun run --cwd packages/opencode typecheck` is still blocked by pre-existing errors in untouched files (`src/cli/cmd/import.ts`, `src/cli/cmd/tui/component/*`, `src/share/share-next.ts`, `test/acp/event-subscription.test.ts`); touched swarm alignment files were not part of that failure set, and `bun run --cwd packages/sdk/js typecheck` passed after regenerating the SDK.
+---
+
+## 2026-04-11 19:15:48 CST - US-001
+- Added canonical alignment state to `packages/opencode/src/session/swarm-state.ts` for project-scoped role catalog data, user-scoped confirmations, run contract, gate state, role delta state, pending confirmations, and alignment audit metadata.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/test/session/swarm-cleanup.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Canonical swarm snapshot schema changes must update `SwarmState.Alignment`, `SwarmState.Example`, and `SwarmState.create()` together.
+  - Phase-one swarm schema rollouts should reject older snapshot versions instead of adding compatibility loaders.
+  - `Swarm.launch()` initialization coverage belongs in `packages/opencode/test/session/swarm-cleanup.test.ts`, while snapshot shape coverage belongs in `packages/opencode/test/session/swarm-state.test.ts`.
+---
+
+## 2026-04-11 19:21:03 CST - US-002
+- Added `SwarmState.readAlignment()`, `writeAlignment()`, `putRole()`, and `confirmRole()` in `packages/opencode/src/session/swarm-state.ts` to persist project-scoped role catalog entries and separate user-scoped confirmations in `board/alignment.json`, including per-role audit metadata on create and update.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Shared alignment state should live in `board/alignment.json` instead of individual swarm `state.json` files when the data must survive across runs.
+  - Keep reusable role definitions in `alignment.catalog.roles` and per-user approvals in `alignment.confirmations.users` so later role delta checks can compare shared baseline data with user-specific confirmation state.
+  - Role catalog audit metadata belongs on each stored role entry as well as the top-level catalog audit stamp, which makes create versus update assertions easy in tests.
+---
+
+## 2026-04-11 19:24:27 CST - US-003
+- Added `SwarmState.classify()` in `packages/opencode/src/session/swarm-state.ts` to compare requested run roles against the stored catalog, classify `unchanged`, `added`, `removed`, and `modified` entries, and ignore formatting-only whitespace noise outside the material fields.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Match requested roles by `role_id` when present, and fall back to the role `name` so new overlays without catalog IDs still classify deterministically.
+  - Material delta detection should stay limited to `purpose`, `perspective`, and `default_when`; timestamps, versions, and whitespace-only edits should not trigger approval flow.
+  - Keep delta classification pure and test it directly before wiring it into conductor or contract flows.
+---
+
+## 2026-04-11 19:30:52 CST - US-004
+- Added `SwarmState.draft()` and wired `packages/opencode/src/tool/delegate-task.ts` to persist `alignment.contract` before any swarm worker session is created, preserving catalog-backed role references and discussion-mode context across later delegations.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/tool/delegate-task.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - The first `delegate_task` call is the safest place to create a run contract because it is the last guaranteed checkpoint before worker launch.
+  - Keep run-contract drafting pure in `SwarmState.draft()` so later gate and confirmation logic can reuse the same contract builder without depending on tool context.
+  - When a delegated role already exists in the catalog, store the catalog reference in the contract and leave overlay fields `null` until a real per-run delta is known.
+---
+
+## 2026-04-11 19:33:49 CST - US-005
+- Added `SwarmState.decide()` in `packages/opencode/src/session/swarm-state.ts` for deterministic `G0`/`G1`/`G2`/`G3` evaluation, and wired `packages/opencode/src/tool/delegate-task.ts` to persist gate inputs, reason text, and gate audit metadata alongside the run contract before worker launch.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/tool/delegate-task.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Gate evaluation should stay pure in `SwarmState.decide()` and return the original input object so later API and UI readers can explain the exact decision inputs.
+  - Sensitivity and material role delta should short-circuit the rest of the decision tree, which keeps precedence easy to read and test.
+  - Persist gate audit metadata whenever the gate is refreshed so later escalation checks can compare both value changes and who updated the gate state.
+---
+
+## 2026-04-11 19:36:04 CST - US-006
+- Added `SwarmState.admit()` in `packages/opencode/src/session/swarm-state.ts` to enforce the 2-of-3 discussion admission threshold across multiple valid options, meaningful trade-offs, and direction-changing consequences, while treating role-based debate benefit as advisory context only.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Discussion admission should stay pure and separate from contract drafting so the conductor can evaluate thresholds before deciding between execute and discussion modes.
+  - The `0/3`, `1/3`, `2/3`, and `3/3` cases are worth keeping as explicit tests because they document the threshold better than prose alone.
+  - `role_benefit` should remain visible in the result for later summaries, but it must never override the primary-signal threshold.
+---
+
+## 2026-04-11 19:39:19 CST - US-007
+- Added `SwarmState.preflight()` and updated `packages/opencode/src/tool/delegate-task.ts` plus `packages/opencode/src/agent/prompt/conductor.txt` so conductor delegation now drafts the contract, classifies role deltas, evaluates the gate, pauses on `G2`/`G3`, and avoids asking for approval on every task breakdown or worker prompt.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/tool/delegate-task.ts`, `packages/opencode/src/agent/prompt/conductor.txt`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep conductor preflight in one pure helper so later confirmation routes and escalation logic can reuse the same state transition inputs.
+  - Returning early from `delegate_task` on `G2` or `G3` is an effective pre-worker guard because it stops session creation before any worker is registered.
+  - Direction-level approval prompts belong in conductor policy text, not in per-task or per-worker delegation logic.
+---
+
+## 2026-04-11 19:47:52 CST - US-008
+- Added persisted `alignment.summary` data plus `SwarmState.summarize()` and `SwarmState.renderSummary()` so higher-risk runs now store one user-facing contract summary and blocked `delegate_task` output shows that summary instead of raw worker prompt context.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/tool/delegate-task.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Store user-facing approval copy in canonical swarm state so CLI, web, and later write routes can all read the same alignment summary.
+  - Reuse `SwarmState.renderSummary()` for approval messaging instead of rebuilding ad-hoc strings in individual surfaces.
+  - Catalog-backed run roles should keep overlay values `null`; delta checks must treat those nulls as inherited catalog fields or summaries will show false-positive role changes.
+---
+
+## 2026-04-11 19:47:52 CST - US-009
+- Added `alignment.run_confirmation` reuse checks in `SwarmState.preflight()` plus `Swarm.confirm()` and a guarded `Swarm.resume()` path so `G2`/`G3` runs stay paused until confirmed, then resume without re-triggering the same checkpoint while the contract still matches.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/session/swarm.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Reusing a high-risk approval needs explicit persisted state; clearing `pending_confirmation` alone is not enough because later preflight checks will recompute the same gate.
+  - Approval reuse should compare both the stored gate and the full stored contract so later role or scope changes trigger a fresh checkpoint instead of silently inheriting an outdated confirmation.
+  - Keep `Swarm.resume()` strict for pending run confirmations so admin pause controls cannot accidentally bypass alignment gates.
+---
+
+## 2026-04-11 19:47:52 CST - US-010
+- Added `SwarmState.writeback()` so approved role overlays now rewrite only material `modified` or `added` deltas back into `board/alignment.json`, increment versions, and record the approving user and run in both catalog audit metadata and user confirmation state.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Approved role writeback should merge null overlay fields back to the catalog baseline so partial overlays can update one field without blanking the rest of the charter.
+  - Unchanged roles should not be rewritten during approval flows; skipping them preserves stable versions and cleaner audit history.
+  - Catalog writeback should always pair the catalog update with `confirmRole()` so future runs can reuse the approved version without an extra confirmation pass.
+---
+
+## 2026-04-11 19:47:52 CST - US-011
+- Added gate-input overrides plus escalation detection in `SwarmState.preflight()` and cleared stale `alignment.run_confirmation` during `delegate_task` preflight so later higher-risk turns now persist a stronger gate, an escalation-specific pause reason, and a fresh confirmation requirement before delegation resumes.
+- Files changed: `packages/opencode/src/session/swarm-state.ts`, `packages/opencode/src/tool/delegate-task.ts`, `packages/opencode/test/session/swarm-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Mid-run escalation should compare gate ranks, not just gate inequality, so lateral changes like `G2` to `G2` do not create noisy re-approval loops.
+  - Later-phase risk checks need explicit gate-input overrides because the default preflight inputs only cover the routine delegation case.
+  - Clear stale `run_confirmation` as soon as preflight stops matching the stored contract and gate, otherwise read models can imply the higher-risk turn was already approved.
+---
+
+## 2026-04-11 19:47:52 CST - US-012
+- Added `SwarmAdmin.Alignment`, embedded it into the admin detail read model, exposed it at `/swarm/:id/alignment`, and regenerated `packages/sdk/js/src/v2/gen/*` so both CLI and web clients can read the same run contract, gate, role delta, pending confirmation, and summary state.
+- Files changed: `packages/opencode/src/session/swarm-admin.ts`, `packages/opencode/src/server/routes/swarm.ts`, `packages/opencode/test/session/swarm-admin.test.ts`, `packages/opencode/AGENTS.md`, `packages/sdk/js/src/v2/gen/*`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep alignment read shapes curated instead of exposing raw `SwarmState.Alignment`; `SwarmAdmin.Alignment` is the stable contract for client surfaces.
+  - Embed the same alignment read model into detail endpoints and dedicated alignment routes so CLI and web stay in sync without duplicating projection logic.
+  - Regenerate the JavaScript SDK after swarm route schema changes before re-running package builds, or local package resolution may fail against stale generated exports.
+---

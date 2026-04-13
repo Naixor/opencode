@@ -1,266 +1,334 @@
 {
   "project": "OpenCode",
-  "branchName": "ralph/swarm-alignment-contract",
-  "sourcePrdFile": "tasks/prds/prd-swarm-alignment-contract.md",
-  "description": "Swarm Alignment Contract and Approval Gates - add persisted role alignment state, deterministic gate decisions, and user-facing approval checkpoints so Swarm can auto-run routine work without drifting on risky runs.",
+  "branchName": "ralph/swarm-autonomous-delivery-system",
+  "sourcePrdFile": "tasks/prds/prd-swarm-autonomous-delivery-system.md",
+  "description": "Swarm Autonomous Delivery System - add authoritative delivery state, gated execution, recovery, small-MR enforcement, and a dedicated run UI so Swarm can complete real delivery loops from planning through retrospective.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Define alignment state in the canonical swarm snapshot",
-      "description": "As a platform engineer, I want alignment data stored in the canonical swarm snapshot so that contract and gate state have one source of truth.",
+      "title": "Create SQLite schema for swarm runs and roles",
+      "description": "As a platform engineer, I want `SwarmRun` and `RoleSpec` stored in SQLite so that delivery runs and role definitions have one authoritative source of truth.",
       "acceptanceCriteria": [
-        "Add alignment fields to canonical swarm state for the project-scoped role catalog, user-scoped confirmations, run contract, gate, role delta status, pending confirmation, and audit metadata",
-        "Initialize empty alignment state for newly created swarms",
-        "Do not add compatibility loaders for pre-alignment swarm records",
+        "Add SQLite persistence for `SwarmRun` with `id`, `goal`, `status`, `phase`, `created_at`, `updated_at`, and `owner_session_id`",
+        "Add SQLite persistence for `RoleSpec` with `role_id`, `name`, `responsibility`, `skills`, `limits`, and `approval_required`",
+        "Define shared enum or validation support for run status and phase values in the schema layer",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": ""
+      "notes": "Added `swarm_run` and `role_spec` SQLite tables, shared delivery run status/phase validators, migration, and coverage for persistence plus schema columns."
     },
     {
       "id": "US-002",
-      "title": "Persist role catalog and user confirmation records",
-      "description": "As a swarm operator, I want project-level role definitions and user-level confirmations stored separately so that teams share role baselines without sharing approvals.",
+      "title": "Create SQLite schema for work items",
+      "description": "As a delivery engine, I want `WorkItem` records persisted in SQLite so that planned work, dependencies, and verification metadata survive interruptions.",
       "acceptanceCriteria": [
-        "Persist project-scoped role catalog entries with `id`, `name`, `purpose`, `perspective`, `default_when`, and `version`",
-        "Persist user-scoped confirmation records separately from the role catalog",
-        "Record audit metadata when role catalog entries are created or updated",
+        "Add SQLite persistence for `WorkItem` with `id`, `title`, `status`, `owner_role_id`, `blocked_by`, `scope`, `phase_gate`, and `verification`",
+        "Persist `small_mr_required` and dependency data on each work item",
+        "Validate work item status and phase-gate values in the shared schema layer",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": true,
-      "notes": ""
+      "notes": "Added the `work_item` SQLite table, shared work status and phase-gate validators, a generated migration, and storage coverage for persisted dependency, scope, verification, and small-MR fields."
     },
     {
       "id": "US-003",
-      "title": "Classify meaningful role deltas",
-      "description": "As a conductor, I want requested roles compared against the confirmed catalog so that only material role changes trigger user review.",
+      "title": "Create SQLite schema for decisions and open questions",
+      "description": "As a conductor, I want `Decision` and `OpenQuestion` stored as first-class records so that unresolved ambiguities and final conclusions are durable and auditable.",
       "acceptanceCriteria": [
-        "Compare requested run roles against catalog roles and classify each as `unchanged`, `added`, `removed`, or `modified`",
-        "Treat only `purpose`, `perspective`, and `default_when` as material changes",
-        "Ignore timestamps, formatting-only edits, and other metadata-only noise during delta detection",
+        "Add SQLite persistence for `Decision` with `id`, `kind`, `summary`, `source`, `status`, `requires_user_confirmation`, `applies_to`, `related_question_id`, `decided_by`, and `decided_at`",
+        "Add SQLite persistence for `OpenQuestion` with `id`, `title`, `context`, `options`, `recommended_option`, `status`, `deadline_policy`, `blocking`, `affects`, `related_decision_id`, and `raised_by`",
+        "Validate the allowed `Decision.status` and `OpenQuestion.status` transition values in shared schema code",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": true,
-      "notes": ""
+      "notes": "Added `decision` and `open_question` SQLite tables, shared status enums plus transition helpers for both lifecycles, a generated migration, and storage coverage for persisted decision/question fields."
     },
     {
       "id": "US-004",
-      "title": "Generate run contracts before delegation",
-      "description": "As a conductor, I want each swarm run to create a compact run contract before delegation so that alignment happens at the direction level.",
+      "title": "Add a shared delivery store around SQLite state",
+      "description": "As a maintainer, I want all delivery-state reads and writes to go through one shared module so that SQLite stays the only authoritative write path.",
       "acceptanceCriteria": [
-        "Define a persisted `RunContract` with `goal`, `scope`, `constraints`, `roles`, `mode`, `assumptions`, `risks`, `discussion_reason`, and `created_at`",
-        "Generate and store the run contract before any worker delegation starts",
-        "Store role references as catalog entries plus per-run overlay deltas when present",
+        "Route `SwarmRun`, `RoleSpec`, `WorkItem`, `Decision`, and `OpenQuestion` CRUD through one shared store module",
+        "Reject invalid state transitions for delivery objects in the shared store layer",
+        "Keep SharedBoard or UI consumers read-only or projection-only relative to authoritative SQLite state",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": true,
-      "notes": ""
+      "notes": "Added `packages/opencode/src/delivery/store.ts` as the authoritative SQLite CRUD layer for runs, roles, work items, decisions, and questions; enforced delivery transition guards there; and covered the shared store plus transition helpers with targeted storage tests."
     },
     {
       "id": "US-005",
-      "title": "Evaluate deterministic alignment gates",
-      "description": "As a user, I want gate decisions to come from explicit deterministic inputs so that Swarm interruptions are predictable and explainable.",
+      "title": "Launch a swarm run with a staged delivery plan",
+      "description": "As a user, I want a launch flow that turns a goal into a persisted staged run so that Swarm starts from a recoverable plan instead of transient prompt state.",
       "acceptanceCriteria": [
-        "Define gate values `G0`, `G1`, `G2`, and `G3`",
-        "Implement deterministic gate precedence in this order: action sensitivity, material role delta, ambiguity or valid options or trade-off strength, confidence, routine versus novel scope",
-        "Allow LLM output to inform only the `confidence` input, not the final gate mapping logic",
-        "Persist the gate, the evaluated inputs, and a human-readable decision reason for each run",
+        "Add a launch entrypoint that creates a `SwarmRun` from a high-level delivery goal",
+        "Persist the default phases `plan`, `implement`, `verify`, `commit`, and `retrospective` for new runs",
+        "Store planned work items with owner role, scope, dependencies, and expected verification during planning",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
-      "notes": ""
+      "notes": "Added `DeliveryStore.launch()` as the authoritative staged-plan entrypoint, persisted ordered run phases plus run-linked work items, wired `Swarm.launch()` through it, and covered the flow with delivery-store and swarm launch tests."
     },
     {
       "id": "US-006",
-      "title": "Enforce discussion admission thresholds",
-      "description": "As a conductor, I want discussion mode admitted only for real direction-setting choices so that routine execution does not turn into unnecessary debate.",
+      "title": "Persist phase gate evaluation and transitions",
+      "description": "As a user, I want phase progression controlled by persisted gates so that runs only advance when the required conditions are actually satisfied.",
       "acceptanceCriteria": [
-        "Evaluate the three primary discussion signals: multiple valid options, meaningful trade-offs, and direction-changing consequences",
-        "Allow discussion mode only when at least two primary discussion signals are true",
-        "Treat likely benefit from role-based debate as advisory context rather than a hard requirement",
-        "Fall back to normal execution planning when the admission threshold is not met",
+        "Define enter, exit, and fallback rules for `plan`, `implement`, `verify`, `commit`, and `retrospective`",
+        "Persist gate results and blocked reasons back onto the run and affected work items",
+        "Prevent phase advancement while required decisions or blocking open questions remain unresolved",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 6,
       "passes": true,
-      "notes": ""
+      "notes": "Added shared enter/exit/fallback gate rules plus persisted `gate` JSON on `swarm_run` and `work_item`, wired `DeliveryStore.evaluateRun()` and guarded phase advancement through gate checks, and covered blocked decision/question transitions in delivery-store/schema tests."
     },
     {
       "id": "US-007",
-      "title": "Run conductor preflight from alignment state",
-      "description": "As a system owner, I want the conductor to create the contract and gate before delegation so that worker planning follows approved alignment rules.",
+      "title": "Assign work items and detect major role changes",
+      "description": "As a conductor, I want role assignment and major-change detection persisted on work items so that only meaningful role shifts require user review.",
       "acceptanceCriteria": [
-        "Update conductor flow to generate the run contract, compute role deltas, and evaluate the gate before worker delegation begins",
-        "Proceed automatically for `G0` and `G1`, and require user confirmation for `G2` and `G3`",
-        "Update conductor prompt or hook strategy so it does not ask the user to approve every task breakdown or worker prompt",
+        "Assign each work item to a `RoleSpec` and persist the owner role id",
+        "Detect major assignment changes for role adds, role removals, role responsibility changes, and cross-role owner reassignments",
+        "Allow ordinary same-role scheduling adjustments without triggering confirmation",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 7,
       "passes": true,
-      "notes": ""
+      "notes": "Added `DeliveryStore.reviewAssignments()` and `DeliveryStore.assign()` so work-item owner changes stay tied to `RoleSpec` assignments, major role/owner deltas are detected before mutation, and same-role scheduling updates apply without confirmation; covered the behavior in delivery-store tests."
     },
     {
       "id": "US-008",
-      "title": "Create user-facing alignment summaries",
-      "description": "As a user, I want one concise alignment summary for higher-risk runs so that I can confirm direction without reading internal worker prompts.",
+      "title": "Create confirmation-backed role reassignment flow",
+      "description": "As a user, I want major role changes to pause behind an explicit confirmation record so that assignment authority stays visible and reversible.",
       "acceptanceCriteria": [
-        "Generate a user-facing alignment summary for `G2` and `G3` runs with goal, scope, constraints, selected roles, material role deltas, major assumptions, and proposed next phase",
-        "Do not include raw internal worker prompts in the summary unless explicitly requested",
-        "Store or expose the summary in a form that both CLI and web consumers can read",
+        "Create an `OpenQuestion` with before and after state, reason, recommended option, and impact when a major role change is proposed",
+        "Keep the related `Decision` in `proposed` until the user resolves the question",
+        "Apply confirmed or rejected outcomes back through `Decision` updates rather than direct object mutation",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 8,
       "passes": true,
-      "notes": ""
+      "notes": "Added `DeliveryStore.requestAssignment()` and `DeliveryStore.resolveAssignment()` so major role changes create linked `Decision` and `OpenQuestion` records with before/after proposal state, remain blocked behind confirmation, and apply confirmed or rejected outcomes through decision resolution instead of direct mutation."
     },
     {
       "id": "US-009",
-      "title": "Pause and resume runs on confirmation gates",
-      "description": "As a user, I want risky runs to pause until I confirm them so that Swarm cannot continue past a direction checkpoint without my approval.",
+      "title": "Record structured decision proposals and consensus actions",
+      "description": "As a conductor, I want proposal, review, objection, and decision actions tied to one record so that consensus happens through structured state instead of free-text chatter.",
       "acceptanceCriteria": [
-        "When the evaluated gate is `G2` or `G3`, record pending confirmation state and pause the run before delegation continues",
-        "Clear pending confirmation and resume delegation when run-level confirmation is recorded",
-        "Skip confirmation when there is no material role delta and the gate is below `G2`",
+        "Store `proposal`, `review`, `objection`, and `decision` actions against a single `Decision` record",
+        "Persist participant roles, candidate outcomes, and input context for proposed decisions",
+        "Reject consensus actions that are not linked to a concrete `Decision` id",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 9,
       "passes": true,
-      "notes": ""
+      "notes": "Extended `decision` persistence with `participants`, `candidate_outcomes`, `input_context`, and `actions`, added `DeliveryStore.recordDecision()` for structured `proposal`/`review`/`objection`/`decision` entries on one record, and covered the proposal plus missing-id rejection flow in delivery schema/store tests."
     },
     {
       "id": "US-010",
-      "title": "Auto-write approved role changes back to the catalog",
-      "description": "As a user, I want approved role changes saved back to the long-lived catalog so that I do not need to re-approve the same updates on future runs.",
+      "title": "Resolve decisions through agreement or conductor arbitration",
+      "description": "As a conductor, I want deterministic decision resolution rules so that aligned proposals auto-resolve and sufficiently informed conflicts can be settled without vague debate.",
       "acceptanceCriteria": [
-        "When a user approves a modified role for a run, write the approved `purpose`, `perspective`, and `default_when` values back to the long-lived role catalog",
-        "Do not rewrite catalog entries for `unchanged` roles",
-        "Record the run and user that caused each catalog writeback",
+        "Automatically mark a decision as `decided` when required participants align and the recorded inputs are sufficient",
+        "Allow conductor arbitration for informed conflicts that do not cross a user-confirmation boundary",
+        "Persist final reason, `decided_by`, `decided_at`, and affected object updates on the resolved decision",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 10,
       "passes": true,
-      "notes": ""
+      "notes": "Updated `DeliveryStore.recordDecision()` to auto-resolve aligned non-confirmation decisions, allow conductor arbitration for informed conflicts, and persist final resolution metadata as JSON on the terminal decision action; extended delivery-store regression coverage for both paths."
     },
     {
       "id": "US-011",
-      "title": "Pause on mid-run gate escalation",
-      "description": "As a user, I want Swarm to stop when a later phase becomes riskier than the original contract so that I can re-approve the new direction.",
+      "title": "Implement open-question lifecycle and gate recomputation",
+      "description": "As a worker, I want unresolved questions tracked through an explicit lifecycle so that blocking ambiguity stays visible and gates recompute when answers arrive.",
       "acceptanceCriteria": [
-        "Re-evaluate alignment gate when later phases introduce new risk inputs",
-        "Pause the run before further delegation when the new gate is higher than the current gate",
-        "Persist the new gate, the escalation reason, and a fresh pending confirmation requirement before the run can continue",
+        "Support `open -> waiting_user -> answered -> resolved`, `open -> deferred`, and `open|waiting_user -> cancelled` transitions for `OpenQuestion`",
+        "Pause affected work items for blocking questions and re-check deferred questions before the next related gate",
+        "Recompute related gates and sync the linked decision outcome when a question is closed or downgraded",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 11,
       "passes": true,
-      "notes": ""
+      "notes": "Tightened the shared question transition graph, taught `DeliveryStore.updateQuestion()` to clear blocking and sync linked decision outcomes on resolve/defer/cancel, re-block deferred questions when their affected gate becomes current, and covered the lifecycle with delivery schema/store regressions."
     },
     {
       "id": "US-012",
-      "title": "Expose alignment read state in swarm APIs",
-      "description": "As a client developer, I want alignment state available in swarm read models so that web and CLI surfaces can explain why a run proceeded or paused.",
+      "title": "Add work-item checkpoints and failure evidence",
+      "description": "As a user, I want each work item to capture checkpoints and failure evidence so that recovery preserves context instead of erasing what went wrong.",
       "acceptanceCriteria": [
-        "Expose run contract, gate, selected roles, role delta status, pending confirmation state, and alignment summary in server-side swarm read models",
-        "Provide read paths suitable for both web and CLI consumers",
-        "Regenerate the JavaScript SDK after the route schema changes",
+        "Store last successful phase, verification result, produced files, pending actions, and rollback suggestions per work item",
+        "Preserve failure evidence instead of clearing progress when verification or pre-commit work fails",
+        "Keep the current worktree intact by default and require an explicit `Decision` before destructive cleanup is allowed",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-013",
-      "title": "Add alignment confirmation write routes",
-      "description": "As a user, I want server-side endpoints for role approval and run confirmation so that the UI and CLI can resume or update alignment state safely.",
+      "title": "Restore interrupted runs from authoritative state",
+      "description": "As a user, I want interrupted runs to resume from stored state and checkpoints so that long autonomous delivery loops do not restart from scratch.",
       "acceptanceCriteria": [
-        "Add a server-side write path for role approval that updates confirmation state and catalog writeback according to the alignment rules",
-        "Add a server-side write path for run-level confirmation that clears pending confirmation and resumes the paused run",
-        "Regenerate the JavaScript SDK after the route schema changes",
+        "Resume an existing run by loading authoritative SQLite records before checkpoints and active decisions or questions",
+        "Treat stale or conflicting checkpoints as expired and stop behind a new decision or open question when state is inconsistent",
+        "Cover interrupted planning, implementation failure, verification failure, and pre-commit interruption recovery paths",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-014",
-      "title": "Show alignment summaries in CLI flow",
-      "description": "As a CLI user, I want alignment decisions shown in the terminal so that I can understand non-blocking and blocking gates without reading internal prompts.",
+      "title": "Enforce single-thread small-MR execution",
+      "description": "As a developer, I want P1 delivery to enforce one active story path through commit so that each change stays independently verifiable and recoverable.",
       "acceptanceCriteria": [
-        "Show a concise non-blocking alignment summary for `G1` runs in the CLI flow",
-        "Use the alignment summary instead of raw worker prompts when asking for `G2` or `G3` confirmation in CLI surfaces",
-        "Include the proposed next phase or pause reason in the CLI output",
+        "Mark each work item with `small_mr_required=true`",
+        "Allow only one active implementation path per story through commit in P1",
+        "Block commit until the work item has passing verification and maps to exactly one story or feature point",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-015",
-      "title": "Add a web alignment panel",
-      "description": "As a web user, I want a dedicated alignment panel so that I can see the current gate, role deltas, and pending approvals at a glance.",
+      "title": "Execute local commit phase with audit writeback",
+      "description": "As a developer, I want successful story work committed locally with structured metadata so that P1 delivery closes the loop without reaching into remote merge flows.",
       "acceptanceCriteria": [
-        "Add a web panel that shows current gate, mode, selected roles, role delta summary, run contract summary, and pending confirmation state",
-        "Explain why auto-running `G0` or `G1` runs proceeded without blocking",
-        "Do not display raw internal worker prompts by default",
+        "Allow the commit phase to produce a local `git commit` only after small-MR and verification checks pass",
+        "Persist staged scope, verification proof, commit hash or message, and post-commit status on the linked work item and run",
+        "Do not create PR or MR records or trigger remote merge behavior in P1",
         "Tests pass",
-        "Verify in browser using dev-browser skill",
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-016",
-      "title": "Add unit coverage for gate and discussion policy",
-      "description": "As a maintainer, I want deterministic unit coverage for gate and discussion decisions so that future changes do not make Swarm too interruptive or too permissive.",
+      "title": "Persist structured audit logs and resume lookup",
+      "description": "As an operator, I want structured audit history and a resume index so that delivery runs can be inspected and resumed without replaying chat history.",
       "acceptanceCriteria": [
-        "Add tests for unchanged confirmed roles plus low risk producing `G0` or `G1`",
-        "Add tests for material role deltas producing `G2`",
-        "Add tests for sensitive or high-risk actions producing `G3`",
-        "Add tests for `0/3`, `1/3`, `2/3`, and `3/3` primary discussion signals mapping to the expected execution or discussion mode",
+        "Record structured audit events for phase changes, assignments, decisions, open questions, verification results, and commits per run",
+        "Provide a resume lookup that identifies completed and incomplete work items from stored state and audit data",
+        "Do not re-queue already verified and committed stories when a run is resumed",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-017",
-      "title": "Add integration coverage for approval and escalation flows",
-      "description": "As a maintainer, I want integration coverage for approval writeback and mid-run escalation so that alignment state stays reliable across real swarm transitions.",
+      "title": "Add retrospective output and durable memory extraction",
+      "description": "As a conductor, I want every run to end with a structured retrospective so that reusable lessons are kept while noisy execution details are filtered out.",
       "acceptanceCriteria": [
-        "Add integration tests for role approval auto-writeback and audit metadata",
-        "Add integration tests for mid-run gate escalation pausing the run and requiring fresh confirmation",
-        "Add integration tests showing alignment state is readable by server-side consumers after approval and escalation transitions",
+        "Move completed or failed runs into `retrospective` before final completion is recorded",
+        "Link retrospective output to work items, decisions, verification results, failures, escalations, and collaboration issues",
+        "Only auto-write durable memories that pass reuse filters; require human confirmation for architecture, security, or other high-impact strategy memories",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": true,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Expose swarm delivery read models and routes",
+      "description": "As a client developer, I want server-side delivery read models so that CLI and web surfaces can inspect runs, work items, questions, and decisions from one API contract.",
+      "acceptanceCriteria": [
+        "Add server read models or routes for `SwarmRun`, `WorkItem`, `Decision`, `OpenQuestion`, current phase gate, blockers, and small-MR results",
+        "Project route payloads from authoritative SQLite delivery state instead of reconstructing them from free-text logs",
+        "Regenerate the JavaScript SDK after route schema changes",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Add delivery confirmation and question write routes",
+      "description": "As a user, I want server-side write paths for confirmations and question handling so that UI and CLI actions can safely resolve delivery blockers.",
+      "acceptanceCriteria": [
+        "Add write routes for major role-change confirmation and for answering, deferring, or cancelling open questions",
+        "Route handlers update state only through shared `Decision` and `OpenQuestion` workflows",
+        "Regenerate the JavaScript SDK after route schema changes",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Build the SwarmRun overview page",
+      "description": "As a user, I want a dedicated `SwarmRun` page so that I can understand the current phase, gate result, blockers, and work-item state without digging through session internals.",
+      "acceptanceCriteria": [
+        "Add a dedicated `SwarmRun` page that shows run status, current phase, gate result, blockers, and linked work items",
+        "Reach the page from existing session navigation while keeping the main detail view separate from the session page body",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Add decision and confirmation panels to the SwarmRun page",
+      "description": "As a user, I want to inspect decisions and resolve pending confirmations from the run page so that major role changes and open questions stay actionable.",
+      "acceptanceCriteria": [
+        "Show linked decisions and open questions with recommended option, impact summary, and current status on the `SwarmRun` page",
+        "Allow users to confirm major role changes and answer, defer, or cancel open questions from the page",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Show small-MR results and audit history in the UI",
+      "description": "As a user, I want verification, commit, and audit details visible on the run page so that I can quickly see what shipped, what is blocked, and why.",
+      "acceptanceCriteria": [
+        "Show per-story verification status, local commit result, and structured audit history on the `SwarmRun` page",
+        "Make it possible to identify the current phase, blocker, and pending confirmations from the UI within 30 seconds",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
       "notes": ""
     }
   ]

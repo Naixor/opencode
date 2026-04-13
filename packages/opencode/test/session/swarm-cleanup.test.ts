@@ -3,6 +3,7 @@ import path from "path"
 import { tmpdir } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { Global } from "../../src/global"
+import { DeliveryStore } from "../../src/delivery/store"
 import { SwarmCleanup } from "../../src/session/swarm-cleanup"
 import { Swarm } from "../../src/session/swarm"
 import { SwarmState } from "../../src/session/swarm-state"
@@ -57,6 +58,26 @@ describe("SwarmCleanup", () => {
         const b = await Swarm.launch({ goal: "Ready for v3", dedupe_key: "launch-1" })
         expect(b.id).toBe(a.id)
         expect((await Swarm.list()).map((item) => item.id)).toEqual([a.id])
+      },
+    })
+  })
+
+  test("persists a staged delivery plan when a swarm launches", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await SwarmCleanup.run({ dry_run: false, confirm: "purge-legacy-swarms" })
+        const info = await Swarm.launch({ goal: "Ship delivery state" })
+        const run = DeliveryStore.getRun(info.id)
+        const items = DeliveryStore.listRunItems(info.id)
+          .toSorted((a, b) => run.phases.indexOf(a.phase_gate) - run.phases.indexOf(b.phase_gate))
+          .map((item) => item.phase_gate)
+
+        expect(run.goal).toBe("Ship delivery state")
+        expect(run.owner_session_id).toBe(info.conductor)
+        expect(run.phases).toEqual(["plan", "implement", "verify", "commit", "retrospective"])
+        expect(items).toEqual(["plan", "implement", "verify", "commit", "retrospective"])
       },
     })
   })

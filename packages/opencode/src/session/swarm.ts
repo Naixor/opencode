@@ -17,6 +17,7 @@ import { SessionMetadata } from "./session-metadata"
 import { SwarmState } from "./swarm-state"
 import { Config } from "../config/config"
 import { SwarmCleanup } from "./swarm-cleanup"
+import { DeliveryStore } from "../delivery/store"
 
 export namespace Swarm {
   const log = Log.create({ service: "swarm" })
@@ -298,6 +299,11 @@ export namespace Swarm {
       time: { created: now, updated: now },
     }
     await save(info)
+    DeliveryStore.launch({
+      id,
+      goal: input.goal,
+      owner_session_id: session.id,
+    })
 
     // Send goal to conductor (async — don't await completion)
     SessionPrompt.prompt({
