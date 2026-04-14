@@ -1,335 +1,308 @@
 {
   "project": "OpenCode",
-  "branchName": "ralph/swarm-autonomous-delivery-system",
-  "sourcePrdFile": "tasks/prds/prd-swarm-autonomous-delivery-system.md",
-  "description": "Swarm Autonomous Delivery System - add authoritative delivery state, gated execution, recovery, small-MR enforcement, and a dedicated run UI so Swarm can complete real delivery loops from planning through retrospective.",
+  "branchName": "ralph/hindsight-local-memory-companion-integration",
+  "sourcePrdFile": "tasks/prds/prd-hindsight-local-memory-integration.md",
+  "description": "Add a local embedded Hindsight companion that improves memory recall and extraction while keeping OpenCode's local JSON memory store authoritative.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create SQLite schema for swarm runs and roles",
-      "description": "As a platform engineer, I want `SwarmRun` and `RoleSpec` stored in SQLite so that delivery runs and role definitions have one authoritative source of truth.",
+      "title": "Add Hindsight config schema and defaults",
+      "description": "As a maintainer, I want explicit Hindsight config so that rollout, fallback, and resource budgets are controlled by validated settings.",
       "acceptanceCriteria": [
-        "Add SQLite persistence for `SwarmRun` with `id`, `goal`, `status`, `phase`, `created_at`, `updated_at`, and `owner_session_id`",
-        "Add SQLite persistence for `RoleSpec` with `role_id`, `name`, `responsibility`, `skills`, `limits`, and `approval_required`",
-        "Define shared enum or validation support for run status and phase values in the schema layer",
+        "Add `memory.hindsight` config in `packages/opencode/src/config/config.ts` with `enabled`, `mode`, `extract`, `recall`, `backfill`, `workspace_scope`, `bank_prefix`, `startup_timeout_ms`, `query_timeout_ms`, `retain_limit`, `recall_limit`, `observation_limit`, `context_max_items`, `context_max_tokens`, and `log_level`",
+        "Default values are `enabled: false`, `mode: \"embedded\"`, `extract: true`, `recall: true`, `backfill: true`, `workspace_scope: \"worktree\"`, `context_max_items: 6`, and `context_max_tokens: 1200`",
+        "Invalid Hindsight config fails during parsing instead of later runtime use",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Added `swarm_run` and `role_spec` SQLite tables, shared delivery run status/phase validators, migration, and coverage for persistence plus schema columns."
+      "notes": "Added a validated `memory.hindsight` config schema with phase-1 defaults and config tests covering default application plus invalid-mode rejection."
     },
     {
       "id": "US-002",
-      "title": "Create SQLite schema for work items",
-      "description": "As a delivery engine, I want `WorkItem` records persisted in SQLite so that planned work, dependencies, and verification metadata survive interruptions.",
+      "title": "Add embedded Hindsight service lifecycle",
+      "description": "As a user, I want OpenCode to start and reuse a local embedded Hindsight service so that semantic retrieval works without a cloud dependency.",
       "acceptanceCriteria": [
-        "Add SQLite persistence for `WorkItem` with `id`, `title`, `status`, `owner_role_id`, `blocked_by`, `scope`, `phase_gate`, and `verification`",
-        "Persist `small_mr_required` and dependency data on each work item",
-        "Validate work item status and phase-gate values in the shared schema layer",
+        "Add workspace-scoped Hindsight service module under `packages/opencode/src/memory/hindsight/`",
+        "Use `@vectorize-io/hindsight-all` as the default embedded path and bind only to loopback",
+        "Service starts lazily, reuses one handle per worktree, and supports health, timeout, degraded, and shutdown behavior",
+        "Startup or health failure falls back without crashing memory flows",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Added the `work_item` SQLite table, shared work status and phase-gate validators, a generated migration, and storage coverage for persisted dependency, scope, verification, and small-MR fields."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Create SQLite schema for decisions and open questions",
-      "description": "As a conductor, I want `Decision` and `OpenQuestion` stored as first-class records so that unresolved ambiguities and final conclusions are durable and auditable.",
+      "title": "Add Hindsight client wrapper",
+      "description": "As a developer, I want one client wrapper around Hindsight SDK calls so that recall, retain, and backfill share the same timeout and error handling.",
       "acceptanceCriteria": [
-        "Add SQLite persistence for `Decision` with `id`, `kind`, `summary`, `source`, `status`, `requires_user_confirmation`, `applies_to`, `related_question_id`, `decided_by`, and `decided_at`",
-        "Add SQLite persistence for `OpenQuestion` with `id`, `title`, `context`, `options`, `recommended_option`, `status`, `deadline_policy`, `blocking`, `affects`, `related_decision_id`, and `raised_by`",
-        "Validate the allowed `Decision.status` and `OpenQuestion.status` transition values in shared schema code",
+        "Add client wrapper module that connects through the embedded service using `@vectorize-io/hindsight-client`",
+        "Expose thin wrappers for retain, batch retain, recall, and document or operation inspection calls needed by backfill",
+        "Apply shared timeout and non-fatal error handling in the wrapper instead of scattering SDK calls across engine code",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Added `decision` and `open_question` SQLite tables, shared status enums plus transition helpers for both lifecycles, a generated migration, and storage coverage for persisted decision/question fields."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Add a shared delivery store around SQLite state",
-      "description": "As a maintainer, I want all delivery-state reads and writes to go through one shared module so that SQLite stays the only authoritative write path.",
+      "title": "Add worktree bank identity and stable document mapping",
+      "description": "As a developer, I want deterministic bank and document mapping so that retain, recall, and backfill stay idempotent.",
       "acceptanceCriteria": [
-        "Route `SwarmRun`, `RoleSpec`, `WorkItem`, `Decision`, and `OpenQuestion` CRUD through one shared store module",
-        "Reject invalid state transitions for delivery objects in the shared store layer",
-        "Keep SharedBoard or UI consumers read-only or projection-only relative to authoritative SQLite state",
+        "Add deterministic worktree hash and bank id helpers such as `opencode:${worktreeHash}`",
+        "Generate stable `mem:`, `sess:`, and `obs:` document ids plus string-only metadata and normalized tags",
+        "Resolve recall hits by preferring reversible `document_id` parsing and then `metadata.memory_id`, while rejecting cross-worktree hits",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Added `packages/opencode/src/delivery/store.ts` as the authoritative SQLite CRUD layer for runs, roles, work items, decisions, and questions; enforced delivery transition guards there; and covered the shared store plus transition helpers with targeted storage tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Launch a swarm run with a staged delivery plan",
-      "description": "As a user, I want a launch flow that turns a goal into a persisted staged run so that Swarm starts from a recoverable plan instead of transient prompt state.",
+      "title": "Add retain wrapper for authoritative memory documents",
+      "description": "As a developer, I want local memory records normalized into Hindsight retain calls so that the companion bank mirrors authoritative memory content safely.",
       "acceptanceCriteria": [
-        "Add a launch entrypoint that creates a `SwarmRun` from a high-level delivery goal",
-        "Persist the default phases `plan`, `implement`, `verify`, `commit`, and `retrospective` for new runs",
-        "Store planned work items with owner role, scope, dependencies, and expected verification during planning",
+        "Add retain or upsert wrapper that maps one local memory record to one Hindsight document in the worktree bank",
+        "Use stable `mem:` document ids, string-only metadata, normalized tags, and replace-style idempotent updates",
+        "Retain failures are logged and returned as non-fatal results instead of blocking local memory writes",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "Added `DeliveryStore.launch()` as the authoritative staged-plan entrypoint, persisted ordered run phases plus run-linked work items, wired `Swarm.launch()` through it, and covered the flow with delivery-store and swarm launch tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Persist phase gate evaluation and transitions",
-      "description": "As a user, I want phase progression controlled by persisted gates so that runs only advance when the required conditions are actually satisfied.",
+      "title": "Add Hindsight recall query and resolve pipeline",
+      "description": "As a developer, I want ranked Hindsight hits resolved back to local memory ids so that downstream recall logic only sees authoritative candidates.",
       "acceptanceCriteria": [
-        "Define enter, exit, and fallback rules for `plan`, `implement`, `verify`, `commit`, and `retrospective`",
-        "Persist gate results and blocked reasons back onto the run and affected work items",
-        "Prevent phase advancement while required decisions or blocking open questions remain unresolved",
+        "Add Hindsight recall wrapper with timeout handling and ranked result parsing",
+        "Resolve hits into local memory ids while dropping unresolved, stale, cross-worktree, `sess:`, and `obs:` hits from direct injection",
+        "Preserve both raw relevance score and ranked order on resolved candidates for downstream selection",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Added shared enter/exit/fallback gate rules plus persisted `gate` JSON on `swarm_run` and `work_item`, wired `DeliveryStore.evaluateRun()` and guarded phase advancement through gate checks, and covered blocked decision/question transitions in delivery-store/schema tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Assign work items and detect major role changes",
-      "description": "As a conductor, I want role assignment and major-change detection persisted on work items so that only meaningful role shifts require user review.",
+      "title": "Integrate Hindsight ranking into memory recall",
+      "description": "As a user, I want recall to use Hindsight-ranked authoritative candidates so that the assistant selects more relevant existing memories.",
       "acceptanceCriteria": [
-        "Assign each work item to a `RoleSpec` and persist the owner role id",
-        "Detect major assignment changes for role adds, role removals, role responsibility changes, and cross-role owner reassignments",
-        "Allow ordinary same-role scheduling adjustments without triggering confirmation",
+        "Update `packages/opencode/src/memory/engine/recall.ts` to query Hindsight when `memory.hindsight.enabled` and `memory.hindsight.recall` are true",
+        "Pass resolved authoritative local memory candidates plus raw score and rank into `memory-recall` for final selection",
+        "Fallback to the current recall path on startup failure, timeout, or unusable Hindsight results",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Added `DeliveryStore.reviewAssignments()` and `DeliveryStore.assign()` so work-item owner changes stay tied to `RoleSpec` assignments, major role/owner deltas are detected before mutation, and same-role scheduling updates apply without confirmation; covered the behavior in delivery-store tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Create confirmation-backed role reassignment flow",
-      "description": "As a user, I want major role changes to pause behind an explicit confirmation record so that assignment authority stays visible and reversible.",
+      "title": "Preserve local authority lifecycle boundaries",
+      "description": "As a maintainer, I want Hindsight integration to leave lifecycle ownership on local memory so that retrieval improves without rewriting storage, inject, hit tracking, or decay rules.",
       "acceptanceCriteria": [
-        "Create an `OpenQuestion` with before and after state, reason, recommended option, and impact when a major role change is proposed",
-        "Keep the related `Decision` in `proposed` until the user resolves the question",
-        "Apply confirmed or rejected outcomes back through `Decision` updates rather than direct object mutation",
+        "Keep `packages/opencode/src/memory/storage.ts` as the authoritative store in phase 1",
+        "Keep `inject`, `hit-tracker`, and decay paths operating on local authoritative memory records instead of raw Hindsight responses",
+        "Enable Hindsight recall and extract participation without changing local lifecycle field ownership such as `status`, `score`, `useCount`, or `hitCount`",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "Added `DeliveryStore.requestAssignment()` and `DeliveryStore.resolveAssignment()` so major role changes create linked `Decision` and `OpenQuestion` records with before/after proposal state, remain blocked behind confirmation, and apply confirmed or rejected outcomes through decision resolution instead of direct mutation."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Record structured decision proposals and consensus actions",
-      "description": "As a conductor, I want proposal, review, objection, and decision actions tied to one record so that consensus happens through structured state instead of free-text chatter.",
+      "title": "Add a Hindsight-aware extractor variant",
+      "description": "As a maintainer, I want a dedicated Hindsight-aware extractor path so that extract integration stays aligned with the existing memory-extractor contract.",
       "acceptanceCriteria": [
-        "Store `proposal`, `review`, `objection`, and `decision` actions against a single `Decision` record",
-        "Persist participant roles, candidate outcomes, and input context for proposed decisions",
-        "Reject consensus actions that are not linked to a concrete `Decision` id",
+        "Add a dedicated Hindsight-aware extractor variant instead of bolting unbounded context onto the existing extractor prompt",
+        "Keep the variant compatible with current authoritative memory create or update outputs",
+        "If Hindsight context is unavailable, the extractor path can still run without failing memory extraction",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "Extended `decision` persistence with `participants`, `candidate_outcomes`, `input_context`, and `actions`, added `DeliveryStore.recordDecision()` for structured `proposal`/`review`/`objection`/`decision` entries on one record, and covered the proposal plus missing-id rejection flow in delivery schema/store tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Resolve decisions through agreement or conductor arbitration",
-      "description": "As a conductor, I want deterministic decision resolution rules so that aligned proposals auto-resolve and sufficiently informed conflicts can be settled without vague debate.",
+      "title": "Add extractor context budget enforcement",
+      "description": "As a maintainer, I want explicit item and token budgets for Hindsight extractor context so that extraction quality stays bounded.",
       "acceptanceCriteria": [
-        "Automatically mark a decision as `decided` when required participants align and the recorded inputs are sufficient",
-        "Allow conductor arbitration for informed conflicts that do not cross a user-confirmation boundary",
-        "Persist final reason, `decided_by`, `decided_at`, and affected object updates on the resolved decision",
+        "Enforce both `context_max_items` and `context_max_tokens` budgets in the Hindsight-aware extractor path",
+        "Use defaults of `6` items and `1200` tokens when no override is provided",
+        "Discard or trim excess Hindsight context before prompt construction instead of exceeding the configured budget",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "Updated `DeliveryStore.recordDecision()` to auto-resolve aligned non-confirmation decisions, allow conductor arbitration for informed conflicts, and persist final resolution metadata as JSON on the terminal decision action; extended delivery-store regression coverage for both paths."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Implement open-question lifecycle and gate recomputation",
-      "description": "As a worker, I want unresolved questions tracked through an explicit lifecycle so that blocking ambiguity stays visible and gates recompute when answers arrive.",
+      "title": "Retain session slices for extraction context",
+      "description": "As a developer, I want session slices retained with stable ids so that extraction can query semantically related local context.",
       "acceptanceCriteria": [
-        "Support `open -> waiting_user -> answered -> resolved`, `open -> deferred`, and `open|waiting_user -> cancelled` transitions for `OpenQuestion`",
-        "Pause affected work items for blocking questions and re-check deferred questions before the next related gate",
-        "Recompute related gates and sync the linked decision outcome when a question is closed or downgraded",
+        "Retain current session slices with stable `sess:` document ids before or alongside extraction",
+        "Use the worktree bank, string-only metadata, and normalized tags for session-slice retention",
+        "Retention failure stays non-fatal to the extract flow",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": true,
-      "notes": "Tightened the shared question transition graph, taught `DeliveryStore.updateQuestion()` to clear blocking and sync linked decision outcomes on resolve/defer/cancel, re-block deferred questions when their affected gate becomes current, and covered the lifecycle with delivery schema/store regressions."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-012",
-      "title": "Add work-item checkpoints and failure evidence",
-      "description": "As a user, I want each work item to capture checkpoints and failure evidence so that recovery preserves context instead of erasing what went wrong.",
+      "title": "Inject Hindsight context into extraction",
+      "description": "As a user, I want extraction to see semantically related context from retained sessions so that new memories and updates are more accurate.",
       "acceptanceCriteria": [
-        "Store last successful phase, verification result, produced files, pending actions, and rollback suggestions per work item",
-        "Preserve failure evidence instead of clearing progress when verification or pre-commit work fails",
-        "Keep the current worktree intact by default and require an explicit `Decision` before destructive cleanup is allowed",
+        "Query Hindsight for related documents or observations and pass a bounded `Hindsight context` section into the Hindsight-aware extractor",
+        "Local memory writes still go through authoritative `Memory.create()` and `Memory.update()` paths",
+        "Extractor falls back cleanly when Hindsight returns no usable context",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": true,
-      "notes": "Added authoritative `work_item.checkpoint` and `work_item.failure` JSON persistence, taught `DeliveryStore.updateItem()` to preserve checkpoint state while snapshotting verify/commit failures, and required a decided `destructive_cleanup` decision before `DeliveryStore.allowCleanup()` can unlock destructive cleanup."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-013",
-      "title": "Restore interrupted runs from authoritative state",
-      "description": "As a user, I want interrupted runs to resume from stored state and checkpoints so that long autonomous delivery loops do not restart from scratch.",
+      "title": "Retain authoritative memory writes after create and update",
+      "description": "As a developer, I want changed local memories upserted into Hindsight so that recall stays aligned with the authoritative store over time.",
       "acceptanceCriteria": [
-        "Resume an existing run by loading authoritative SQLite records before checkpoints and active decisions or questions",
-        "Treat stale or conflicting checkpoints as expired and stop behind a new decision or open question when state is inconsistent",
-        "Cover interrupted planning, implementation failure, verification failure, and pre-commit interruption recovery paths",
+        "Hook memory create and update flows to upsert the affected authoritative memory document into Hindsight",
+        "Repeated updates reuse the same stable `mem:` document id instead of creating duplicates",
+        "Retain failure never blocks the local authoritative memory write path",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": true,
-      "notes": "Added `DeliveryStore.resume()` so recovery now reloads authoritative SQLite run and work-item state before checkpoint metadata, rewinds interrupted work into a resumable state, preserves verify/commit failure evidence, and opens a blocking `recovery_review` decision plus question when stored recovery metadata conflicts with the current run."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-014",
-      "title": "Enforce single-thread small-MR execution",
-      "description": "As a developer, I want P1 delivery to enforce one active story path through commit so that each change stays independently verifiable and recoverable.",
+      "title": "Add Hindsight sidecar state persistence",
+      "description": "As a developer, I want structured per-worktree Hindsight state stored outside the authority file so that backfill can resume safely.",
       "acceptanceCriteria": [
-        "Mark each work item with `small_mr_required=true`",
-        "Allow only one active implementation path per story through commit in P1",
-        "Block commit until the work item has passing verification and maps to exactly one story or feature point",
+        "Add sidecar state helpers that read and write a per-worktree `hindsight.json` file next to local memory data",
+        "Persist bank identity, scope, timestamps, and structured backfill state including status, cursor, counts, operation ids, and failure samples",
+        "Do not change the shape of the existing authoritative local memory file to store Hindsight state",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": true,
-      "notes": "Enforced P1 small-MR execution in `DeliveryStore` by keeping `small_mr_required` enabled on delivery work items and blocking the run gate whenever more than one implement/verify/commit path is active; extended regression coverage for the hard invariant and single-thread gate."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-015",
-      "title": "Execute local commit phase with audit writeback",
-      "description": "As a developer, I want successful story work committed locally with structured metadata so that P1 delivery closes the loop without reaching into remote merge flows.",
+      "title": "Add resumable backfill runner for local memories",
+      "description": "As an existing user, I want current local memories imported into Hindsight so that semantic recall is useful immediately after enablement.",
       "acceptanceCriteria": [
-        "Allow the commit phase to produce a local `git commit` only after small-MR and verification checks pass",
-        "Persist staged scope, verification proof, commit hash or message, and post-commit status on the linked work item and run",
-        "Do not create PR or MR records or trigger remote merge behavior in P1",
+        "Add backfill runner that reads local memories and imports them through Hindsight retain APIs using stable `mem:` document ids",
+        "Persist cursor, progress, and failures in the Hindsight sidecar while using replace-style idempotent upserts",
+        "Re-running backfill resumes safely and does not create duplicate authoritative mappings",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": true,
-      "notes": "Added authoritative `work_item.commit` and `swarm_run.audit` persistence plus `DeliveryStore.recordCommit()` so the commit phase now requires passed verification proof, writes staged scope and local commit metadata back onto the commit work item, and appends a structured local-commit audit event without introducing any PR/MR behavior."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-016",
-      "title": "Persist structured audit logs and resume lookup",
-      "description": "As an operator, I want structured audit history and a resume index so that delivery runs can be inspected and resumed without replaying chat history.",
+      "title": "Auto-start and resume backfill on enable",
+      "description": "As a user, I want backfill to begin automatically when Hindsight is enabled so that the companion becomes useful without extra manual setup.",
       "acceptanceCriteria": [
-        "Record structured audit events for phase changes, assignments, decisions, open questions, verification results, and commits per run",
-        "Provide a resume lookup that identifies completed and incomplete work items from stored state and audit data",
-        "Do not re-queue already verified and committed stories when a run is resumed",
+        "Enabling Hindsight starts backfill automatically unless a config escape hatch disables auto-start for testing or recovery",
+        "Interrupted backfill resumes from saved sidecar state instead of starting over blindly",
+        "Disabling Hindsight after backfill does not break local memory reads or prompt injection",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": true,
-      "notes": "Expanded `swarm_run.audit` into structured phase/assignment/decision/question/verification/commit events, added `DeliveryStore.lookup()` plus audit-backed resume repair, and verified committed or passed work is not re-queued when recovery rebuilds a run."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-017",
-      "title": "Add retrospective output and durable memory extraction",
-      "description": "As a conductor, I want every run to end with a structured retrospective so that reusable lessons are kept while noisy execution details are filtered out.",
+      "title": "Add observability and degraded-mode behavior",
+      "description": "As a developer, I want structured logs and safe degraded behavior so that rollout issues are visible without breaking sessions.",
       "acceptanceCriteria": [
-        "Move completed or failed runs into `retrospective` before final completion is recorded",
-        "Link retrospective output to work items, decisions, verification results, failures, escalations, and collaboration issues",
-        "Only auto-write durable memories that pass reuse filters; require human confirmation for architecture, security, or other high-impact strategy memories",
+        "Add structured logs for service startup, health, retain, recall query, extractor assist, stale drops, fallback, and backfill progress",
+        "Mark Hindsight degraded after startup failure and keep local memory create, update, and injection flows running",
+        "Include durations, counts, and fallback reasons without logging more content than current memory logs allow",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": true,
-      "notes": "Added `swarm_run.retrospective` persistence plus a `retrospective` audit event, implemented `DeliveryStore.recordRetrospective()` to link final output back to work items, decisions, verification, failures, escalations, and collaboration issues, and auto-wrote filtered durable memories with pending confirmation for high-impact notes."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-018",
-      "title": "Expose swarm delivery read models and routes",
-      "description": "As a client developer, I want server-side delivery read models so that CLI and web surfaces can inspect runs, work items, questions, and decisions from one API contract.",
+      "title": "Add a read-only Hindsight inspect command",
+      "description": "As a maintainer, I want a minimal status command so that I can inspect Hindsight service health and backfill state during rollout.",
       "acceptanceCriteria": [
-        "Add server read models or routes for `SwarmRun`, `WorkItem`, `Decision`, `OpenQuestion`, current phase gate, blockers, and small-MR results",
-        "Project route payloads from authoritative SQLite delivery state instead of reconstructing them from free-text logs",
-        "Regenerate the JavaScript SDK after route schema changes",
+        "Add a minimal internal read-only command or entrypoint that reports service health, bank identity, scope, and backfill state",
+        "The inspect command does not mutate Hindsight data or local memory state",
+        "Output is sufficient to diagnose whether enablement, service startup, and backfill are healthy",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": true,
-      "notes": "Added `DeliveryStore.read()` and `/swarm/:id/delivery` so server consumers can fetch one authoritative SQLite-backed delivery payload for the run, work items, decisions, questions, current gate, blockers, and small-MR state; regenerated the JavaScript SDK and covered the route with a server test."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-019",
-      "title": "Add delivery confirmation and question write routes",
-      "description": "As a user, I want server-side write paths for confirmations and question handling so that UI and CLI actions can safely resolve delivery blockers.",
+      "title": "Add mapping and recall regression coverage",
+      "description": "As a maintainer, I want targeted regression coverage for config, mapping, and recall resolution so that future changes do not silently break recall behavior.",
       "acceptanceCriteria": [
-        "Add write routes for major role-change confirmation and for answering, deferring, or cancelling open questions",
-        "Route handlers update state only through shared `Decision` and `OpenQuestion` workflows",
-        "Regenerate the JavaScript SDK after route schema changes",
+        "Add unit coverage for config parsing, bank id generation, document id generation, metadata normalization, and resolve rules",
+        "Add regression coverage for recall fallback, stale-hit dropping, and score or rank propagation into `memory-recall`",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 19,
-      "passes": true,
-      "notes": "Added `/swarm/:id/delivery/confirm-assignment` plus question answer/defer/cancel write routes, kept route mutations on `DeliveryStore.resolveAssignment()` and `DeliveryStore.updateQuestion()`, regenerated the JavaScript SDK, and covered the new write flows with server-route tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-020",
-      "title": "Build the SwarmRun overview page",
-      "description": "As a user, I want a dedicated `SwarmRun` page so that I can understand the current phase, gate result, blockers, and work-item state without digging through session internals.",
+      "title": "Add extract and backfill regression coverage",
+      "description": "As a maintainer, I want targeted regression coverage for extract integration and backfill recovery so that future changes do not silently break the companion flow.",
       "acceptanceCriteria": [
-        "Add a dedicated `SwarmRun` page that shows run status, current phase, gate result, blockers, and linked work items",
-        "Reach the page from existing session navigation while keeping the main detail view separate from the session page body",
-        "Verify in browser using dev-browser skill",
+        "Add regression coverage for Hindsight-aware extraction, context budget enforcement, and authoritative memory write behavior",
+        "Add regression coverage for backfill resume, idempotent rerun, and degraded behavior when the embedded service is unavailable",
+        "Keep any real embedded-daemon smoke path opt-in for CI or local verification instead of making it a hard default test requirement",
+        "Tests pass",
         "Typecheck passes"
       ],
       "priority": 20,
-      "passes": true,
-      "notes": "Added a dedicated `/:dir/swarm/:id/run` page that reads `/swarm/:id/delivery`, renders run status, current phase, gate result, blockers, small-MR summary, and work-item state, and linked it from existing swarm sidebar navigation plus the admin detail header."
-    },
-    {
-      "id": "US-021",
-      "title": "Add decision and confirmation panels to the SwarmRun page",
-      "description": "As a user, I want to inspect decisions and resolve pending confirmations from the run page so that major role changes and open questions stay actionable.",
-      "acceptanceCriteria": [
-        "Show linked decisions and open questions with recommended option, impact summary, and current status on the `SwarmRun` page",
-        "Allow users to confirm major role changes and answer, defer, or cancel open questions from the page",
-        "Verify in browser using dev-browser skill",
-        "Typecheck passes"
-      ],
-      "priority": 21,
-      "passes": true,
-      "notes": "Expanded `packages/app/src/pages/swarm/swarm-run.tsx` with decision and question panels that show linked status, recommendation, impact, and action history, then wired run-scoped confirm, answer, defer, and cancel actions through the authoritative delivery SDK routes with a detail refetch after each mutation."
-    },
-    {
-      "id": "US-022",
-      "title": "Show small-MR results and audit history in the UI",
-      "description": "As a user, I want verification, commit, and audit details visible on the run page so that I can quickly see what shipped, what is blocked, and why.",
-      "acceptanceCriteria": [
-        "Show per-story verification status, local commit result, and structured audit history on the `SwarmRun` page",
-        "Make it possible to identify the current phase, blocker, and pending confirmations from the UI within 30 seconds",
-        "Verify in browser using dev-browser skill",
-        "Typecheck passes"
-      ],
-      "priority": 22,
-      "passes": true,
-      "notes": "Expanded the `/:dir/swarm/:id/run` page with an at-a-glance delivery summary, per-story verification and local commit status cards, and a structured audit timeline sourced from the authoritative delivery read model; browser verification confirmed the route shell and empty-state flow locally, while populated-state browser checks still depend on a live delivery payload from the current local server wiring."
+      "passes": false,
+      "notes": ""
     }
   ]
 }

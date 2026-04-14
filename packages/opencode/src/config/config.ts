@@ -1021,6 +1021,72 @@ export namespace Config {
     })
   export type Provider = z.infer<typeof Provider>
 
+  export const Hindsight = z
+    .object({
+      enabled: z.boolean().optional().default(false).describe("Enable Hindsight companion integration"),
+      mode: z
+        .enum(["embedded"])
+        .optional()
+        .default("embedded")
+        .describe("Hindsight runtime mode (phase 1 only supports embedded)"),
+      extract: z.boolean().optional().default(true).describe("Enable Hindsight-assisted extraction"),
+      recall: z.boolean().optional().default(true).describe("Enable Hindsight-assisted recall ranking"),
+      backfill: z.boolean().optional().default(true).describe("Enable Hindsight backfill support"),
+      workspace_scope: z
+        .enum(["worktree"])
+        .optional()
+        .default("worktree")
+        .describe("Scope Hindsight data to the current worktree"),
+      bank_prefix: z.string().optional().describe("Prefix used when generating Hindsight bank ids"),
+      startup_timeout_ms: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Timeout in milliseconds for embedded Hindsight startup"),
+      query_timeout_ms: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Timeout in milliseconds for Hindsight queries"),
+      retain_limit: z.number().int().positive().optional().describe("Maximum documents retained per retain batch"),
+      recall_limit: z.number().int().positive().optional().describe("Maximum Hindsight recall hits to request"),
+      observation_limit: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Maximum Hindsight observations to inspect for extractor context"),
+      context_max_items: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .default(6)
+        .describe("Maximum Hindsight context items to inject into extractor prompts (default: 6)"),
+      context_max_tokens: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .default(1200)
+        .describe("Maximum Hindsight context tokens to inject into extractor prompts (default: 1200)"),
+      log_level: Log.Level.optional().describe("Log level override for Hindsight integration"),
+    })
+    .default({
+      enabled: false,
+      mode: "embedded",
+      extract: true,
+      recall: true,
+      backfill: true,
+      workspace_scope: "worktree",
+      context_max_items: 6,
+      context_max_tokens: 1200,
+    })
+    .describe("Hindsight companion configuration")
+  export type Hindsight = z.infer<typeof Hindsight>
+
   export const Info = z
     .object({
       $schema: z.string().optional().describe("JSON schema reference for configuration validation"),
@@ -1462,6 +1528,7 @@ export namespace Config {
           projectId: z.string().optional().describe("Override auto-detected project ID"),
           languages: z.array(z.string()).optional().describe("Override auto-detected languages"),
           techStack: z.array(z.string()).optional().describe("Override auto-detected tech stack"),
+          hindsight: Hindsight,
           promotionThreshold: z
             .object({
               minScore: z.number().optional().describe("Minimum score for team promotion candidate (default: 5.0)"),

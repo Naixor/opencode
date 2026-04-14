@@ -59,6 +59,56 @@ test("loads JSON config file", async () => {
   })
 })
 
+test("applies hindsight defaults when configured", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        $schema: "https://opencode.ai/config.json",
+        memory: {
+          hindsight: {},
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await Config.get()
+      expect(config.memory?.hindsight).toEqual({
+        enabled: false,
+        mode: "embedded",
+        extract: true,
+        recall: true,
+        backfill: true,
+        workspace_scope: "worktree",
+        context_max_items: 6,
+        context_max_tokens: 1200,
+      })
+    },
+  })
+})
+
+test("throws error for invalid hindsight config", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        $schema: "https://opencode.ai/config.json",
+        memory: {
+          hindsight: {
+            mode: "remote",
+          },
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      await expect(Config.get()).rejects.toThrow()
+    },
+  })
+})
+
 test("ignores legacy tui keys in opencode config", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
