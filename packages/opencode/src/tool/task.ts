@@ -11,6 +11,7 @@ import { defer } from "@/util/defer"
 import { Config } from "../config/config"
 import { PermissionNext } from "@/permission/next"
 import { Categories } from "../agent/background/categories"
+import { RalphLoop } from "../session/hooks/ralph-loop"
 
 const parameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
@@ -102,6 +103,11 @@ export const TaskTool = Tool.define("task", async (ctx) => {
           ],
         })
       })
+
+      if (params.subagent_type === "oracle") {
+        RalphLoop.setVerificationSession(ctx.sessionID, session.id)
+      }
+
       const msg = await MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID })
       if (msg.info.role !== "assistant") throw new Error("Not an assistant message")
 

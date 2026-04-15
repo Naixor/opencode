@@ -1,0 +1,240 @@
+## Codebase Patterns
+- New SQLite tables need both a `src/**/*.sql.ts` definition and a matching export from `packages/opencode/src/storage/schema.ts` so `Database.Client()` and Drizzle migrations stay aligned.
+- Delivery-state mutations belong in `packages/opencode/src/delivery/store.ts`; SharedBoard and UI code should consume SQLite-backed read models instead of writing delivery tables directly.
+- `DeliveryStore.launch()` is the authoritative way to seed a recoverable swarm delivery run: it persists `swarm_run.phases`, ensures default delivery roles exist, and inserts run-linked staged `work_item` rows before conductor execution continues.
+- Delivery phase gates live in `swarm_run.gate` and `work_item.gate`; use `DeliveryStore.evaluateRun()` or the store write paths to refresh blocker reasons before advancing `swarm_run.phase`.
+- Use `DeliveryStore.reviewAssignments()` before changing role plans or `owner_role_id`; `DeliveryStore.assign()` only applies same-role scheduling updates and raises `DeliveryAssignmentError` for role add/remove, responsibility changes, or cross-role owner reassignments.
+- Major role-plan deltas should go through `DeliveryStore.requestAssignment()` and `DeliveryStore.resolveAssignment()`; store the before/after proposal in `open_question.context` and keep the linked `Decision` in `proposed` until the question is resolved.
+- Use `DeliveryStore.recordDecision()` for structured consensus activity; keep proposal-time `participants`, `candidate_outcomes`, and `input_context` on the authoritative `decision` row so later review, objection, and final decision actions append to one log.
+- Non-confirmation decisions resolve inside `DeliveryStore.recordDecision()`: all listed participants must have recorded outcomes before consensus or conductor arbitration can decide the row, and the terminal `decision` action `context` stores JSON `{ reason, updates }` for downstream consumers.
+- Route open-question lifecycle changes through `DeliveryStore.updateQuestion()`; it is responsible for clearing `blocking` on resolved/deferred/cancelled questions, syncing the linked `Decision`, and re-blocking deferred questions when the affected work-item gate becomes current.
+- Work-item recovery state lives in `work_item.checkpoint` and `work_item.failure`; keep successful progress in `checkpoint`, let `updateItem()` snapshot verify/commit failures into `failure`, and only flip `destructive_cleanup_allowed` through `DeliveryStore.allowCleanup()` with a decided `destructive_cleanup` decision.
+- `DeliveryStore.resume()` is the authoritative recovery entrypoint: it reloads SQLite run/items first, rewinds interrupted `in_progress` or `verifying` work back to a resumable state, preserves verify/commit failure evidence, and opens a blocking `recovery_review` question when checkpoint or failure metadata conflicts with current delivery state.
+- Keep `small_mr_required` enabled for P1 delivery work items and let `DeliveryStore.sync()` block the run whenever more than one `implement`/`verify`/`commit` item is active; the single-thread guard is the authoritative small-MR enforcement point.
+- Complete the commit gate through `DeliveryStore.recordCommit()` rather than `updateItem()`; it is the only path that writes `work_item.commit`, requires passed verification proof plus staged scope, and appends the matching `swarm_run.audit` commit event.
+- `swarm_run.audit` is the structured run history for phase, assignment, decision, question, verification, and commit events; use `DeliveryStore.lookup()` or `DeliveryStore.resume()` to rebuild completed versus pending work and keep already verified or committed items out of the resume queue.
+- Finalize delivery runs through `DeliveryStore.recordRetrospective()`; it records linked retrospective output on `swarm_run`, appends a `retrospective` audit event, writes durable memories through the project memory store, and blocks direct terminal `updateRun(...status)` writes until retrospective exists.
+- Delivery API consumers should use `DeliveryStore.read()` via `/swarm/:id/delivery`; it refreshes run gates from SQLite and returns one authoritative payload for the run, work items, decisions, questions, blockers, and small-MR state.
+- Swarm delivery UI should use the dedicated `/:dir/swarm/:id/run` route backed by `/swarm/:id/delivery`; keep `/:dir/swarm/:id` focused on admin controls so run monitoring stays separate from session and admin views.
+- Swarm run action panels should call the delivery write routes and then refetch the same `/swarm/:id/delivery` resource; keep decisions and questions authoritative instead of staging local optimistic copies.
+- Swarm run ship-status and audit sections should read the authoritative `state`, `commit`, and `audit` fields from `/swarm/:id/delivery`; avoid reconstructing delivery history from EventSource snapshots in client state.
+
+## 2026-04-14 00:17:26 CST - US-001
+- Added authoritative SQLite schema for `swarm_run` and `role_spec`, plus shared `RunStatus` and `RunPhase` validators for delivery state.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/storage/schema.ts`, `packages/opencode/migration/20260413161652_add-swarm-delivery-schema/migration.sql`, `packages/opencode/migration/20260413161652_add-swarm-delivery-schema/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Delivery-state schema can start as a focused module under `packages/opencode/src/delivery/` without touching the existing SharedBoard-backed swarm runtime yet.
+  - Drizzle migration generation works from `packages/opencode` with `bun run db generate --name <slug>` and produces the required per-folder `migration.sql` plus `snapshot.json` output.
+  - Persistence coverage is easiest through `Database.Client()` plus `resetDatabase()` in `packages/opencode/test/fixture/db.ts`, then `pragma table_info(...)` for column assertions.
+---
+
+## 2026-04-14 00:23:48 CST - US-002
+- Added authoritative `work_item` SQLite persistence with owner role, dependency list, scope, phase gate, verification metadata, and `small_mr_required` fields.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/storage/schema.ts`, `packages/opencode/migration/20260413162202_add-work-item-schema/migration.sql`, `packages/opencode/migration/20260413162202_add-work-item-schema/snapshot.json`, `packages/opencode/migration/20260413162303_refine-work-item-schema/migration.sql`, `packages/opencode/migration/20260413162303_refine-work-item-schema/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - `WorkItem` status needs its own enum set (`ready`, `in_progress`, `verifying`, etc.) instead of reusing run-level status values.
+  - Work-item verification fits better as structured JSON metadata (`status`, `required`, `commands`, `result`, `updated_at`) than as a raw command list, which keeps later gate and audit stories extensible.
+  - When a schema refinement happens before commit, letting Drizzle generate a follow-up migration preserves a correct latest snapshot without hand-editing snapshot files.
+---
+
+## 2026-04-14 00:31:48 CST - US-003
+- Added authoritative `decision` and `open_question` SQLite persistence plus shared status-transition helpers for both lifecycles.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/storage/schema.ts`, `packages/opencode/migration/20260413163120_add-decision-question-schema/migration.sql`, `packages/opencode/migration/20260413163120_add-decision-question-schema/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Delivery lifecycle validation belongs in `packages/opencode/src/delivery/schema.ts`; exporting small transition helpers there keeps later store code focused on business rules instead of repeating enum edge checks.
+  - Decision and question link fields can stay as nullable ids at the schema stage, which avoids cyclic foreign-key constraints while the authoritative store logic is still being introduced.
+  - The storage regression test can cover all delivery tables in one fixture-backed flow, which keeps migration assertions cheap while still validating the whole schema surface.
+---
+
+## 2026-04-14 00:43:06 CST - US-004
+- Added `packages/opencode/src/delivery/store.ts` as the shared SQLite CRUD layer for `SwarmRun`, `RoleSpec`, `WorkItem`, `Decision`, and `OpenQuestion`, with delivery transition guards enforced in the store.
+- Files changed: `packages/opencode/src/delivery/store.ts`, `packages/opencode/src/delivery/schema.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Store-level updates should load the current row inside `Database.transaction(...)`, reject invalid lifecycle changes before writing, and then re-read the row so later consumers only see authoritative SQLite state.
+  - Delivery transition rules now live in `packages/opencode/src/delivery/schema.ts`, so future route or orchestration stories can reuse the same guards instead of inventing local status checks.
+  - NamedError-backed transition failures surface as the error name in Bun assertions, so store regression tests should assert `DeliveryTransitionError` rather than the custom payload message.
+  - `packages/opencode/test/storage/delivery-store.test.ts` is the focused regression suite for shared delivery CRUD and invalid transition rejection; extend it before wiring new delivery routes or UI flows.
+---
+
+## 2026-04-14 00:58:12 CST - US-005
+- Added `DeliveryStore.launch()` as the authoritative staged-plan entrypoint, persisted ordered run phases on `swarm_run`, linked planned `work_item` rows back to their run, and wired `Swarm.launch()` through the new delivery launch flow.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/src/session/swarm.ts`, `packages/opencode/migration/20260413165640_add-delivery-launch-plan/migration.sql`, `packages/opencode/migration/20260413165640_add-delivery-launch-plan/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/test/session/swarm-cleanup.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - `Swarm.launch()` should call `DeliveryStore.launch()` right after the conductor session exists so `owner_session_id` and staged delivery state are persisted before worker orchestration starts.
+  - Persisting the full ordered phase list on `swarm_run.phases` keeps current-phase transitions (`phase`) separate from the authored stage plan that later gates and UI read models will need.
+  - When a strict foreign key is added to existing delivery data, rebuild-style migrations can preserve old rows by backfilling synthetic legacy runs instead of weakening the new authoritative schema.
+---
+
+## 2026-04-14 01:14:14 CST - US-006
+- Added shared enter/exit/fallback gate rules, persisted `gate` JSON on `swarm_run` and `work_item`, and taught `DeliveryStore` to recompute gate state plus blocker reasons from current run, item, decision, and question rows.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/migration/20260413170956_add-delivery-phase-gates/migration.sql`, `packages/opencode/migration/20260413170956_add-delivery-phase-gates/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Gate state should be refreshed inside delivery-store write paths so run status, current item readiness, and blocker reasons stay aligned with authoritative SQLite rows.
+  - Generated SQLite `ADD COLUMN ... NOT NULL` migrations for JSON backfills need manual defaults or `UPDATE` statements when earlier delivery rows may already exist.
+  - Gate-controlled phase advancement belongs in `DeliveryStore.updateRun()`: call `DeliveryStore.evaluateRun()` first, then only allow `Delivery.next(prev.phase)` when the persisted gate is `ready`.
+---
+
+## 2026-04-14 01:40:00 CST - US-007
+- Added `DeliveryStore.reviewAssignments()` and `DeliveryStore.assign()` so work-item assignment changes stay tied to `RoleSpec` ownership while major role-plan deltas are detected before mutation.
+- Files changed: `packages/opencode/src/delivery/store.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Treat `roles` in assignment review as the full proposed role plan for the run; that is what lets the store detect role additions, removals, and responsibility edits in one pass.
+  - Same-role scheduling changes should flow through `DeliveryStore.assign()` instead of `updateItem()` when later stories need a shared major-change boundary before creating confirmation records.
+  - `DeliveryAssignmentError` is the reusable handoff point for the upcoming confirmation workflow because it preserves the exact role and owner deltas without mutating SQLite first.
+---
+
+## 2026-04-14 01:32:56 CST - US-008
+- Added `DeliveryStore.requestAssignment()` and `DeliveryStore.resolveAssignment()` so major role changes create linked `Decision`/`OpenQuestion` records with serialized before/after state, impact, and recommendation before any SQLite mutation happens.
+- Files changed: `packages/opencode/src/delivery/store.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep major assignment proposals in `open_question.context` as structured JSON so later routes and UI can read the same before/after payload without inventing a second store.
+  - Resolve confirmed or rejected role changes by updating the linked `Decision` first, then applying or discarding the proposed role/item patch inside the same transaction.
+  - Delivery gate recomputation already treats proposed confirmation-backed `Decision` and blocking `OpenQuestion` rows as blockers, so the confirmation workflow only needs to create and resolve those records to pause or resume a run.
+---
+
+## 2026-04-14 01:41:05 CST - US-009
+- Extended `decision` persistence with structured `participants`, `candidate_outcomes`, `input_context`, and `actions` fields so consensus activity stays on one authoritative row.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/migration/20260413173901_decision-actions/migration.sql`, `packages/opencode/migration/20260413173901_decision-actions/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Proposal metadata belongs on the `decision` row itself; later `review`, `objection`, and `decision` actions should append to `decision.actions` instead of creating sibling records or free-text logs.
+  - When a migration adds JSON-backed `NOT NULL` columns to an existing SQLite table, give the SQL migration an explicit `'[]'` default so older rows can be backfilled safely during `ALTER TABLE`.
+  - `DeliveryStore.recordDecision()` should be the shared entrypoint for structured consensus writes because it both validates the action kind and rejects writes for missing `decision_id` values.
+---
+
+## 2026-04-14 01:48:53 CST - US-010
+- Added deterministic resolution rules to `DeliveryStore.recordDecision()` so non-confirmation decisions auto-resolve on aligned participant inputs and conductor `decision` actions can arbitrate informed conflicts.
+- Files changed: `packages/opencode/src/delivery/store.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep proposal-time `participants`, `candidate_outcomes`, and `input_context` populated before expecting consensus resolution; incomplete decision metadata should leave the row in `proposed`.
+  - Store the terminal decision rationale and touched targets as JSON in the final `decision.actions[*].context` entry so later routes and UI work can read one authoritative resolution payload without a second table.
+  - Assignment confirmation resolution should append the same terminal decision metadata shape as consensus resolution so user-confirmed and auto-resolved decisions stay inspectable through one action log format.
+---
+
+## 2026-04-14 01:58:22 CST - US-011
+- Tightened the `OpenQuestion` lifecycle to the explicit `open -> waiting_user -> answered -> resolved`, `open -> deferred`, and `open|waiting_user -> cancelled` paths, and taught `DeliveryStore.updateQuestion()` to auto-clear blocking plus sync linked decisions on resolve/defer/cancel.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep deferred questions attached to the future `WorkItem` ids that should re-check them; `sync()` only re-arms deferred blockers when the affected gate becomes current.
+  - `resolveAssignment()` now passes through `waiting_user -> answered -> resolved` inside one transaction so confirmation-backed questions still respect the shared lifecycle rules.
+  - Blocking questions pause affected work items through store-driven status and gate recomputation, while resolved or downgraded questions release the same items without requiring a second manual refresh.
+---
+
+## 2026-04-14 02:11:03 CST - US-012
+- Added authoritative `work_item.checkpoint` and `work_item.failure` persistence for recovery metadata, plus store logic that snapshots verify/commit failures without erasing the last successful checkpoint.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/migration/20260413180918_add-work-item-checkpoints/migration.sql`, `packages/opencode/migration/20260413180918_add-work-item-checkpoints/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep recovery state split between `checkpoint` (last good progress) and `failure` (latest verify/commit failure evidence) so later resume logic can read both without reconstructing history from logs.
+  - Let `DeliveryStore.updateItem()` auto-capture verify/commit failures from status and verification transitions; callers should update `checkpoint` before risky work instead of overwriting it after a failure.
+  - Destructive cleanup is opt-in state on `checkpoint`; future cleanup or recovery flows should call `DeliveryStore.allowCleanup()` and require a decided `destructive_cleanup` decision that applies to the work item.
+---
+
+## 2026-04-14 02:20:51 CST - US-013
+- Added `DeliveryStore.resume()` as the authoritative recovery entrypoint so interrupted runs now reload SQLite state first, rewind interrupted work into a resumable state, and raise a blocking `recovery_review` decision when checkpoint or failure metadata conflicts with the current run.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Recovery should trust `SwarmRun` and `WorkItem` SQLite rows before consulting `checkpoint`, `failure`, or any old session memory; those secondary blobs only refine the resume plan.
+  - Interrupted `verifying` work needs an explicit verification reset (`running -> pending`) before the item can become resumable again without tripping phase-gate logic.
+  - Resume-time inconsistencies should block the run behind a linked `Decision` and `OpenQuestion`, not silently patch forward, so later routes and UI can surface the recovery choice through the same authoritative workflow.
+---
+
+## 2026-04-14 02:28:17 CST - US-014
+- Enforced P1 small-MR execution in `DeliveryStore` so delivery work items cannot disable `small_mr_required`, and the run gate now blocks when more than one `implement`/`verify`/`commit` path is active.
+- Files changed: `packages/opencode/src/delivery/store.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - The single-thread small-MR rule belongs in `DeliveryStore.sync()`, because gate recomputation is where the store can see every active `implement`/`verify`/`commit` item for the run.
+  - Treat `small_mr_required` as a hard store invariant in P1; rejecting `false` at the write path is simpler than trying to repair the flag later from run state.
+  - Tests that advance from `verify` to `commit` need an explicit `verification.status = "passed"` on the verify item before the run gate can open for commit.
+---
+
+## 2026-04-14 02:42:20 CST - US-015
+- Added authoritative local-commit writeback with `work_item.commit`, `swarm_run.audit`, and `DeliveryStore.recordCommit()` so the commit phase now records staged scope, passed verification proof, and local commit metadata before the work item can complete.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/migration/20260413184006_add-delivery-commit-audit/migration.sql`, `packages/opencode/migration/20260413184006_add-delivery-commit-audit/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Successful commit completion should go through `DeliveryStore.recordCommit()` instead of `updateItem()`, because `done()` now treats commit work as complete only after the structured `commit` record exists.
+  - Keep actual staged file scope separate from `WorkItem.scope`; the commit writeback records the concrete staged paths in `work_item.commit.staged_scope` and mirrors them into `swarm_run.audit`.
+  - Run-level audit history can start as an append-only JSON list on `swarm_run`; later audit stories can extend the same structure with more event kinds without weakening the authoritative store path.
+---
+
+## 2026-04-14 02:55:53 CST - US-016
+- Expanded `swarm_run.audit` into typed phase, assignment, decision, question, verification, and commit events, and taught the delivery store to append those records from the authoritative write paths.
+- Added `DeliveryStore.lookup()` plus audit-backed resume repair so verified or committed work can be reconstructed from stored state and audit history instead of being re-queued after partial state loss.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Append delivery audit events from the same store write path that mutates authoritative state; that keeps `swarm_run.audit` usable as a resume index without replaying chat history.
+  - `DeliveryStore.lookup()` is the shared way to derive completed and pending work from SQLite rows plus audit history, while `DeliveryStore.resume()` should repair missing verify or commit completion from audit before deciding what to re-queue.
+  - Resume repair only needs to restore terminal verify and commit facts; phase gates and future pending work can still be recomputed by `DeliveryStore.sync()` after the authoritative rows are patched.
+---
+
+## 2026-04-14 03:18:44 CST - US-017
+- Added authoritative retrospective persistence on `swarm_run`, a `retrospective` audit event, and `DeliveryStore.recordRetrospective()` so delivery runs now finalize through a linked retrospective instead of writing terminal run status directly.
+- Wired retrospective output to linked work items, decisions, verification results, failures, escalations, and collaboration issues, and wrote durable retrospective memories through the project memory store with duplicate filtering plus pending-confirmation handling for high-impact notes.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/delivery.sql.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/migration/20260413191513_add-delivery-retrospective/migration.sql`, `packages/opencode/migration/20260413191513_add-delivery-retrospective/snapshot.json`, `packages/opencode/test/storage/delivery-schema.test.ts`, `packages/opencode/test/storage/delivery-store.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Use `DeliveryStore.recordRetrospective()` as the only terminal delivery-finalization path; it promotes the run into `retrospective`, completes the retrospective work item, stores the linked output, and only then marks the run `completed` or `failed`.
+  - Retrospective memories should be passed in as structured durable candidates, then filtered through `Memory.findSimilar()` plus simple length checks before writing to memory storage.
+  - High-impact retrospective notes should still be stored automatically, but with memory status `pending` so later human confirmation can promote or reject them without losing the captured lesson.
+---
+
+## 2026-04-14 03:29:10 CST - US-018
+- Added `DeliveryStore.read()` plus the `/swarm/:id/delivery` server route so clients can fetch one authoritative SQLite-backed delivery payload with the run, work items, decisions, questions, gate, blockers, and small-MR state.
+- Regenerated the JavaScript SDK after exposing the new delivery route contract and added route coverage for the new read model payload.
+- Verification: `bun run typecheck`, `bun test test/storage/delivery-store.test.ts test/server/swarm-delivery-route.test.ts`, and `test-runner` all passed.
+- Files changed: `packages/opencode/src/delivery/schema.ts`, `packages/opencode/src/delivery/store.ts`, `packages/opencode/src/server/routes/swarm.ts`, `packages/opencode/test/server/swarm-delivery-route.test.ts`, `packages/sdk/js/src/v2/gen/sdk.gen.ts`, `packages/sdk/js/src/v2/gen/types.gen.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep delivery read routes projection-only: `DeliveryStore.read()` should refresh gates from SQLite first, then return route-ready run, item, decision, question, blocker, and small-MR fields without inventing a second delivery cache.
+  - Route blockers should be structured records, not only `gate.reason`, so later UI panels can link decisions, open questions, and small-MR conflicts directly from the same payload.
+  - Route schema changes require regenerating the JS SDK with `./packages/sdk/js/script/build.ts` before marking the story done.
+---
+
+## 2026-04-14 03:41:34 CST - US-019
+- Added `/swarm/:id/delivery/confirm-assignment` plus question `answer`, `defer`, and `cancel` write routes in `packages/opencode/src/server/routes/swarm.ts`, keeping mutations on `DeliveryStore.resolveAssignment()` and `DeliveryStore.updateQuestion()` before returning a fresh delivery read model.
+- Regenerated the JavaScript SDK and expanded `packages/opencode/test/server/swarm-delivery-route.test.ts` to cover confirmation, answer, defer, and cancel flows end-to-end through the server routes.
+- Verification: `./packages/sdk/js/script/build.ts`, `bun test test/server/swarm-delivery-route.test.ts`, and `test-runner` passed. `bun run typecheck` still reports unrelated pre-existing errors in CLI/share modules outside the delivery-route changes.
+- Files changed: `packages/opencode/src/server/routes/swarm.ts`, `packages/opencode/test/server/swarm-delivery-route.test.ts`, `packages/sdk/js/src/v2/gen/sdk.gen.ts`, `packages/sdk/js/src/v2/gen/types.gen.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep delivery write routes run-scoped: verify the `decision_id` or `question_id` belongs to the requested swarm before mutating shared state, then return `DeliveryStore.read(run_id)` so clients stay on one delivery contract.
+  - Answer routes can stay inside the existing question lifecycle by stepping `open|deferred -> waiting_user -> answered -> resolved`; that preserves the linked `Decision` sync implemented in `DeliveryStore.updateQuestion()`.
+  - The route test is the right integration point for delivery API writes because it proves the HTTP contract, the store workflow, and the generated SDK schema changed together.
+---
+
+## 2026-04-14 04:24:00 CST - US-020
+- Added a dedicated `SwarmRun` page at `/:dir/swarm/:id/run` that reads `/swarm/:id/delivery` and renders run status, phase, gate state, blockers, small-MR summary, and authoritative work-item cards.
+- Routed sidebar swarm entries to the new run view and added an `Open Run View` shortcut from the swarm admin page so the run page is reachable from existing session navigation while staying separate from the admin detail surface.
+- Verification: `bun run typecheck`, `bun run test:unit`, browser verification at `http://localhost:4444/.../swarm/demo/run` for the new route shell and empty-state behavior, and `test-runner` all passed (`VERIFY: PASS`). No live swarm existed locally to validate a populated run payload in browser.
+- Files changed: `packages/app/src/app.tsx`, `packages/app/src/pages/layout/sidebar-swarm.tsx`, `packages/app/src/pages/swarm/swarm-dashboard.tsx`, `packages/app/src/pages/swarm/swarm-run.tsx`, `packages/app/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep delivery monitoring on the dedicated `/:dir/swarm/:id/run` route and fetch the authoritative `/swarm/:id/delivery` payload there instead of rebuilding run state from admin or session data.
+  - Sidebar swarm navigation can point at the run view while the admin page remains reachable as a secondary action, which keeps the primary swarm detail surface focused on delivery status.
+  - Browser verification can confirm route rendering and empty-state behavior when no local swarm data exists, but populated-state checks still need a real swarm run.
+---
+
+## 2026-04-14 04:07:54 CST - US-021
+- Added decision and question panels to `packages/app/src/pages/swarm/swarm-run.tsx`, including decision action logs, impact/recommendation summaries, and run-scoped action buttons for confirmation, answer, defer, and cancel flows.
+- Kept all run-page mutations on the authoritative delivery SDK routes, refreshed the same delivery detail resource after each action, and documented that pattern in `packages/app/AGENTS.md`.
+- Verification: `bun run typecheck`, `bun run test:unit`, and `test-runner` passed (`VERIFY: PASS`). Browser verification confirmed the run route shell still loads locally, but the current local server wiring only exposed the empty-state shell instead of a live `/swarm/:id/delivery` payload for populated-state interaction.
+- Files changed: `packages/app/src/pages/swarm/swarm-run.tsx`, `packages/app/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep decision and question cards on the same `/swarm/:id/delivery` resource; after any write action, refetch instead of hand-merging nested run state.
+  - Confirmation-backed role changes should stay on `confirmAssignment`, while ordinary open questions should use the dedicated `answerQuestion`, `deferQuestion`, and `cancelQuestion` routes from the same page.
+  - Local browser checks can still validate route wiring and empty-state resilience even when the active local server is not serving populated delivery data, but full interaction checks need a live delivery run behind the page.
+---
+
+## 2026-04-14 04:33:48 CST - US-022
+- Expanded `packages/app/src/pages/swarm/swarm-run.tsx` with an at-a-glance delivery summary, per-story commit status cards next to verification and checkpoint state, and a structured audit-history timeline so users can see what shipped, what is blocked, and which confirmation is next.
+- Documented the delivery read-model pattern in `packages/app/AGENTS.md` and kept the new ship-status and audit copy derived from `/swarm/:id/delivery` instead of rebuilding history from EventSource transitions.
+- Verification: `bun run typecheck`, `bun run test:unit`, and `test-runner` passed (`VERIFY: PASS`). Browser verification confirmed the `/:dir/swarm/:id/run` route shell and empty-state flow locally; the current local server wiring still did not expose a populated delivery payload for end-to-end populated-state clicks.
+- Files changed: `packages/app/src/pages/swarm/swarm-run.tsx`, `packages/app/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep quick-scan run summaries sourced from the delivery read model so current blocker, pending confirmation, verification proof, and commit status stay aligned without extra client caches.
+  - Show local ship evidence on each work-item card by pairing `state.commit` with the existing verification snapshot instead of inventing a separate per-story status store.
+  - The audit timeline can render directly from the authoritative `audit` list, but browser validation of populated delivery panels still depends on a local server that serves a real `/swarm/:id/delivery` payload.
+---
+
+## 2026-04-14 05:27:04 CST - Completion Audit
+- Re-read `tasks/prd.json`, `tasks/.last-branch`, and the current branch state; all 22 user stories remain `passes: true`, and the active branch still matches `ralph/swarm-autonomous-delivery-system`.
+- Verification: reran the project `test-runner` for the current repository state and it returned `VERIFY: PASS`.
+- Files changed: `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - When an ultrawork loop reaches all-true `passes` state, append one final completion audit entry with the active branch and a fresh `test-runner` result so the stop condition is verifiable from repository artifacts alone.
+  - Keep the completion audit in `tasks/progress.txt`; Oracle audits that inspect repo state should not need temporary loop memory to confirm the final gate.
+---

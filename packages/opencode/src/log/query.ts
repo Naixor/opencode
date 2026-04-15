@@ -15,6 +15,55 @@ import type { SQL } from "../storage/db"
 
 export namespace LlmLog {
   const log = Log.create({ service: "llm-log-query" })
+  const stale = 5 * 60 * 1000
+
+  function reap(now = Date.now()) {
+    const cutoff = now - stale
+
+    return Database.use((db) => {
+      const rows = db
+        .select({
+          id: LlmLogTable.id,
+          response_id: LlmLogResponseTable.id,
+          error: LlmLogResponseTable.error,
+        })
+        .from(LlmLogTable)
+        .leftJoin(LlmLogResponseTable, eq(LlmLogTable.id, LlmLogResponseTable.llm_log_id))
+        .where(and(eq(LlmLogTable.status, "pending"), lte(LlmLogTable.time_start, cutoff)))
+        .all()
+
+      if (rows.length === 0) return 0
+
+      const done = (status: "success" | "error" | "aborted", ids: string[]) => {
+        if (ids.length === 0) return
+        db.update(LlmLogTable)
+          .set({
+            status,
+            time_end: now,
+            duration_ms: sql<number>`${now} - ${LlmLogTable.time_start}`,
+            time_updated: now,
+          })
+          .where(inArray(LlmLogTable.id, ids))
+          .run()
+      }
+
+      done(
+        "success",
+        rows.filter((row) => row.response_id && !row.error).map((row) => row.id),
+      )
+      done(
+        "error",
+        rows.filter((row) => row.response_id && row.error).map((row) => row.id),
+      )
+      done(
+        "aborted",
+        rows.filter((row) => !row.response_id).map((row) => row.id),
+      )
+
+      log.info("reaped stale llm logs", { count: rows.length, cutoff })
+      return rows.length
+    })
+  }
 
   export const ListFilters = z
     .object({
@@ -53,6 +102,7 @@ export namespace LlmLog {
   }
 
   export function list(filters?: z.input<typeof ListFilters>): { items: ListItem[]; total: number } {
+    reap()
     const parsed = ListFilters.parse(filters) ?? { limit: 50, offset: 0 }
 
     const conditions: SQL[] = []
@@ -170,6 +220,7 @@ export namespace LlmLog {
   }
 
   export function get(id: string): Detail {
+    reap()
     return Database.use((db) => {
       const row = db.select().from(LlmLogTable).where(eq(LlmLogTable.id, id)).get()
       if (!row) throw new NotFoundError({ message: `LLM log not found: ${id}` })
@@ -376,6 +427,7 @@ export namespace LlmLog {
   }
 
   export function stats(filters?: z.input<typeof StatsFilters>): StatsResult {
+    reap()
     const parsed = StatsFilters.parse(filters) ?? {}
     const where = buildStatsConditions(parsed)
 
@@ -506,6 +558,7 @@ export namespace LlmLog {
   }
 
   export function analyze(filters?: z.input<typeof AnalyzeFilters>): AnalyzeResult {
+    reap()
     const parsed = AnalyzeFilters.parse(filters) ?? {}
     const where = buildStatsConditions(parsed)
 

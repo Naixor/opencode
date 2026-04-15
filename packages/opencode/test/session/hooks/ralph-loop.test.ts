@@ -94,6 +94,10 @@ async function nextSession(originID: string) {
 }
 
 async function addDone(sessionID: string) {
+  await addAssistantText(sessionID, "<promise>DONE</promise>")
+}
+
+async function addAssistantText(sessionID: string, text: string) {
   const user = Identifier.ascending("message")
   const assistant = Identifier.ascending("message")
 
@@ -135,7 +139,7 @@ async function addDone(sessionID: string) {
     messageID: assistant,
     sessionID,
     type: "text",
-    text: "<promise>DONE</promise>",
+    text,
   })
 }
 
@@ -257,6 +261,46 @@ describe("RalphLoop memory inheritance", () => {
       const system = await runInject(childID, 1)
       expect(system).toContain("oracle-memory")
       expect(system).not.toContain("parent-memory")
+    })
+  })
+
+  test("ultrawork stops when oracle verifier returns VERIFIED COMPLETE", async () => {
+    await withInstance(async () => {
+      const origin = await Session.create({})
+      watchPrompts()
+
+      await addDone(origin.id)
+      await RalphLoop.start(origin.id, "ship it", { ultrawork: true })
+      SessionStatus.set(origin.id, { type: "idle" })
+
+      const verifyID = await nextSession(origin.id)
+      RalphLoop.setVerificationSession(origin.id, verifyID)
+      await addAssistantText(verifyID, "VERIFIED COMPLETE\n\nNo active work remains.")
+
+      SessionStatus.set(verifyID, { type: "idle" })
+
+      await waitFor(() => {
+        if (!RalphLoop.getState(origin.id)) return true
+      })
+      expect(RalphLoop.getState(origin.id)).toBeNull()
+    })
+  })
+
+  test("cancelForSession cancels active ultrawork from a child session", async () => {
+    await withInstance(async () => {
+      const origin = await Session.create({})
+      const calls = watchPrompts()
+
+      await addDone(origin.id)
+      await RalphLoop.start(origin.id, "ship it", { ultrawork: true })
+      SessionStatus.set(origin.id, { type: "idle" })
+
+      const verifyID = await nextSession(origin.id)
+      expect(RalphLoop.getStateForSession(verifyID)?.originSessionID).toBe(origin.id)
+
+      expect(await RalphLoop.cancelForSession(verifyID)).toBe(true)
+      expect(RalphLoop.getState(origin.id)).toBeNull()
+      expect(calls).toEqual([verifyID])
     })
   })
 })

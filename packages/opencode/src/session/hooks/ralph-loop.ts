@@ -92,6 +92,8 @@ You already emitted <promise>${loopState.initialCompletionPromise}</promise>. Th
 REQUIRED NOW:
 - Call Oracle using task(subagent_type="oracle", load_skills=[], run_in_background=false, ...)
 - Ask Oracle to verify whether the original task is actually complete
+- Instruct Oracle to emit <promise>${ULTRAWORK_VERIFICATION_PROMISE}</promise> only if the original task is actually complete
+- If Oracle does not verify completion, it must NOT emit that promise and should explain what is still missing
 - The system will inspect the Oracle session directly for the verification result
 - If Oracle does not verify, continue fixing the task and do not consider it complete
 ${memoryInstruction}
@@ -127,6 +129,7 @@ REQUIRED NOW:
 - Oracle does not lie. Treat the verification result as ground truth
 - Do not claim completion early or argue with the failed verification
 - After fixing the remaining issues, request Oracle review again using task(subagent_type="oracle", load_skills=[], run_in_background=false, ...)
+- Instruct Oracle to emit <promise>${ULTRAWORK_VERIFICATION_PROMISE}</promise> only when the original task is actually complete
 - Only when the work is ready for review again, output: <promise>${loopState.completionPromise}</promise>
 
 Original task:
@@ -154,6 +157,26 @@ ${loopState.prompt}`
       }
       if (pattern.test(text)) return true
     }
+    return false
+  }
+
+  async function detectVerification(sessionID: string): Promise<boolean> {
+    if (await detectCompletion(sessionID, ULTRAWORK_VERIFICATION_PROMISE)) return true
+
+    const Session = await getSession()
+    const msgs = await Session.messages({ sessionID })
+    const pattern = /(^|\n|\r)\s*(?:[-*]\s*)?`?VERIFIED COMPLETE`?\b/i
+
+    for (const msg of msgs) {
+      if (msg.info.role !== "assistant") continue
+      let text = ""
+      for (const part of msg.parts) {
+        if (part.type !== "text" || !("text" in part)) continue
+        text += (text ? "\n" : "") + ((part as { text?: string }).text ?? "")
+      }
+      if (pattern.test(text)) return true
+    }
+
     return false
   }
 
@@ -289,6 +312,29 @@ ${loopState.prompt}`
     return loops.get(sessionID) ?? null
   }
 
+  function resolve(sessionID: string): string | undefined {
+    if (loops.has(sessionID)) return sessionID
+
+    const originID = sessionToOrigin.get(sessionID)
+    if (originID) return originID
+
+    for (const [originID, loopState] of loops) {
+      if (loopState.verificationSessionID === sessionID) return originID
+    }
+  }
+
+  export function getStateForSession(sessionID: string): LoopState | null {
+    const originID = resolve(sessionID)
+    if (!originID) return null
+    return loops.get(originID) ?? null
+  }
+
+  export async function cancelForSession(sessionID: string): Promise<boolean> {
+    const originID = resolve(sessionID)
+    if (!originID) return false
+    return cancel(originID)
+  }
+
   export function listActive(): ReadonlyArray<{ sessionID: string; iteration: number; maxIterations: number }> {
     const result: Array<{ sessionID: string; iteration: number; maxIterations: number }> = []
     for (const [, loopState] of loops) {
@@ -344,11 +390,12 @@ ${loopState.prompt}`
     const { currentSessionID } = loopState
 
     // Check for ultrawork verification result
-    if (loopState.verificationPending && loopState.verificationSessionID) {
-      const verified = await detectCompletion(
-        isOracleIdle ? loopState.verificationSessionID : currentSessionID,
-        ULTRAWORK_VERIFICATION_PROMISE,
-      )
+    if (loopState.verificationPending) {
+      if (!loopState.verificationSessionID) {
+        return
+      }
+
+      const verified = await detectVerification(isOracleIdle ? loopState.verificationSessionID : currentSessionID)
 
       if (verified) {
         finishLoop(loopState)

@@ -89,6 +89,7 @@ import { DialogExportOptions } from "../../ui/dialog-export-options"
 import { formatTranscript } from "../../util/transcript"
 import { UI } from "@/cli/ui.ts"
 import { useTuiConfig } from "../../context/tui-config"
+import { RalphLoop } from "@/session/hooks/ralph-loop"
 
 addDefaultParsers(parsers.parsers)
 
@@ -130,6 +131,7 @@ export function Session() {
   const { theme } = useTheme()
   const promptRef = usePromptRef()
   const session = createMemo(() => sync.session.get(route.sessionID))
+  const loop = createMemo(() => RalphLoop.getStateForSession(route.sessionID))
   const children = createMemo(() => {
     const parentID = session()?.parentID ?? session()?.id
     return sync.data.session
@@ -516,6 +518,24 @@ export function Session() {
           sessionID: route.sessionID,
           modelID: selectedModel.modelID,
           providerID: selectedModel.providerID,
+        })
+        dialog.clear()
+      },
+    },
+    {
+      title: loop()?.ultrawork ? "Cancel ultrawork loop" : "Cancel ralph loop",
+      value: "session.loop.cancel",
+      category: "Session",
+      enabled: !!loop(),
+      slash: {
+        name: "cancel-loop",
+        aliases: ["cancel-ulw"],
+      },
+      onSelect: async (dialog) => {
+        const cancelled = await RalphLoop.cancelForSession(route.sessionID)
+        toast.show({
+          message: cancelled ? "Loop cancelled" : "No active loop for this session",
+          variant: cancelled ? "success" : "warning",
         })
         dialog.clear()
       },

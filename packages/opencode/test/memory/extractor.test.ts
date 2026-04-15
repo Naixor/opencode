@@ -444,12 +444,10 @@ describe("MemoryExtractor", () => {
             },
           }
         }),
-        spyOn(SessionPrompt, "prompt").mockImplementation((async () => {
-          return {
-            info: {} as never,
-            parts: [{ type: "text", text: JSON.stringify({ items: [] }) }],
-          }
-        }) as unknown as typeof SessionPrompt.prompt),
+        spyOn(SessionPrompt, "prompt").mockResolvedValue({
+          info: {} as never,
+          parts: [{ type: "text", text: JSON.stringify({ items: [] }) }],
+        } as Awaited<ReturnType<typeof SessionPrompt.prompt>>),
       )
 
       await Instance.provide({
@@ -505,13 +503,21 @@ describe("MemoryExtractor", () => {
           document_id: "sess:test:sess_12:0:2",
           error: "boom",
         }),
-        spyOn(SessionPrompt, "prompt").mockImplementation((async () => {
-          called = true
-          return {
-            info: {} as never,
-            parts: [{ type: "text", text: JSON.stringify({ items: [] }) }],
-          }
-        }) as unknown as typeof SessionPrompt.prompt),
+        spyOn(SessionPrompt, "prompt").mockImplementation(
+          Object.assign(
+            async () => {
+              called = true
+              return {
+                info: {} as never,
+                parts: [{ type: "text", text: JSON.stringify({ items: [] }) }],
+              } as Awaited<ReturnType<typeof SessionPrompt.prompt>>
+            },
+            {
+              force: SessionPrompt.prompt.force,
+              schema: SessionPrompt.prompt.schema,
+            },
+          ),
+        ),
       )
 
       await Instance.provide({

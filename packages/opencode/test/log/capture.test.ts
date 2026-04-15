@@ -11,6 +11,7 @@ import { count, sql } from "drizzle-orm"
 import { Session } from "../../src/session"
 import { Identifier } from "../../src/id/id"
 import { MessageV2 } from "../../src/session/message-v2"
+import { LlmLog } from "../../src/log/query"
 
 describe("LLM Log Capture", () => {
   function ensureSession(sessionID: string) {
@@ -332,6 +333,115 @@ describe("LLM Log Capture", () => {
           args: { filePath: "foo.txt" },
         },
       ])
+    })
+  })
+
+  test("list reaps stale pending logs that never finished as aborted", async () => {
+    await withInstance(async () => {
+      const sessionID = "test-cap-stale-abort"
+      ensureSession(sessionID)
+
+      await HookChain.execute("pre-llm", {
+        sessionID,
+        system: ["prompt"],
+        agent: "oracle",
+        model: "test/model",
+        messages: [],
+      })
+
+      const now = Date.now()
+      Database.use((db) => {
+        db.update(LlmLogTable)
+          .set({
+            time_start: now - 6 * 60 * 1000,
+            time_created: now - 6 * 60 * 1000,
+            time_updated: now - 6 * 60 * 1000,
+          })
+          .where(eq(LlmLogTable.session_id, sessionID))
+          .run()
+      })
+
+      const result = LlmLog.list({ session_id: sessionID })
+      expect(result.items).toHaveLength(1)
+      expect(result.items[0]?.status).toBe("aborted")
+      expect(result.items[0]?.time_end).toBeGreaterThan(0)
+      expect(result.items[0]?.duration_ms).toBeGreaterThan(0)
+    })
+  })
+
+  test("get reaps stale pending logs with captured response as success or error", async () => {
+    await withInstance(async () => {
+      const successID = "test-cap-stale-success"
+      const errorID = "test-cap-stale-error"
+      ensureSession(successID)
+      ensureSession(errorID)
+
+      await HookChain.execute("pre-llm", {
+        sessionID: successID,
+        system: ["prompt"],
+        agent: "oracle",
+        model: "test/model",
+        messages: [],
+      })
+      await HookChain.execute("pre-llm", {
+        sessionID: errorID,
+        system: ["prompt"],
+        agent: "oracle",
+        model: "test/model",
+        messages: [],
+      })
+
+      const successLog = Database.use((db) =>
+        db.select().from(LlmLogTable).where(eq(LlmLogTable.session_id, successID)).get(),
+      )
+      const errorLog = Database.use((db) =>
+        db.select().from(LlmLogTable).where(eq(LlmLogTable.session_id, errorID)).get(),
+      )
+      expect(successLog?.id).toBeTruthy()
+      expect(errorLog?.id).toBeTruthy()
+
+      const now = Date.now()
+      Database.use((db) => {
+        db.update(LlmLogTable)
+          .set({
+            time_start: now - 6 * 60 * 1000,
+            time_created: now - 6 * 60 * 1000,
+            time_updated: now - 6 * 60 * 1000,
+          })
+          .where(eq(LlmLogTable.id, successLog!.id))
+          .run()
+        db.update(LlmLogTable)
+          .set({
+            time_start: now - 6 * 60 * 1000,
+            time_created: now - 6 * 60 * 1000,
+            time_updated: now - 6 * 60 * 1000,
+          })
+          .where(eq(LlmLogTable.id, errorLog!.id))
+          .run()
+        db.insert(LlmLogResponseTable)
+          .values({
+            id: Identifier.ascending("log"),
+            llm_log_id: successLog!.id,
+            completion_text: "done",
+            tool_calls: null,
+            raw_response: null,
+            error: null,
+          })
+          .run()
+        db.insert(LlmLogResponseTable)
+          .values({
+            id: Identifier.ascending("log"),
+            llm_log_id: errorLog!.id,
+            completion_text: null,
+            tool_calls: null,
+            raw_response: null,
+            error: { message: "boom" },
+          })
+          .run()
+      })
+
+      expect(LlmLog.get(successLog!.id).status).toBe("success")
+      expect(LlmLog.get(errorLog!.id).status).toBe("error")
     })
   })
 })
