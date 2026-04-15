@@ -6,6 +6,19 @@ import { MemoryStorage } from "./storage"
 export namespace Memory {
   const log = Log.create({ service: "memory" })
 
+  function text(err: unknown) {
+    return err instanceof Error ? err.message : String(err)
+  }
+
+  async function sync(memory: Info) {
+    return import("./hindsight/retain")
+      .then((mod) => mod.MemoryHindsightRetain.memory(memory))
+      .catch((err) => {
+        log.warn("hindsight sync failed", { id: memory.id, error: text(err) })
+      })
+      .then(() => memory)
+  }
+
   // --- Enums ---
 
   export const Category = z.enum(["style", "pattern", "tool", "domain", "workflow", "correction", "context"])
@@ -116,7 +129,7 @@ export namespace Memory {
     const validated = Info.parse(memory)
     await MemoryStorage.save(validated)
     log.info("created", { id: validated.id, categories: validated.categories, scope: validated.scope })
-    return validated
+    return sync(validated)
   }
 
   export async function get(id: string): Promise<Info | undefined> {
@@ -142,7 +155,7 @@ export namespace Memory {
     })
     if (!result) return undefined
     log.info("updated", { id })
-    return Info.parse(result)
+    return sync(Info.parse(result))
   }
 
   export async function remove(id: string): Promise<boolean> {

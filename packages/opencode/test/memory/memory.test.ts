@@ -1,8 +1,10 @@
-import { describe, test, expect, beforeEach } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
 import path from "path"
 import { Global } from "../../src/global"
 import { Instance } from "../../src/project/instance"
 import { Memory } from "../../src/memory/memory"
+import { MemoryHindsightClient } from "../../src/memory/hindsight/client"
+import { MemoryHindsightMap } from "../../src/memory/hindsight/mapper"
 import { MemoryInject } from "../../src/memory/engine/injector"
 import { MemoryStorage } from "../../src/memory/storage"
 import { Token } from "../../src/util/token"
@@ -30,6 +32,10 @@ const hindsight = {
   context_max_items: 6,
   context_max_tokens: 1200,
 }
+
+afterEach(() => {
+  mock.restore()
+})
 
 describe("Memory", () => {
   function fake(content: string, category: Memory.Category = "style", id = crypto.randomUUID()) {
@@ -238,6 +244,85 @@ describe("Memory", () => {
           const text = await Bun.file(file).text()
           expect(text).toContain(mem.id)
           expect(text).toContain("Keep personal.json authoritative")
+        },
+      })
+    })
+
+    test("create and update upsert the same authoritative hindsight document", async () => {
+      await using tmp = await tmpdir({
+        git: true,
+        config: {
+          memory: {
+            hindsight,
+          },
+        },
+      })
+
+      const calls: Array<Parameters<typeof MemoryHindsightClient.retain>[0]> = []
+      spyOn(MemoryHindsightClient, "retain").mockImplementation(async (input) => {
+        calls.push(input)
+        return {
+          success: true,
+          bank_id: "bank_1",
+          items_count: 1,
+          async: false,
+        }
+      })
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await MemoryStorage.clear()
+          const created = await Memory.create({
+            content: "Keep memory writes mirrored",
+            categories: ["pattern"],
+            scope: "personal",
+            source: { sessionID: "ses_hindsight", method: "manual" },
+          })
+          const updated = await Memory.update(created.id, {
+            content: "Keep memory writes mirrored after edits",
+          })
+
+          expect(updated?.content).toBe("Keep memory writes mirrored after edits")
+          expect(calls).toHaveLength(2)
+          expect(calls[0]?.document_id).toBe(MemoryHindsightMap.memoryDocumentId(created, tmp.path))
+          expect(calls[1]?.document_id).toBe(MemoryHindsightMap.memoryDocumentId(created, tmp.path))
+          expect(calls[1]?.content).toBe("Keep memory writes mirrored after edits")
+        },
+      })
+    })
+
+    test("hindsight retain failure never blocks local create or update", async () => {
+      await using tmp = await tmpdir({
+        git: true,
+        config: {
+          memory: {
+            hindsight,
+          },
+        },
+      })
+
+      spyOn(MemoryHindsightClient, "retain").mockImplementation(async () => undefined)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await MemoryStorage.clear()
+          const created = await Memory.create({
+            content: "Local writes stay authoritative",
+            categories: ["workflow"],
+            scope: "personal",
+            source: { sessionID: "ses_hindsight", method: "manual" },
+          })
+          const updated = await Memory.update(created.id, {
+            content: "Local writes stay authoritative after failure",
+          })
+
+          expect(updated?.content).toBe("Local writes stay authoritative after failure")
+          expect(await Memory.get(created.id)).toMatchObject({
+            id: created.id,
+            content: "Local writes stay authoritative after failure",
+          })
         },
       })
     })

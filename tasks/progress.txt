@@ -11,6 +11,7 @@
 - Enforce Hindsight extractor context budgets before prompt construction in `MemoryExtractor.formatHints()`: cap by both `context_max_items` and `context_max_tokens` with `Token.estimate()`, and if needed trim only the final included hint instead of overflowing the system prompt.
 - Hindsight-assisted extraction should retain the current session snapshot via `MemoryHindsightRetain.session()` before the LLM call, using stable `sess:` ids built from the active message-window bounds and treating retain failures as non-fatal.
 - Build Hindsight extractor context from `MemoryHindsightRecall.context()` after session retention: prefer `source_facts`, then `chunks`, then direct hit text, dedupe repeated snippets, and omit the whole section when no usable items come back.
+- Mirror authoritative memory writes into Hindsight at the `Memory.create()` and `Memory.update()` boundary after the local save succeeds; reuse `MemoryHindsightRetain.memory()` so `mem:` ids stay stable across edits and retain failures remain warn-only.
 
 ## 2026-04-14 23:20:31 CST - US-001
 - Added `memory.hindsight` config parsing in `packages/opencode/src/config/config.ts` with the requested feature gates, rollout knobs, and phase-1 defaults.
@@ -130,4 +131,14 @@
   - Keep extractor semantic-context gathering in `MemoryHindsightRecall.context()` so `extractor.ts` only composes hints instead of parsing Hindsight hit shapes directly.
   - Prefer `source_facts` over `chunks`, and `chunks` over direct hit text, because facts are the most structured evidence while direct text is only a fallback when richer context is absent.
   - Stub both `MemoryHindsightRetain.session()` and `MemoryHindsightRecall.context()` in extractor tests when Hindsight extract is enabled, otherwise the embedded wrapper path can make focused tests slow or flaky.
+---
+
+## 2026-04-15 16:52:00 CST - US-013
+- Hooked authoritative memory writes into Hindsight by adding a shared post-save sync helper in `packages/opencode/src/memory/memory.ts`, so both `Memory.create()` and `Memory.update()` upsert the affected local record through `MemoryHindsightRetain.memory()` after the authoritative write succeeds.
+- Added regression coverage in `packages/opencode/test/memory/memory.test.ts` for stable `mem:` reuse across create and update plus non-fatal degraded retain behavior, and documented the reusable write-boundary sync pattern in `packages/opencode/AGENTS.md`.
+- Files changed: `packages/opencode/src/memory/memory.ts`, `packages/opencode/test/memory/memory.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep Hindsight mirror sync in `memory.ts` rather than individual engine callers so every authoritative create or update path inherits the same behavior automatically.
+  - Trigger the companion retain only after `MemoryStorage.save()` or `atomicUpdate()` succeeds; that keeps local persistence authoritative when Hindsight is degraded.
+  - Regression tests for write mirroring can stub `MemoryHindsightClient.retain()` directly and assert repeated writes reuse the same `document_id` instead of creating duplicates.
 ---

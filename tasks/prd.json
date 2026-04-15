@@ -197,8 +197,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated `Memory.create()` and `Memory.update()` to upsert the affected authoritative local memory into Hindsight through `MemoryHindsightRetain.memory()` after the local save succeeds, while reusing the same stable `mem:` document id and keeping retain failures non-fatal to the authoritative write path."
     },
     {
       "id": "US-014",
