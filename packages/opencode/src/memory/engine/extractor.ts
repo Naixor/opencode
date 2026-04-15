@@ -10,10 +10,20 @@ import { ConfigPaths } from "@/config/paths"
 import { Instance } from "@/project/instance"
 import { Session } from "@/session"
 import { SessionPrompt } from "@/session/prompt"
+import { Token } from "@/util/token"
 
 export namespace MemoryExtractor {
   const log = Log.create({ service: "memory.extractor" })
   type Prompt = "extract" | "extract-hindsight"
+  const DEFAULT_HINT_ITEMS = 6
+  const DEFAULT_HINT_TOKENS = 1200
+
+  export interface Hint {
+    text: string
+    kind?: string
+    id?: string
+    score?: number
+  }
 
   // Concurrency guard: prevent multiple extractions on the same session
   const inflight = new Set<string>()
@@ -140,21 +150,74 @@ export namespace MemoryExtractor {
     return {
       name,
       parts: sections(tpl, name),
+      items: cfg.memory?.hindsight.context_max_items,
+      tokens: cfg.memory?.hindsight.context_max_tokens,
     }
   }
 
-  function system(input: { system: string; existing: Memory.Info[]; snapshot: string }) {
-    return [
-      input.system,
-      "",
-      "## Existing memories",
-      "",
-      formatExisting(input.existing),
-      "",
-      "## Session conversation",
-      "",
-      input.snapshot,
-    ].join("\n")
+  function system(input: { system: string; existing: Memory.Info[]; snapshot: string; hints?: string }) {
+    const result = [input.system, "", "## Existing memories", "", formatExisting(input.existing)]
+    if (input.hints) {
+      result.push("", "## Hindsight context", "", input.hints)
+    }
+    result.push("", "## Session conversation", "", input.snapshot)
+    return result.join("\n")
+  }
+
+  function note(input: Hint) {
+    const parts = [
+      input.kind,
+      input.id,
+      typeof input.score === "number" && Number.isFinite(input.score) ? `score:${input.score.toFixed(3)}` : undefined,
+    ].filter(Boolean)
+    return parts.join(", ")
+  }
+
+  function entry(input: Hint, text = input.text.replace(/\s+/g, " ").trim()) {
+    if (!text) return ""
+    const meta = note(input)
+    return meta ? `- ${text} (${meta})` : `- ${text}`
+  }
+
+  function fit(lines: string[], input: Hint, cap: number) {
+    const text = input.text.replace(/\s+/g, " ").trim()
+    if (!text) return
+
+    let low = 0
+    let high = text.length
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2)
+      const next = entry(input, `${text.slice(0, mid).trimEnd()}${mid < text.length ? "..." : ""}`)
+      if (!next) break
+      if (Token.estimate([...lines, next].join("\n")) <= cap) {
+        low = mid
+        continue
+      }
+      high = mid - 1
+    }
+
+    if (low <= 0) return
+    return entry(input, `${text.slice(0, low).trimEnd()}${low < text.length ? "..." : ""}`)
+  }
+
+  export function formatHints(list: Hint[], input: { items?: number; tokens?: number } = {}) {
+    const max = input.items ?? DEFAULT_HINT_ITEMS
+    const cap = input.tokens ?? DEFAULT_HINT_TOKENS
+    if (max <= 0 || cap <= 0 || list.length === 0) return ""
+
+    const lines: string[] = []
+    for (const item of list) {
+      if (lines.length >= max) break
+      const full = entry(item)
+      if (full && Token.estimate([...lines, full].join("\n")) <= cap) {
+        lines.push(full)
+        continue
+      }
+      const next = fit(lines, item, cap)
+      if (next) lines.push(next)
+      break
+    }
+    return lines.join("\n")
   }
 
   /**
@@ -166,6 +229,7 @@ export namespace MemoryExtractor {
   export async function extractFromSession(
     sessionID: string,
     messages: Array<{ role: string; content: string }>,
+    options?: { context?: Hint[] },
   ): Promise<Memory.Info[]> {
     if (messages.length === 0) {
       log.info("no messages to extract from", { sessionID })
@@ -185,10 +249,12 @@ export namespace MemoryExtractor {
       const cfg = await prompt()
       const existing = await Memory.list()
 
+      const hints = cfg.name === "extract-hindsight" ? formatHints(options?.context ?? [], cfg) : ""
       const sys = system({
         system: cfg.parts.system,
         existing,
         snapshot: contextSnapshot,
+        hints,
       })
 
       const task = cfg.parts.analysis || buildTaskInstructions()
@@ -196,6 +262,7 @@ export namespace MemoryExtractor {
       log.info("extractFromSession: invoking subagent", {
         sessionID,
         prompt: cfg.name,
+        hints: hints ? hints.split("\n").length : 0,
       })
 
       const session = await Session.create({

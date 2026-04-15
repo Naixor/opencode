@@ -8,6 +8,7 @@
 - Engine recall should enrich `memory-recall` candidate JSON with optional Hindsight `rank` and `score` hints, but fall back to the original full pool whenever semantic recall yields no authoritative candidates.
 - Authority-boundary regressions should assert local `personal.json`, injector payloads, hit counters, and decay behavior still move only through local memory records even when tests enable Hindsight; in typed fixtures, pass the full nested Hindsight defaults object into `tmpdir({ config })`.
 - Extractor prompt variants should stay in dedicated `memory/extract*.md` files and use `sections(tpl, name)` fallback by prompt name, so Hindsight-specific instructions can diverge without mutating the base extractor contract.
+- Enforce Hindsight extractor context budgets before prompt construction in `MemoryExtractor.formatHints()`: cap by both `context_max_items` and `context_max_tokens` with `Token.estimate()`, and if needed trim only the final included hint instead of overflowing the system prompt.
 
 ## 2026-04-14 23:20:31 CST - US-001
 - Added `memory.hindsight` config parsing in `packages/opencode/src/config/config.ts` with the requested feature gates, rollout knobs, and phase-1 defaults.
@@ -96,4 +97,14 @@
   - Add new extractor modes as parallel prompt variants instead of appending conditional text into the base prompt; that keeps the default extractor path stable and reviewable.
   - Keep prompt-loader fallback keyed by prompt name so partial custom `extract-hindsight.md` overrides inherit the matching default sections instead of the plain extractor defaults.
   - Variant routing can stay at the engine boundary by passing `variant: "hindsight"` into `SessionPrompt.prompt()` while reusing the same `memory-extractor` agent and write path.
+---
+
+## 2026-04-15 15:16:39 CST - US-010
+- Added bounded Hindsight extractor context assembly in `packages/opencode/src/memory/engine/extractor.ts` via `MemoryExtractor.formatHints()`, optional `context` input on `extractFromSession()`, and `## Hindsight context` system-prompt injection that enforces both `context_max_items` and `context_max_tokens` before prompt construction.
+- Added regression coverage in `packages/opencode/test/memory/extractor.test.ts` for default item and token budgets, final-item trimming, and end-to-end bounded Hindsight context prompt assembly; documented the reusable budgeting pattern in `packages/opencode/AGENTS.md`.
+- Files changed: `packages/opencode/src/memory/engine/extractor.ts`, `packages/opencode/test/memory/extractor.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Put extractor-side semantic context budgeting in one helper before `SessionPrompt.prompt()` so variant prompts stay simple and the write path remains unchanged.
+  - Budget checks should use `Token.estimate()` on the rendered bullet list, not raw item text lengths, because metadata and separators affect actual prompt size.
+  - When an item would overflow the remaining token budget, trim only that final included hint and then stop instead of partially admitting later hints out of rank order.
 ---

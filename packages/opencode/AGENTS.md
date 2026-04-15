@@ -30,6 +30,7 @@
 ## Swarm State
 
 - Memory extractor prompt variants should live in separate `src/memory/prompt/default/extract*.txt` files and load through `src/memory/prompt/loader.ts`; when adding a new variant, update the loader name list and use `sections(tpl, name)` so per-section fallback stays aligned with that variant's default.
+- Hindsight extractor context should be pre-rendered through `MemoryExtractor.formatHints()` before building the system prompt; enforce both `memory.hindsight.context_max_items` and `context_max_tokens` there with `Token.estimate()`, and if needed trim only the final included hint instead of overflowing the prompt budget.
 
 - Use `SwarmState.mutate` for authoritative swarm, task, and discussion writes; the per-task and per-discussion JSON files are compatibility projections derived from `board/<swarm>/state.json`.
 - When adding canonical swarm snapshot fields, update `SwarmState.Alignment` or the root `Snapshot` shape in `src/session/swarm-state.ts`, and initialize matching defaults in both `SwarmState.Example` and `SwarmState.create()`; current rollout rejects older snapshot schema versions instead of adding compatibility loaders.

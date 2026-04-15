@@ -152,8 +152,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added `MemoryExtractor.formatHints()` plus optional extractor context input so the Hindsight-aware path now enforces both item and token budgets before prompt construction, trimming only the final included hint when needed and covering defaults plus bounded prompt assembly in extractor tests."
     },
     {
       "id": "US-011",

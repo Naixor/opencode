@@ -8,6 +8,7 @@ import { MemoryStorage } from "../../src/memory/storage"
 import { MemoryExtractor } from "../../src/memory/engine/extractor"
 import { Provider } from "../../src/provider/provider"
 import { SessionPrompt } from "../../src/session/prompt"
+import { Token } from "../../src/util/token"
 import { tmpdir } from "../fixture/fixture"
 
 async function withMemoryEnv<T>(fn: () => Promise<T>, config?: Partial<Config.Info>): Promise<T> {
@@ -196,6 +197,103 @@ describe("MemoryExtractor", () => {
       expect(result).toHaveLength(1)
       expect(result[0].content).toBe("Use Hono for APIs")
       expect(list.map((item) => item.content)).toContain("Use Hono for APIs")
+    })
+
+    test("adds bounded hindsight context before prompt construction", async () => {
+      await using tmp = await tmpdir({
+        git: true,
+        config: {
+          memory: {
+            hindsight: {
+              enabled: true,
+              mode: "embedded",
+              extract: true,
+              recall: true,
+              backfill: true,
+              workspace_scope: "worktree",
+              context_max_items: 2,
+              context_max_tokens: 2000,
+            },
+          },
+        },
+      })
+
+      let sys = ""
+      spies.push(
+        spyOn(Provider, "defaultModel").mockResolvedValue({
+          providerID: "test",
+          modelID: "primary",
+        }),
+        spyOn(Provider, "getSmallModel").mockResolvedValue(undefined),
+        spyOn(SessionPrompt, "prompt").mockImplementation((async (opts) => {
+          sys = opts.system ?? ""
+          return {
+            info: {} as never,
+            parts: [{ type: "text", text: JSON.stringify({ items: [] }) }],
+          }
+        }) as typeof SessionPrompt.prompt),
+      )
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          MemoryExtractor.extractFromSession(
+            "sess_10",
+            [
+              { role: "user", content: "Keep Hono for API routes" },
+              { role: "assistant", content: "Okay." },
+            ],
+            {
+              context: [
+                { text: "Use Hono for API routes", kind: "mem", id: "mem_1", score: 0.91 },
+                { text: "Prefer Bun APIs when possible", kind: "mem", id: "mem_2", score: 0.82 },
+                { text: "This item should be trimmed by the item budget", kind: "sess", id: "sess_1", score: 0.77 },
+              ],
+            },
+          ),
+      })
+
+      expect(sys).toContain("## Hindsight context")
+      expect(sys).toContain("Use Hono for API routes")
+      expect(sys).toContain("Prefer Bun APIs when possible")
+      expect(sys).not.toContain("This item should be trimmed by the item budget")
+    })
+  })
+
+  describe("formatHints", () => {
+    test("uses the default item budget when no override is provided", () => {
+      const text = MemoryExtractor.formatHints(
+        Array.from({ length: 8 }, (_, i) => ({
+          text: `Hint ${i + 1}`,
+        })),
+      )
+
+      expect(text).toContain("Hint 1")
+      expect(text).toContain("Hint 6")
+      expect(text).not.toContain("Hint 7")
+      expect(text).not.toContain("Hint 8")
+    })
+
+    test("uses the default token budget when no override is provided", () => {
+      const text = MemoryExtractor.formatHints(
+        Array.from({ length: 4 }, (_, i) => ({
+          text: `${i + 1}`.repeat(1800),
+        })),
+      )
+
+      expect(text).toContain("1111")
+      expect(text).toContain("2222")
+      expect(Token.estimate(text)).toBeLessThanOrEqual(1200)
+      expect(text).not.toContain("4444")
+    })
+
+    test("trims the final hint instead of exceeding the token budget", () => {
+      const text = MemoryExtractor.formatHints([{ text: "A".repeat(6000) }], {
+        tokens: 100,
+      })
+
+      expect(text).toContain("...")
+      expect(text.length).toBeLessThan(6000)
     })
   })
 
