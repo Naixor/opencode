@@ -227,8 +227,8 @@
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added `packages/opencode/src/memory/hindsight/backfill.ts` as the resumable local-memory backfill runner that imports authoritative memories in stable batches through `retainBatch`, persists cursor or counts and failure samples in `hindsight.json`, and resumes idempotently by falling back to sequential `mem:` retains when batch import is unavailable."
     },
     {
       "id": "US-016",

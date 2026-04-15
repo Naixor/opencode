@@ -153,3 +153,13 @@
   - Reuse the same encoded `Instance.directory` storage path for both authority and sidecar files so project isolation stays aligned across reads and writes.
   - Trim persisted failure samples on every write so resumable backfill state stays useful without growing unbounded over repeated retries.
 ---
+
+## 2026-04-15 16:09:19 CST - US-015
+- Added `packages/opencode/src/memory/hindsight/backfill.ts` as the resumable backfill runner that loads authoritative local memories in stable created-at or id order, imports them through `MemoryHindsightClient.retainBatch()` with stable `mem:` document ids, and persists cursor, counts, and operation ids in `hindsight.json`.
+- Added `packages/opencode/test/memory/hindsight-backfill.test.ts` to cover batch import, resume-from-cursor behavior, and sequential fallback with failure capture; exported the runner from `packages/opencode/src/memory/index.ts`, documented the reusable pattern in `packages/opencode/AGENTS.md`, and fixed the test stub typing so the targeted suite and package typecheck pass.
+- Files changed: `packages/opencode/src/memory/hindsight/backfill.ts`, `packages/opencode/src/memory/index.ts`, `packages/opencode/test/memory/hindsight-backfill.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep backfill ordering deterministic by sorting `Memory.list()` results by `createdAt` and then `id`, so cursor resume stays idempotent across reruns.
+  - Use `retainBatch()` first for throughput, but on degraded batch behavior fall back to `MemoryHindsightRetain.memory()` one item at a time and stop immediately on the first failure so the saved cursor still marks the last confirmed import.
+  - Resume logic should slice strictly after the saved cursor and preserve cumulative `processed`, `succeeded`, and `failed` counts in the sidecar instead of resetting progress on every rerun.
+---
