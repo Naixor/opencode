@@ -9,6 +9,7 @@
 - Authority-boundary regressions should assert local `personal.json`, injector payloads, hit counters, and decay behavior still move only through local memory records even when tests enable Hindsight; in typed fixtures, pass the full nested Hindsight defaults object into `tmpdir({ config })`.
 - Extractor prompt variants should stay in dedicated `memory/extract*.md` files and use `sections(tpl, name)` fallback by prompt name, so Hindsight-specific instructions can diverge without mutating the base extractor contract.
 - Enforce Hindsight extractor context budgets before prompt construction in `MemoryExtractor.formatHints()`: cap by both `context_max_items` and `context_max_tokens` with `Token.estimate()`, and if needed trim only the final included hint instead of overflowing the system prompt.
+- Hindsight-assisted extraction should retain the current session snapshot via `MemoryHindsightRetain.session()` before the LLM call, using stable `sess:` ids built from the active message-window bounds and treating retain failures as non-fatal.
 
 ## 2026-04-14 23:20:31 CST - US-001
 - Added `memory.hindsight` config parsing in `packages/opencode/src/config/config.ts` with the requested feature gates, rollout knobs, and phase-1 defaults.
@@ -107,4 +108,14 @@
   - Put extractor-side semantic context budgeting in one helper before `SessionPrompt.prompt()` so variant prompts stay simple and the write path remains unchanged.
   - Budget checks should use `Token.estimate()` on the rendered bullet list, not raw item text lengths, because metadata and separators affect actual prompt size.
   - When an item would overflow the remaining token budget, trim only that final included hint and then stop instead of partially admitting later hints out of rank order.
+---
+
+## 2026-04-15 16:05:00 CST - US-011
+- Added session-slice retention for Hindsight extraction by extending `packages/opencode/src/memory/hindsight/mapper.ts` with `sessionMetadata()` and `sessionTags()`, extending `packages/opencode/src/memory/hindsight/retain.ts` with `MemoryHindsightRetain.session()`, and calling it from `packages/opencode/src/memory/engine/extractor.ts` before the Hindsight-aware extractor prompt is built.
+- Added regression coverage in `packages/opencode/test/memory/extractor.test.ts`, `packages/opencode/test/memory/hindsight-retain.test.ts`, and `packages/opencode/test/memory/hindsight-mapper.test.ts` for stable `sess:` mapping, replace-style session retain calls, and non-fatal extract continuation when session-slice retain fails; documented the reusable pattern in `packages/opencode/AGENTS.md`.
+- Files changed: `packages/opencode/src/memory/engine/extractor.ts`, `packages/opencode/src/memory/hindsight/mapper.ts`, `packages/opencode/src/memory/hindsight/retain.ts`, `packages/opencode/test/memory/extractor.test.ts`, `packages/opencode/test/memory/hindsight-retain.test.ts`, `packages/opencode/test/memory/hindsight-mapper.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Reuse the existing extractor message window bounds for `sess:` document ids so session-slice retention stays deterministic without inventing a second slicing policy.
+  - Keep session-slice metadata string-only and store slice bounds as `slice_start` and `slice_end`; tags should flow through `MemoryHindsightBank.tags({ kind: "session_slice" })` just like memory retains do.
+  - Hindsight retain helpers should return structured failure results even for session slices, so extract flows can log degraded state and continue into `SessionPrompt.prompt()`.
 ---

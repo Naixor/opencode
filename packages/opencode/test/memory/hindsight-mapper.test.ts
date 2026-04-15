@@ -42,6 +42,27 @@ describe("MemoryHindsightMap", () => {
       updated_at: "20",
     })
     expect(
+      MemoryHindsightMap.sessionMetadata(
+        {
+          session_id: "sess_1",
+          start: 10,
+          end: 20,
+          created_at: 30,
+          updated_at: 40,
+        },
+        root,
+      ),
+    ).toEqual({
+      workspace_id: MemoryHindsightBank.worktreeHash(root),
+      project_root: root,
+      session_id: "sess_1",
+      source_kind: "session_slice",
+      slice_start: "10",
+      slice_end: "20",
+      created_at: "30",
+      updated_at: "40",
+    })
+    expect(
       MemoryHindsightMap.memoryTags({
         scope: "personal",
         status: "confirmed",
@@ -56,6 +77,10 @@ describe("MemoryHindsightMap", () => {
       "status:confirmed",
       "tag:bun-apis",
       "tag:needs-review",
+    ])
+    expect(MemoryHindsightMap.sessionTags({ tags: [" recent context ", "Recent Context"] })).toEqual([
+      "session_slice",
+      "tag:recent-context",
     ])
   })
 

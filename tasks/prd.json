@@ -167,8 +167,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Extended Hindsight mapping and retain helpers with stable `sess:` session-slice metadata or tags, then retained the active extractor message window before the Hindsight-aware prompt is built while keeping retain failures non-fatal and covered by extractor or retain regression tests."
     },
     {
       "id": "US-012",

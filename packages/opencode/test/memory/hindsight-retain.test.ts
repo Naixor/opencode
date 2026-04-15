@@ -45,6 +45,18 @@ function item() {
   })
 }
 
+function slice() {
+  return {
+    session_id: "sess_1",
+    start: 0,
+    end: 2,
+    content: "[user]: Keep Hono for APIs\n---\n[assistant]: Okay.",
+    created_at: 10,
+    updated_at: 20,
+    tags: ["recent context"],
+  }
+}
+
 beforeEach(() => {
   mock.restore()
 })
@@ -148,5 +160,45 @@ describe("MemoryHindsightRetain", () => {
       document_id: MemoryHindsightMap.memoryDocumentId(item(), tmp.path),
     })
     expect(spy).not.toHaveBeenCalled()
+  })
+
+  test("maps session slices into replace-style retain calls", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        memory: {
+          hindsight: cfg(true),
+        },
+      },
+    })
+
+    const calls: Array<Parameters<typeof MemoryHindsightClient.retain>[0]> = []
+    spyOn(MemoryHindsightClient, "retain").mockImplementation(async (input) => {
+      calls.push(input)
+      return {
+        success: true,
+        bank_id: "bank_1",
+        items_count: 1,
+        async: false,
+      }
+    })
+
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: () => MemoryHindsightRetain.session(slice()),
+    })
+
+    expect(result.status).toBe("retained")
+    expect(result.document_id).toBe(MemoryHindsightMap.sessionDocumentId(slice(), tmp.path))
+    expect(calls).toEqual([
+      {
+        content: slice().content,
+        timestamp: new Date(slice().updated_at).toISOString(),
+        metadata: MemoryHindsightMap.sessionMetadata(slice(), tmp.path),
+        document_id: MemoryHindsightMap.sessionDocumentId(slice(), tmp.path),
+        tags: MemoryHindsightMap.sessionTags({ tags: slice().tags }),
+        update_mode: "replace",
+      },
+    ])
   })
 })

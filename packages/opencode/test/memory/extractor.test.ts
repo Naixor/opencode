@@ -9,6 +9,7 @@ import { MemoryExtractor } from "../../src/memory/engine/extractor"
 import { Provider } from "../../src/provider/provider"
 import { SessionPrompt } from "../../src/session/prompt"
 import { Token } from "../../src/util/token"
+import { MemoryHindsightRetain } from "../../src/memory/hindsight/retain"
 import { tmpdir } from "../fixture/fixture"
 
 async function withMemoryEnv<T>(fn: () => Promise<T>, config?: Partial<Config.Info>): Promise<T> {
@@ -257,6 +258,122 @@ describe("MemoryExtractor", () => {
       expect(sys).toContain("Use Hono for API routes")
       expect(sys).toContain("Prefer Bun APIs when possible")
       expect(sys).not.toContain("This item should be trimmed by the item budget")
+    })
+
+    test("retains the current session slice before hindsight-assisted extraction", async () => {
+      await using tmp = await tmpdir({
+        git: true,
+        config: {
+          memory: {
+            hindsight: {
+              enabled: true,
+              mode: "embedded",
+              extract: true,
+              recall: true,
+              backfill: true,
+              workspace_scope: "worktree",
+              context_max_items: 6,
+              context_max_tokens: 1200,
+            },
+          },
+        },
+      })
+
+      const calls: Array<Parameters<typeof MemoryHindsightRetain.session>[0]> = []
+      spies.push(
+        spyOn(Provider, "defaultModel").mockResolvedValue({
+          providerID: "test",
+          modelID: "primary",
+        }),
+        spyOn(Provider, "getSmallModel").mockResolvedValue(undefined),
+        spyOn(MemoryHindsightRetain, "session").mockImplementation(async (input) => {
+          calls.push(input)
+          return {
+            status: "retained",
+            document_id: "sess:test:sess_11:0:2",
+            result: {
+              success: true,
+              bank_id: "bank_1",
+              items_count: 1,
+              async: false,
+            },
+          }
+        }),
+        spyOn(SessionPrompt, "prompt").mockImplementation((async () => {
+          return {
+            info: {} as never,
+            parts: [{ type: "text", text: JSON.stringify({ items: [] }) }],
+          }
+        }) as unknown as typeof SessionPrompt.prompt),
+      )
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          MemoryExtractor.extractFromSession("sess_11", [
+            { role: "user", content: "Keep Hono for API routes" },
+            { role: "assistant", content: "Okay." },
+          ]),
+      })
+
+      expect(calls).toHaveLength(1)
+      expect(calls[0].session_id).toBe("sess_11")
+      expect(calls[0].start).toBe(0)
+      expect(calls[0].end).toBe(2)
+      expect(calls[0].content).toContain("[user]: Keep Hono for API routes")
+      expect(calls[0].content).toContain("[assistant]: Okay.")
+    })
+
+    test("keeps extraction non-fatal when session-slice retain fails", async () => {
+      await using tmp = await tmpdir({
+        git: true,
+        config: {
+          memory: {
+            hindsight: {
+              enabled: true,
+              mode: "embedded",
+              extract: true,
+              recall: true,
+              backfill: true,
+              workspace_scope: "worktree",
+              context_max_items: 6,
+              context_max_tokens: 1200,
+            },
+          },
+        },
+      })
+
+      let called = false
+      spies.push(
+        spyOn(Provider, "defaultModel").mockResolvedValue({
+          providerID: "test",
+          modelID: "primary",
+        }),
+        spyOn(Provider, "getSmallModel").mockResolvedValue(undefined),
+        spyOn(MemoryHindsightRetain, "session").mockResolvedValue({
+          status: "failed",
+          document_id: "sess:test:sess_12:0:2",
+          error: "boom",
+        }),
+        spyOn(SessionPrompt, "prompt").mockImplementation((async () => {
+          called = true
+          return {
+            info: {} as never,
+            parts: [{ type: "text", text: JSON.stringify({ items: [] }) }],
+          }
+        }) as unknown as typeof SessionPrompt.prompt),
+      )
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          MemoryExtractor.extractFromSession("sess_12", [
+            { role: "user", content: "Keep Hono for API routes" },
+            { role: "assistant", content: "Okay." },
+          ]),
+      })
+
+      expect(called).toBe(true)
     })
   })
 

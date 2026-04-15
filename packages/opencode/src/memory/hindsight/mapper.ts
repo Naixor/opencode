@@ -16,6 +16,11 @@ export namespace MemoryHindsightMap {
     hash: string
   }
 
+  export interface SliceInput extends SessionInput {
+    created_at?: number
+    updated_at?: number
+  }
+
   export interface Hit {
     document_id?: string | null
     metadata?: Record<string, unknown> | null
@@ -72,6 +77,26 @@ export namespace MemoryHindsightMap {
       status: memory.status,
       categories: memory.categories,
       tags: memory.tags,
+    })
+  }
+
+  export function sessionMetadata(input: SliceInput, root: string) {
+    return {
+      workspace_id: MemoryHindsightBank.worktreeHash(root),
+      project_root: root,
+      session_id: input.session_id,
+      source_kind: "session_slice",
+      slice_start: String(input.start),
+      slice_end: String(input.end),
+      ...(input.created_at === undefined ? {} : { created_at: String(input.created_at) }),
+      ...(input.updated_at === undefined ? {} : { updated_at: String(input.updated_at) }),
+    }
+  }
+
+  export function sessionTags(input: { tags?: string[] } = {}) {
+    return MemoryHindsightBank.tags({
+      kind: "session_slice",
+      tags: input.tags,
     })
   }
 
