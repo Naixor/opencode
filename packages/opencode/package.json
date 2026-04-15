@@ -97,6 +97,8 @@
     "@solid-primitives/event-bus": "1.1.2",
     "@solid-primitives/scheduled": "1.5.2",
     "@standard-schema/spec": "1.0.0",
+    "@vectorize-io/hindsight-all": "0.5.1",
+    "@vectorize-io/hindsight-client": "0.5.1",
     "@zip.js/zip.js": "2.7.62",
     "ai": "catalog:",
     "ai-gateway-provider": "2.3.1",

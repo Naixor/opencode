@@ -344,6 +344,8 @@
         "@solid-primitives/event-bus": "1.1.2",
         "@solid-primitives/scheduled": "1.5.2",
         "@standard-schema/spec": "1.0.0",
+        "@vectorize-io/hindsight-all": "0.5.1",
+        "@vectorize-io/hindsight-client": "0.5.1",
         "@zip.js/zip.js": "2.7.62",
         "ai": "catalog:",
         "ai-gateway-provider": "2.3.1",
@@ -2131,6 +2133,10 @@
     "@typespec/ts-http-runtime": ["@typespec/ts-http-runtime@0.3.2", "", { "dependencies": { "http-proxy-agent": "^7.0.0", "https-proxy-agent": "^7.0.0", "tslib": "^2.6.2" } }, "sha512-IlqQ/Gv22xUC1r/WQm4StLkYQmaaTsXAhUVsNE0+xiyf0yRFiH5++q78U3bw6bLKDCTmh0uqKB9eG9+Bt75Dkg=="],
 
     "@ungap/structured-clone": ["@ungap/structured-clone@1.3.0", "", {}, "sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g=="],
+
+    "@vectorize-io/hindsight-all": ["@vectorize-io/hindsight-all@0.5.1", "", {}, "sha512-Gd5m5sKF0Aw373yeqUeV4qy+vuXRn6quiahVLcAOGC2zrIAIrEPvhy7xkH/mpkhhhUc6NHLwCTN7QQ/z/8OAyQ=="],
+
+    "@vectorize-io/hindsight-client": ["@vectorize-io/hindsight-client@0.5.1", "", {}, "sha512-UD6O+kNMKGfqh5Gp9aXc2eQkp7eoHsreraRTq0pQDFU1izpAWNUnrmJyNwRDBdk8Ew2g0CSgTgrMpjuLb57hbw=="],
 
     "@vercel/oidc": ["@vercel/oidc@3.1.0", "", {}, "sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w=="],
 

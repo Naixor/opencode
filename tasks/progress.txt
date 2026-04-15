@@ -3,6 +3,7 @@
 - Workspace-scoped runtime singletons belong on `Instance.state(...)` with a dispose hook so per-worktree resources are reused during a session and automatically shut down on `Instance.dispose()`.
 - Hindsight wrappers should resolve the embedded service once, build both `HindsightClient` and a raw `createClient(createConfig(...))`, then route SDK helpers through one shared timeout or non-fatal result path instead of per-call error handling.
 - Keep Hindsight bank identity and resolve rules in dedicated helpers under `packages/opencode/src/memory/hindsight/`; only `mem:` ids should resolve directly to authoritative memories, while `sess:` and `obs:` remain indirect ranking evidence and cross-worktree hashes must be dropped.
+- Workspace-scoped companion services fit `Instance.state(..., dispose)` well: cache one lazy boot promise per worktree, bind the embedded daemon to `127.0.0.1`, and treat startup or health timeouts as degraded fallback instead of throwing into memory flows.
 
 ## 2026-04-14 23:20:31 CST - US-001
 - Added `memory.hindsight` config parsing in `packages/opencode/src/config/config.ts` with the requested feature gates, rollout knobs, and phase-1 defaults.
@@ -41,4 +42,14 @@
   - Worktree hash should remain the single shared primitive for both bank ids and document ids so retain, recall, and backfill stay aligned.
   - Resolve logic should prefer reversible `mem:` document ids first, then fall back to `metadata.memory_id`, and treat cross-worktree hashes as hard drops.
   - `sess:` and `obs:` ids should still parse cleanly for diagnostics, but they must remain indirect evidence instead of direct authority candidates.
+---
+
+## 2026-04-15 10:48:27 CST - US-002
+- Added `packages/opencode/src/memory/hindsight/service.ts` as a workspace-scoped embedded Hindsight lifecycle manager with lazy boot, deterministic loopback base URL and profile metadata, reusable ready state, health checks, degraded fallback, and shutdown on instance disposal.
+- Exported the service from `packages/opencode/src/memory/index.ts`, added `@vectorize-io/hindsight-all` and `@vectorize-io/hindsight-client` in `packages/opencode/package.json`, and covered reuse, timeout fallback, and disposal isolation in `packages/opencode/test/memory/hindsight-service.test.ts`.
+- Files changed: `packages/opencode/src/memory/hindsight/service.ts`, `packages/opencode/src/memory/index.ts`, `packages/opencode/test/memory/hindsight-service.test.ts`, `packages/opencode/package.json`, `bun.lock`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Persist the embedded `HindsightServer` on state before awaiting startup so timeout or health failures can still shut the daemon down cleanly during degrade.
+  - Deriving the embedded port from the shared worktree hash keeps one predictable daemon endpoint per worktree without adding extra config.
+  - `tmpdir({ git: true })` is important for worktree-scoped tests because non-git temp directories collapse to the global worktree identity and can mask per-worktree isolation bugs.
 ---

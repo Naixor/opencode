@@ -33,7 +33,7 @@
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Added a workspace-scoped embedded Hindsight service lifecycle with lazy per-worktree reuse, loopback-only startup defaults, degraded fallback handling, explicit health or shutdown APIs, and focused lifecycle tests."
+      "notes": "Added a workspace-scoped embedded Hindsight service that lazily boots one loopback-bound daemon per worktree, reuses the same ready handle, exposes ready or health or degraded state, shuts down on instance disposal, and falls back without throwing on startup or health timeout failures."
     },
     {
       "id": "US-003",
