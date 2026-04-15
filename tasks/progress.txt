@@ -12,6 +12,7 @@
 - Hindsight-assisted extraction should retain the current session snapshot via `MemoryHindsightRetain.session()` before the LLM call, using stable `sess:` ids built from the active message-window bounds and treating retain failures as non-fatal.
 - Build Hindsight extractor context from `MemoryHindsightRecall.context()` after session retention: prefer `source_facts`, then `chunks`, then direct hit text, dedupe repeated snippets, and omit the whole section when no usable items come back.
 - Mirror authoritative memory writes into Hindsight at the `Memory.create()` and `Memory.update()` boundary after the local save succeeds; reuse `MemoryHindsightRetain.memory()` so `mem:` ids stay stable across edits and retain failures remain warn-only.
+- Keep structured Hindsight recovery state in a dedicated `hindsight.json` sidecar beside `personal.json`, keyed by the same encoded project directory; update it through one helper with lock-guarded atomic writes, and trim stored failure samples so backfill metadata cannot grow without bound.
 
 ## 2026-04-14 23:20:31 CST - US-001
 - Added `memory.hindsight` config parsing in `packages/opencode/src/config/config.ts` with the requested feature gates, rollout knobs, and phase-1 defaults.
@@ -141,4 +142,14 @@
   - Keep Hindsight mirror sync in `memory.ts` rather than individual engine callers so every authoritative create or update path inherits the same behavior automatically.
   - Trigger the companion retain only after `MemoryStorage.save()` or `atomicUpdate()` succeeds; that keeps local persistence authoritative when Hindsight is degraded.
   - Regression tests for write mirroring can stub `MemoryHindsightClient.retain()` directly and assert repeated writes reuse the same `document_id` instead of creating duplicates.
+---
+
+## 2026-04-15 15:58:38 CST - US-014
+- Added `packages/opencode/src/memory/hindsight/state.ts` as the structured sidecar helper for `hindsight.json`, keeping per-worktree bank identity, scope, timestamps, and backfill state beside `personal.json` with lock-guarded atomic save or mutate helpers.
+- Added `packages/opencode/test/memory/hindsight-state.test.ts` to verify sidecar persistence, preserved `personal.json` authority shape, and fixed-window trimming for stored failure samples; documented the reusable sidecar-state pattern in `packages/opencode/AGENTS.md`.
+- Files changed: `packages/opencode/src/memory/hindsight/state.ts`, `packages/opencode/src/memory/index.ts`, `packages/opencode/test/memory/hindsight-state.test.ts`, `packages/opencode/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep Hindsight recovery metadata in `hindsight.json` beside `personal.json` instead of expanding the authoritative memory file or its numeric `meta` map.
+  - Reuse the same encoded `Instance.directory` storage path for both authority and sidecar files so project isolation stays aligned across reads and writes.
+  - Trim persisted failure samples on every write so resumable backfill state stays useful without growing unbounded over repeated retries.
 ---

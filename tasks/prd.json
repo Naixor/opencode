@@ -212,8 +212,8 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added `packages/opencode/src/memory/hindsight/state.ts` as the structured per-worktree sidecar state helper for `hindsight.json`, persisting bank identity, scope, timestamps, backfill cursor or counts, operation ids, and trimmed failure samples beside `personal.json` without changing the authoritative local memory file shape."
     },
     {
       "id": "US-015",
