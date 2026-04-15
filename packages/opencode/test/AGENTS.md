@@ -79,3 +79,4 @@ await using tmp = await tmpdir({
 - Directories are created in the system temp folder with prefix `opencode-test-`
 - Use `await using` for automatic cleanup when the variable goes out of scope
 - Paths are sanitized to strip null bytes (defensive fix for CI environments)
+- When test config enables nested `memory.hindsight`, pass the full Hindsight defaults object into `tmpdir({ config })` instead of a partial nested shape so typed fixture setup still matches `Config.Info`.

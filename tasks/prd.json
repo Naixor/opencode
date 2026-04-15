@@ -107,8 +107,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Updated `packages/opencode/src/memory/engine/recall.ts` so memory recall queries Hindsight when enabled, passes authoritative ranked candidates with optional `rank` and `score` hints into the `memory-recall` agent, and falls back to the existing full candidate pool whenever Hindsight is unavailable or returns no usable authority candidates."
     },
     {
       "id": "US-008",
@@ -122,8 +122,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added authority-boundary regression coverage proving `personal.json` remains authoritative storage and that inject, hit tracking, and decay continue to operate on local memory records even when Hindsight recall is enabled."
     },
     {
       "id": "US-009",

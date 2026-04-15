@@ -1,17 +1,20 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, spyOn } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { Global } from "../../src/global"
 import { Instance } from "../../src/project/instance"
+import type { Config } from "../../src/config/config"
 import { Memory } from "../../src/memory/memory"
 import { MemoryStorage } from "../../src/memory/storage"
 import { MemoryInject } from "../../src/memory/engine/injector"
 import { registerMemoryInjector } from "../../src/memory/hooks/inject"
+import { registerHitTracker } from "../../src/memory/hooks/hit-tracker"
+import { MemoryRecall } from "../../src/memory/engine/recall"
 import { HookChain } from "../../src/session/hooks"
 import { tmpdir } from "../fixture/fixture"
 
-async function withInstance<T>(fn: () => Promise<T>): Promise<T> {
-  await using tmp = await tmpdir({ git: true })
+async function withInstance<T>(fn: () => Promise<T>, config?: Partial<Config.Info>): Promise<T> {
+  await using tmp = await tmpdir({ git: true, config })
   return Instance.provide({
     directory: tmp.path,
     fn: async () => {
@@ -19,6 +22,17 @@ async function withInstance<T>(fn: () => Promise<T>): Promise<T> {
       return fn()
     },
   })
+}
+
+const hindsight = {
+  enabled: true,
+  mode: "embedded" as const,
+  extract: true,
+  recall: true,
+  backfill: true,
+  workspace_scope: "worktree" as const,
+  context_max_items: 6,
+  context_max_tokens: 1200,
 }
 
 describe("Memory Hooks (unit-level)", () => {
@@ -264,6 +278,108 @@ describe("Memory Hooks (unit-level)", () => {
     test("getPhase returns recall after threshold", () => {
       expect(MemoryInject.getPhase(3)).toBe("recall")
       expect(MemoryInject.getPhase(10)).toBe("recall")
+    })
+  })
+
+  describe("authoritative lifecycle boundaries", () => {
+    test("inject hook still consumes local memories when hindsight ranking is enabled", async () => {
+      await withInstance(
+        async () => {
+          HookChain.reset()
+          MemoryInject.reset()
+          registerMemoryInjector()
+
+          const mem = await Memory.create({
+            content: "Use Hono routes for APIs",
+            categories: ["tool"],
+            scope: "personal",
+            source: { sessionID: "ses_local", method: "manual" },
+          })
+
+          const stub = spyOn(MemoryRecall, "invoke").mockResolvedValue({
+            relevant: [mem.id],
+            conflicts: [],
+          })
+
+          try {
+            const ctx: HookChain.PreLLMContext = {
+              sessionID: "ses_local",
+              system: ["base"],
+              agent: "sisyphus",
+              model: "claude-sonnet-4-5-20250929",
+              messages: [
+                { role: "user", content: "first" },
+                { role: "assistant", content: "ok" },
+                { role: "user", content: "second" },
+                { role: "assistant", content: "ok" },
+                { role: "user", content: "third" },
+              ],
+            }
+
+            await HookChain.execute("pre-llm", ctx)
+
+            expect(stub).toHaveBeenCalled()
+            expect(ctx.system.some((item) => item.includes(mem.content))).toBe(true)
+            expect(ctx.system.some((item) => item.includes("document_id"))).toBe(false)
+
+            const next = await Memory.get(mem.id)
+            expect(next?.useCount).toBe(1)
+          } finally {
+            stub.mockRestore()
+          }
+        },
+        {
+          memory: {
+            hindsight,
+          },
+        },
+      )
+    })
+
+    test("hit tracker still updates local records when hindsight is enabled", async () => {
+      await withInstance(
+        async () => {
+          HookChain.reset()
+          MemoryInject.reset()
+          registerHitTracker()
+
+          const mem = await Memory.create({
+            content: "Hono routing conventions stay local",
+            categories: ["pattern"],
+            scope: "personal",
+            source: { sessionID: "ses_hit", method: "manual" },
+          })
+
+          MemoryInject.cacheRecallResult(
+            "ses_hit",
+            {
+              relevant: [mem.id],
+              conflicts: [],
+            },
+            3,
+          )
+
+          const ctx: HookChain.PostToolContext = {
+            sessionID: "ses_hit",
+            toolName: "write",
+            args: {},
+            result: {
+              output: "The Hono routing conventions stay local in this write result.",
+            },
+            agent: "sisyphus",
+          }
+
+          await HookChain.execute("post-tool", ctx)
+
+          const next = await Memory.get(mem.id)
+          expect(next?.hitCount).toBe(1)
+        },
+        {
+          memory: {
+            hindsight,
+          },
+        },
+      )
     })
   })
 

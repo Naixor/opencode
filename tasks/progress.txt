@@ -5,6 +5,8 @@
 - When Hindsight needs shared timeout or fallback behavior across retain, recall, and inspect paths, wrap the SDK once in `packages/opencode/src/memory/hindsight/client.ts` and keep downstream memory flows on non-fatal `undefined` results instead of scattering per-call error handling.
 - Authoritative-memory retain helpers should build `document_id`, metadata, and tags through `MemoryHindsightMap`, force `update_mode: "replace"`, and return structured non-fatal results so local writes never depend on companion success.
 - Hindsight recall wrappers should tolerate SDK hit-shape drift (`results` vs `items`, `score` vs relevance-score aliases), preserve source rank on resolved candidates, and record stale or indirect drops separately so downstream recall only sees authoritative local memories.
+- Engine recall should enrich `memory-recall` candidate JSON with optional Hindsight `rank` and `score` hints, but fall back to the original full pool whenever semantic recall yields no authoritative candidates.
+- Authority-boundary regressions should assert local `personal.json`, injector payloads, hit counters, and decay behavior still move only through local memory records even when tests enable Hindsight; in typed fixtures, pass the full nested Hindsight defaults object into `tmpdir({ config })`.
 
 ## 2026-04-14 23:20:31 CST - US-001
 - Added `memory.hindsight` config parsing in `packages/opencode/src/config/config.ts` with the requested feature gates, rollout knobs, and phase-1 defaults.
@@ -63,4 +65,23 @@
   - Keep Hindsight recall result parsing tolerant to minor SDK response-shape drift so engine code does not depend on one transient field layout.
   - Preserve rank from raw hit order even when duplicate memory ids collapse, because downstream selection still needs the original evidence ordering.
   - Treat `sess:` and `obs:` hits as indirect ranking evidence with explicit drop reasons instead of letting them masquerade as authoritative local memories.
+---
+
+## 2026-04-15 12:05:00 CST - US-007
+- Updated `packages/opencode/src/memory/engine/recall.ts` so engine recall asks Hindsight for authoritative ranked candidates when enabled, includes optional `rank` and `score` hints in the `memory-recall` candidate payload, and cleanly falls back to the full candidate pool when Hindsight is unavailable or unusable.
+- Extended the recall prompt in `packages/opencode/src/memory/prompt/default/recall.txt` so the `memory-recall` agent treats Hindsight ranking as tie-break evidence instead of replacing relevance judgment, and added regression coverage in `packages/opencode/test/memory/recall.test.ts` for both ranked-candidate propagation and fallback behavior.
+- Files changed: `packages/opencode/src/memory/engine/recall.ts`, `packages/opencode/src/memory/prompt/default/recall.txt`, `packages/opencode/test/memory/recall.test.ts`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep Hindsight integration at the engine recall boundary so `memory-recall` still decides final relevance over authoritative local memories instead of raw companion hits.
+  - Pass semantic ranking to the agent as optional candidate metadata rather than changing the recall result schema; this preserves the current `relevant` or `conflicts` contract.
+  - When Hindsight returns only stale or indirect hits, fall back before prompt construction so the old recall path remains intact without special-case agent behavior.
+---
+
+## 2026-04-15 12:35:00 CST - US-008
+- Added authority-boundary regression coverage proving Hindsight does not take over lifecycle ownership: `packages/opencode/test/memory/memory.test.ts` now asserts writes still persist through local `personal.json`, `packages/opencode/test/memory/hooks.test.ts` verifies injector and hit tracker still operate on local authoritative ids and counters, and `packages/opencode/test/memory/decay.test.ts` verifies local decay maintenance is unchanged with Hindsight enabled.
+- Files changed: `packages/opencode/test/memory/memory.test.ts`, `packages/opencode/test/memory/hooks.test.ts`, `packages/opencode/test/memory/decay.test.ts`, `packages/opencode/test/AGENTS.md`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Authority-boundary tests are most valuable when they assert concrete local artifacts and counters (`personal.json`, `useCount`, `hitCount`, `score`) instead of only checking Hindsight wrapper behavior.
+  - The injector contract should stay local-memory-only even when recall ranking comes from Hindsight; tests can prove that by stubbing `MemoryRecall.invoke()` and ensuring only local memory content reaches the prompt.
+  - `tmpdir({ config })` test setups with nested `memory.hindsight` config need the full typed Hindsight default object, not a partial nested shape.
 ---

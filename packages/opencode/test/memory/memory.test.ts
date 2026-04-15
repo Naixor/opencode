@@ -1,13 +1,16 @@
 import { describe, test, expect, beforeEach } from "bun:test"
+import path from "path"
+import { Global } from "../../src/global"
 import { Instance } from "../../src/project/instance"
 import { Memory } from "../../src/memory/memory"
 import { MemoryInject } from "../../src/memory/engine/injector"
 import { MemoryStorage } from "../../src/memory/storage"
 import { Token } from "../../src/util/token"
+import type { Config } from "../../src/config/config"
 import { tmpdir } from "../fixture/fixture"
 
-async function withInstance<T>(fn: () => Promise<T>): Promise<T> {
-  await using tmp = await tmpdir({ git: true })
+async function withInstance<T>(fn: () => Promise<T>, config?: Partial<Config.Info>): Promise<T> {
+  await using tmp = await tmpdir({ git: true, config })
   return Instance.provide({
     directory: tmp.path,
     fn: async () => {
@@ -15,6 +18,17 @@ async function withInstance<T>(fn: () => Promise<T>): Promise<T> {
       return fn()
     },
   })
+}
+
+const hindsight = {
+  enabled: true,
+  mode: "embedded" as const,
+  extract: true,
+  recall: true,
+  backfill: true,
+  workspace_scope: "worktree" as const,
+  context_max_items: 6,
+  context_max_tokens: 1200,
 }
 
 describe("Memory", () => {
@@ -194,6 +208,37 @@ describe("Memory", () => {
           source: { sessionID: "ses_1", method: "auto" },
         })
         expect(mem.status).toBe("pending")
+      })
+    })
+
+    test("create still persists to personal.json when hindsight is enabled", async () => {
+      await using tmp = await tmpdir({
+        git: true,
+        config: {
+          memory: {
+            hindsight,
+          },
+        },
+      })
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await MemoryStorage.clear()
+          const mem = await Memory.create({
+            content: "Keep personal.json authoritative",
+            categories: ["pattern"],
+            scope: "personal",
+            source: { sessionID: "ses_hindsight", method: "manual" },
+          })
+
+          const file = path.join(Global.Path.data, "memory", encodeURIComponent(tmp.path), "personal.json")
+          expect(await Bun.file(file).exists()).toBe(true)
+
+          const text = await Bun.file(file).text()
+          expect(text).toContain(mem.id)
+          expect(text).toContain("Keep personal.json authoritative")
+        },
       })
     })
 

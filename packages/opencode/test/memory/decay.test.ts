@@ -1,6 +1,32 @@
 import { describe, test, expect } from "bun:test"
+import { Instance } from "../../src/project/instance"
+import type { Config } from "../../src/config/config"
 import { MemoryDecay } from "../../src/memory/optimizer/decay"
-import type { Memory } from "../../src/memory/memory"
+import { Memory } from "../../src/memory/memory"
+import { MemoryStorage } from "../../src/memory/storage"
+import { tmpdir } from "../fixture/fixture"
+
+async function withInstance<T>(fn: () => Promise<T>, config?: Partial<Config.Info>): Promise<T> {
+  await using tmp = await tmpdir({ git: true, config })
+  return Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      await MemoryStorage.clear()
+      return fn()
+    },
+  })
+}
+
+const hindsight = {
+  enabled: true,
+  mode: "embedded" as const,
+  extract: true,
+  recall: true,
+  backfill: true,
+  workspace_scope: "worktree" as const,
+  context_max_items: 6,
+  context_max_tokens: 1200,
+}
 
 function makeMemory(overrides?: Partial<Memory.Info>): Memory.Info {
   const now = Date.now()
@@ -134,6 +160,36 @@ describe("MemoryDecay", () => {
       const effective = MemoryDecay.calculateDecay(memory, 30)
       // decayFactor ≈ 1.0, usageFactor = 1.0, hitFactor = 1.0
       expect(effective).toBeCloseTo(10.0, 1)
+    })
+
+    test("maintain keeps local decay behavior when hindsight is enabled", async () => {
+      await withInstance(
+        async () => {
+          const mem = await Memory.create({
+            content: "Decay should stay local",
+            categories: ["pattern"],
+            scope: "personal",
+            score: 10,
+            baseScore: 10,
+            useCount: 4,
+            hitCount: 2,
+            lastUsedAt: Date.now() - 30 * 24 * 60 * 60 * 1000,
+            source: { sessionID: "ses_decay", method: "manual" },
+          })
+
+          const expected = MemoryDecay.calculateDecay(mem, 30)
+          const result = await MemoryDecay.maintain()
+          const next = await Memory.get(mem.id)
+
+          expect(result.totalMemories).toBe(1)
+          expect(next?.score).toBeCloseTo(expected, 2)
+        },
+        {
+          memory: {
+            hindsight,
+          },
+        },
+      )
     })
   })
 })
