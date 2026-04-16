@@ -1,6 +1,6 @@
 import path from "path"
 import fs from "fs/promises"
-import { createWriteStream } from "fs"
+import { appendFileSync, createWriteStream, mkdirSync } from "fs"
 import { Global } from "../global"
 import z from "zod"
 import { Glob } from "./glob"
@@ -8,6 +8,7 @@ import { Glob } from "./glob"
 export namespace Log {
   export const Level = z.enum(["DEBUG", "INFO", "WARN", "ERROR"]).meta({ ref: "LogLevel", description: "Log level" })
   export type Level = z.infer<typeof Level>
+  type Crash = Record<string, string | number | boolean | null | undefined>
 
   const levelPriority: Record<Level, number> = {
     DEBUG: 0,
@@ -51,6 +52,34 @@ export namespace Log {
   let logpath = ""
   export function file() {
     return logpath
+  }
+  export function crashFile() {
+    return path.join(Global.Path.log, "crash.log")
+  }
+  function crashText(source: string, error: Error | string, extra?: Crash) {
+    const lines = Object.entries({
+      source,
+      name: error instanceof Error ? error.name : "Error",
+      message: error instanceof Error ? error.message : error,
+      log_file: file() || undefined,
+      ...extra,
+    })
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => `${key}=${value}`)
+
+    return (
+      [`[${new Date().toISOString()}]`, ...lines, error instanceof Error ? error.stack : undefined, ""]
+        .filter(Boolean)
+        .join("\n") + "\n"
+    )
+  }
+
+  export async function captureCrash(source: string, error: Error | string, extra?: Crash) {
+    await fs.appendFile(crashFile(), crashText(source, error, extra))
+  }
+  export function captureCrashSync(source: string, error: Error | string, extra?: Crash) {
+    mkdirSync(Global.Path.log, { recursive: true })
+    appendFileSync(crashFile(), crashText(source, error, extra))
   }
   let write = (msg: any) => {
     process.stderr.write(msg)

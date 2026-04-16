@@ -90,8 +90,15 @@ import { formatTranscript } from "../../util/transcript"
 import { UI } from "@/cli/ui.ts"
 import { useTuiConfig } from "../../context/tui-config"
 import { RalphLoop } from "@/session/hooks/ralph-loop"
+import { Log } from "@/util/log"
 
 addDefaultParsers(parsers.parsers)
+
+const log = Log.create({ service: "tui.session" })
+const warned = new Set<string>()
+
+type Label = string | number | boolean | null | undefined | object
+type Brief = string | number | boolean | null | undefined | Brief[]
 
 class CustomSpeedScroll implements ScrollAcceleration {
   constructor(private speed: number) {}
@@ -1137,9 +1144,7 @@ export function Session() {
             >
               <Show when={loadingOlder()}>
                 <box justifyContent="center" paddingBottom={1}>
-                  <text fg={theme.textMuted}>
-                    <Spinner /> Loading older messages…
-                  </text>
+                  <Spinner color={theme.textMuted}>Loading older messages...</Spinner>
                 </box>
               </Show>
               <For each={messages()}>
@@ -1179,23 +1184,16 @@ export function Session() {
                               paddingLeft={2}
                               backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
                             >
-                              <text fg={theme.textMuted}>{revert()!.reverted.length} message reverted</text>
-                              <text fg={theme.textMuted}>
-                                <span style={{ fg: theme.text }}>{keybind.print("messages_redo")}</span> or /redo to
-                                restore
-                              </text>
+                              <text fg={theme.textMuted}>{str(revert()!.reverted.length)} message reverted</text>
+                              <text
+                                fg={theme.textMuted}
+                              >{`${keybind.print("messages_redo")} or /redo to restore`}</text>
                               <Show when={revert()!.diffFiles?.length}>
                                 <box marginTop={1}>
                                   <For each={revert()!.diffFiles}>
                                     {(file) => (
                                       <text fg={theme.text}>
-                                        {file.filename}
-                                        <Show when={file.additions > 0}>
-                                          <span style={{ fg: theme.diffAdded }}> +{file.additions}</span>
-                                        </Show>
-                                        <Show when={file.deletions > 0}>
-                                          <span style={{ fg: theme.diffRemoved }}> -{file.deletions}</span>
-                                        </Show>
+                                        {`${str(file.filename)}${file.additions > 0 ? ` +${str(file.additions)}` : ""}${file.deletions > 0 ? ` -${str(file.deletions)}` : ""}`}
                                       </text>
                                     )}
                                   </For>
@@ -1350,7 +1348,7 @@ function UserMessage(props: {
             backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
             flexShrink={0}
           >
-            <text fg={theme.text}>{text()?.text}</text>
+            <text fg={theme.text}>{str(text()?.text)}</text>
             <Show when={files().length}>
               <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>
@@ -1361,10 +1359,7 @@ function UserMessage(props: {
                       return theme.secondary
                     })
                     return (
-                      <text fg={theme.text}>
-                        <span style={{ bg: bg(), fg: theme.background }}> {MIME_BADGE[file.mime] ?? file.mime} </span>
-                        <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> {file.filename} </span>
-                      </text>
+                      <text fg={theme.text}>{`${str(MIME_BADGE[file.mime] ?? file.mime)} ${str(file.filename)}`}</text>
                     )
                   }}
                 </For>
@@ -1374,16 +1369,12 @@ function UserMessage(props: {
               when={queued()}
               fallback={
                 <Show when={ctx.showTimestamps()}>
-                  <text fg={theme.textMuted}>
-                    <span style={{ fg: theme.textMuted }}>
-                      {Locale.todayTimeOrDateTime(props.message.time.created)}
-                    </span>
-                  </text>
+                  <text fg={theme.textMuted}>{Locale.todayTimeOrDateTime(props.message.time.created)}</text>
                 </Show>
               }
             >
-              <text fg={theme.textMuted}>
-                <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
+              <text fg={queuedFg()} attributes={TextAttributes.BOLD}>
+                QUEUED
               </text>
             </Show>
           </box>
@@ -1441,10 +1432,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
       </For>
       <Show when={props.parts.some((x) => x.type === "tool" && x.tool === "task")}>
         <box paddingTop={1} paddingLeft={3}>
-          <text fg={theme.text}>
-            {keybind.print("session_child_first")}
-            <span style={{ fg: theme.textMuted }}> view subagents</span>
-          </text>
+          <text fg={theme.text}>{`${keybind.print("session_child_first")} view subagents`}</text>
         </box>
       </Show>
       <Show when={props.message.error && props.message.error.name !== "MessageAbortedError"}>
@@ -1458,31 +1446,14 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           customBorderChars={SplitBorder.customBorderChars}
           borderColor={theme.error}
         >
-          <text fg={theme.textMuted}>{props.message.error?.data.message}</text>
+          <text fg={theme.textMuted}>{str(props.message.error?.data.message)}</text>
         </box>
       </Show>
       <Switch>
         <Match when={props.last || final() || props.message.error?.name === "MessageAbortedError"}>
           <box paddingLeft={3}>
-            <text marginTop={1}>
-              <span
-                style={{
-                  fg:
-                    props.message.error?.name === "MessageAbortedError"
-                      ? theme.textMuted
-                      : local.agent.color(props.message.agent),
-                }}
-              >
-                ▣{" "}
-              </span>{" "}
-              <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
-              <span style={{ fg: theme.textMuted }}> · {props.message.modelID}</span>
-              <Show when={duration()}>
-                <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
-              </Show>
-              <Show when={props.message.error?.name === "MessageAbortedError"}>
-                <span style={{ fg: theme.textMuted }}> · interrupted</span>
-              </Show>
+            <text marginTop={1} fg={theme.text}>
+              {`▣ ${Locale.titlecase(props.message.mode)} · ${str(props.message.modelID)}${duration() ? ` · ${Locale.duration(duration())}` : ""}${props.message.error?.name === "MessageAbortedError" ? " · interrupted" : ""}`}
             </text>
           </box>
         </Match>
@@ -1600,10 +1571,7 @@ function LoopCard(props: { session: SessionInfo }) {
           }}
         >
           <text fg={theme.text}>
-            {expanded() ? "▼" : "▶"} <span style={{ bg: theme.backgroundElement, fg: theme.text }}> {kind()} </span>{" "}
-            <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}> #{step()} </span>{" "}
-            <span style={{ bg: badge(), fg: theme.background }}> {label().toUpperCase()} </span>{" "}
-            <b>{props.session.title}</b>
+            {`${expanded() ? "▼" : "▶"} ${kind()} #${step()} ${label().toUpperCase()} ${str(props.session.title)}`}
           </text>
           <text fg={theme.textMuted}>{summary()}</text>
         </box>
@@ -1618,9 +1586,9 @@ function LoopCard(props: { session: SessionInfo }) {
           <text fg={openHover() ? theme.text : theme.textMuted}>Open child session</text>
         </box>
         <Show when={status() === "working" && current()}>
-          <text fg={theme.textMuted}>
-            <Spinner /> {Locale.titlecase(current()!.tool)} {toolTitle(current()!.state)}
-          </text>
+          <Spinner color={theme.textMuted}>
+            {[Locale.titlecase(current()!.tool), toolTitle(current()!.state)].filter(Boolean).join(" ")}
+          </Spinner>
         </Show>
         <Show when={expanded()}>
           <box flexDirection="column">
@@ -1734,6 +1702,8 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   const ctx = use()
   const sync = useSync()
 
+  onMount(() => warnToolPart(props.part))
+
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
     if (ctx.showDetails()) return false
@@ -1845,9 +1815,13 @@ function GenericTool(props: ToolProps<any>) {
     <Show
       when={props.output && ctx.showGenericToolOutput()}
       fallback={
-        <InlineTool icon="⚙" pending="Writing command..." complete={true} part={props.part}>
-          {props.tool} {input(props.input)}
-        </InlineTool>
+        <InlineTool
+          icon="⚙"
+          pending="Writing command..."
+          complete={true}
+          part={props.part}
+          label={[props.tool, input(props.input)].filter(Boolean).join(" ")}
+        />
       }
     >
       <BlockTool
@@ -1869,11 +1843,18 @@ function GenericTool(props: ToolProps<any>) {
 function ToolTitle(props: { fallback: string; when: any; icon: string; children: JSX.Element }) {
   const { theme } = useTheme()
   return (
-    <text paddingLeft={3} fg={props.when ? theme.textMuted : theme.text}>
-      <Show fallback={<>~ {props.fallback}</>} when={props.when}>
-        <span style={{ bold: true }}>{props.icon}</span> {props.children}
-      </Show>
-    </text>
+    <Switch>
+      <Match when={props.when}>
+        <text paddingLeft={3} fg={theme.text}>
+          {props.icon} {props.children}
+        </text>
+      </Match>
+      <Match when={true}>
+        <text paddingLeft={3} fg={theme.textMuted}>
+          ~ {props.fallback}
+        </text>
+      </Match>
+    </Switch>
   )
 }
 
@@ -1883,13 +1864,17 @@ function InlineTool(props: {
   complete: any
   pending: string
   spinner?: boolean
-  children: JSX.Element
+  label: Label
   part: ToolPart
 }) {
   const [margin, setMargin] = createSignal(0)
   const { theme } = useTheme()
   const ctx = use()
   const sync = useSync()
+  const label = createMemo(() => {
+    warnInlineLabel(props.part, props.label)
+    return str(props.label)
+  })
 
   const permission = createMemo(() => {
     const callID = sync.data.permission[ctx.sessionID]?.at(0)?.tool?.callID
@@ -1941,18 +1926,21 @@ function InlineTool(props: {
     >
       <Switch>
         <Match when={props.spinner}>
-          <Spinner color={fg()} children={props.children} />
+          <Spinner color={fg()}>{label()}</Spinner>
+        </Match>
+        <Match when={props.complete}>
+          <text paddingLeft={3} fg={fg()} attributes={denied() ? TextAttributes.STRIKETHROUGH : undefined}>
+            {props.icon} {label()}
+          </text>
         </Match>
         <Match when={true}>
           <text paddingLeft={3} fg={fg()} attributes={denied() ? TextAttributes.STRIKETHROUGH : undefined}>
-            <Show fallback={<>~ {props.pending}</>} when={props.complete}>
-              <span style={{ fg: props.iconColor }}>{props.icon}</span> {props.children}
-            </Show>
+            ~ {props.pending}
           </text>
         </Match>
       </Switch>
       <Show when={error() && !denied()}>
-        <text fg={theme.error}>{error()}</text>
+        <text fg={theme.error}>{str(error())}</text>
       </Show>
     </box>
   )
@@ -1999,7 +1987,7 @@ function BlockTool(props: {
       </Show>
       {props.children}
       <Show when={error()}>
-        <text fg={theme.error}>{error()}</text>
+        <text fg={theme.error}>{str(error())}</text>
       </Show>
     </box>
   )
@@ -2064,9 +2052,13 @@ function Bash(props: ToolProps<typeof BashTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="$" pending="Writing command..." complete={props.input.command} part={props.part}>
-          {props.input.command}
-        </InlineTool>
+        <InlineTool
+          icon="$"
+          pending="Writing command..."
+          complete={props.input.command}
+          part={props.part}
+          label={props.input.command ?? ""}
+        />
       </Match>
     </Switch>
   )
@@ -2096,9 +2088,13 @@ function Write(props: ToolProps<typeof WriteTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing write..." complete={props.input.filePath} part={props.part}>
-          Write {normalizePath(props.input.filePath!)}
-        </InlineTool>
+        <InlineTool
+          icon="←"
+          pending="Preparing write..."
+          complete={props.input.filePath}
+          part={props.part}
+          label={`Write ${normalizePath(props.input.filePath!)}`}
+        />
       </Match>
     </Switch>
   )
@@ -2106,12 +2102,13 @@ function Write(props: ToolProps<typeof WriteTool>) {
 
 function Glob(props: ToolProps<typeof GlobTool>) {
   return (
-    <InlineTool icon="✱" pending="Finding files..." complete={props.input.pattern} part={props.part}>
-      Glob "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
-      <Show when={props.metadata.count}>
-        ({props.metadata.count} {props.metadata.count === 1 ? "match" : "matches"})
-      </Show>
-    </InlineTool>
+    <InlineTool
+      icon="✱"
+      pending="Finding files..."
+      complete={props.input.pattern}
+      part={props.part}
+      label={`Glob "${props.input.pattern ?? ""}"${props.input.path ? ` in ${normalizePath(props.input.path)}` : ""}${props.metadata.count ? ` (${str(props.metadata.count)} ${props.metadata.count === 1 ? "match" : "matches"})` : ""}`}
+    />
   )
 }
 
@@ -2133,9 +2130,10 @@ function Read(props: ToolProps<typeof ReadTool>) {
         complete={props.input.filePath}
         spinner={isRunning()}
         part={props.part}
-      >
-        Read {normalizePath(props.input.filePath!)} {input(props.input, ["filePath"])}
-      </InlineTool>
+        label={[`Read ${normalizePath(props.input.filePath!)}`, input(props.input, ["filePath"])]
+          .filter(Boolean)
+          .join(" ")}
+      />
       <For each={loaded()}>
         {(filepath) => (
           <box paddingLeft={5}>
@@ -2149,12 +2147,13 @@ function Read(props: ToolProps<typeof ReadTool>) {
 
 function Grep(props: ToolProps<typeof GrepTool>) {
   return (
-    <InlineTool icon="✱" pending="Searching content..." complete={props.input.pattern} part={props.part}>
-      Grep "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
-      <Show when={props.metadata.matches}>
-        ({props.metadata.matches} {props.metadata.matches === 1 ? "match" : "matches"})
-      </Show>
-    </InlineTool>
+    <InlineTool
+      icon="✱"
+      pending="Searching content..."
+      complete={props.input.pattern}
+      part={props.part}
+      label={`Grep "${props.input.pattern ?? ""}"${props.input.path ? ` in ${normalizePath(props.input.path)}` : ""}${props.metadata.matches ? ` (${str(props.metadata.matches)} ${props.metadata.matches === 1 ? "match" : "matches"})` : ""}`}
+    />
   )
 }
 
@@ -2166,17 +2165,25 @@ function List(props: ToolProps<typeof ListTool>) {
     return ""
   })
   return (
-    <InlineTool icon="→" pending="Listing directory..." complete={props.input.path !== undefined} part={props.part}>
-      List {dir()}
-    </InlineTool>
+    <InlineTool
+      icon="→"
+      pending="Listing directory..."
+      complete={props.input.path !== undefined}
+      part={props.part}
+      label={`List ${dir()}`}
+    />
   )
 }
 
 function WebFetch(props: ToolProps<typeof WebFetchTool>) {
   return (
-    <InlineTool icon="%" pending="Fetching from the web..." complete={(props.input as any).url} part={props.part}>
-      WebFetch {(props.input as any).url}
-    </InlineTool>
+    <InlineTool
+      icon="%"
+      pending="Fetching from the web..."
+      complete={(props.input as any).url}
+      part={props.part}
+      label={`WebFetch ${(props.input as any).url ?? ""}`}
+    />
   )
 }
 
@@ -2184,9 +2191,13 @@ function CodeSearch(props: ToolProps<any>) {
   const input = props.input as any
   const metadata = props.metadata as any
   return (
-    <InlineTool icon="◇" pending="Searching code..." complete={input.query} part={props.part}>
-      Exa Code Search "{input.query}" <Show when={metadata.results}>({metadata.results} results)</Show>
-    </InlineTool>
+    <InlineTool
+      icon="◇"
+      pending="Searching code..."
+      complete={input.query}
+      part={props.part}
+      label={`Exa Code Search "${input.query ?? ""}"${metadata.results ? ` (${str(metadata.results)} results)` : ""}`}
+    />
   )
 }
 
@@ -2194,9 +2205,13 @@ function WebSearch(props: ToolProps<any>) {
   const input = props.input as any
   const metadata = props.metadata as any
   return (
-    <InlineTool icon="◈" pending="Searching web..." complete={input.query} part={props.part}>
-      Exa Web Search "{input.query}" <Show when={metadata.numResults}>({metadata.numResults} results)</Show>
-    </InlineTool>
+    <InlineTool
+      icon="◈"
+      pending="Searching web..."
+      complete={input.query}
+      part={props.part}
+      label={`Exa Web Search "${input.query ?? ""}"${metadata.numResults ? ` (${str(metadata.numResults)} results)` : ""}`}
+    />
   )
 }
 
@@ -2256,9 +2271,8 @@ function Task(props: ToolProps<typeof TaskTool>) {
       complete={props.input.description}
       pending="Delegating..."
       part={props.part}
-    >
-      {content()}
-    </InlineTool>
+      label={content()}
+    />
   )
 }
 
@@ -2306,9 +2320,15 @@ function Edit(props: ToolProps<typeof EditTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing edit..." complete={props.input.filePath} part={props.part}>
-          Edit {normalizePath(props.input.filePath!)} {input({ replaceAll: props.input.replaceAll })}
-        </InlineTool>
+        <InlineTool
+          icon="←"
+          pending="Preparing edit..."
+          complete={props.input.filePath}
+          part={props.part}
+          label={[`Edit ${normalizePath(props.input.filePath!)}`, input({ replaceAll: props.input.replaceAll })]
+            .filter(Boolean)
+            .join(" ")}
+        />
       </Match>
     </Switch>
   )
@@ -2369,7 +2389,7 @@ function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
                 when={file.type !== "delete"}
                 fallback={
                   <text fg={theme.diffRemoved}>
-                    -{file.deletions} line{file.deletions !== 1 ? "s" : ""}
+                    -{str(file.deletions)} line{file.deletions !== 1 ? "s" : ""}
                   </text>
                 }
               >
@@ -2381,9 +2401,7 @@ function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
         </For>
       </Match>
       <Match when={true}>
-        <InlineTool icon="%" pending="Preparing patch..." complete={false} part={props.part}>
-          Patch
-        </InlineTool>
+        <InlineTool icon="%" pending="Preparing patch..." complete={false} part={props.part} label="Patch" />
       </Match>
     </Switch>
   )
@@ -2402,9 +2420,13 @@ function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="⚙" pending="Updating todos..." complete={false} part={props.part}>
-          Updating todos...
-        </InlineTool>
+        <InlineTool
+          icon="⚙"
+          pending="Updating todos..."
+          complete={false}
+          part={props.part}
+          label="Updating todos..."
+        />
       </Match>
     </Switch>
   )
@@ -2427,7 +2449,7 @@ function Question(props: ToolProps<typeof QuestionTool>) {
             <For each={props.input.questions ?? []}>
               {(q, i) => (
                 <box flexDirection="column">
-                  <text fg={theme.textMuted}>{q.question}</text>
+                  <text fg={theme.textMuted}>{str(q.question)}</text>
                   <text fg={theme.text}>{format(props.metadata.answers?.[i()])}</text>
                 </box>
               )}
@@ -2436,9 +2458,13 @@ function Question(props: ToolProps<typeof QuestionTool>) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="→" pending="Asking questions..." complete={count()} part={props.part}>
-          Asked {count()} question{count() !== 1 ? "s" : ""}
-        </InlineTool>
+        <InlineTool
+          icon="→"
+          pending="Asking questions..."
+          complete={count()}
+          part={props.part}
+          label={`Asked ${str(count())} question${count() !== 1 ? "s" : ""}`}
+        />
       </Match>
     </Switch>
   )
@@ -2446,9 +2472,13 @@ function Question(props: ToolProps<typeof QuestionTool>) {
 
 function Skill(props: ToolProps<typeof SkillTool>) {
   return (
-    <InlineTool icon="→" pending="Loading skill..." complete={props.input.name} part={props.part}>
-      Skill "{props.input.name}"
-    </InlineTool>
+    <InlineTool
+      icon="→"
+      pending="Loading skill..."
+      complete={props.input.name}
+      part={props.part}
+      label={`Skill "${props.input.name ?? ""}"`}
+    />
   )
 }
 
@@ -2466,7 +2496,8 @@ function Diagnostics(props: { diagnostics?: Record<string, Record<string, any>[]
         <For each={errors()}>
           {(diagnostic) => (
             <text fg={theme.error}>
-              Error [{diagnostic.range.start.line + 1}:{diagnostic.range.start.character + 1}] {diagnostic.message}
+              Error [{str(diagnostic.range.start.line + 1)}:{str(diagnostic.range.start.character + 1)}]{" "}
+              {diagnostic.message}
             </text>
           )}
         </For>
@@ -2489,6 +2520,66 @@ function normalizePath(input?: string) {
   return absolute
 }
 
+function warnInlineLabel(part: ToolPart, label: Label) {
+  if (typeof label === "string") return
+
+  const key = `${part.id}:${kind(label)}:${str(brief(label))}`
+  if (warned.has(key)) return
+  warned.add(key)
+
+  log.warn("non-string inline tool label", {
+    tool: part.tool,
+    call_id: part.callID,
+    part_id: part.id,
+    message_id: part.messageID,
+    session_id: part.sessionID,
+    status: part.state.status,
+    label_type: kind(label),
+    label: brief(label),
+    input: brief(part.state.input),
+  })
+}
+
+function warnToolPart(part: ToolPart) {
+  const key = `toolpart:${part.id}:${part.state.status}`
+  if (warned.has(key)) return
+  warned.add(key)
+
+  log.warn("rendering tool part", {
+    tool: part.tool,
+    call_id: part.callID,
+    part_id: part.id,
+    message_id: part.messageID,
+    session_id: part.sessionID,
+    status: part.state.status,
+    input: brief(part.state.input),
+    metadata: brief(part.state.status === "pending" ? undefined : part.state.metadata),
+  })
+}
+
+function kind<T>(input: T) {
+  if (input === null) return "null"
+  if (Array.isArray(input)) return "array"
+  return typeof input
+}
+
+function brief<T>(input: T): Brief {
+  if (input === undefined) return undefined
+  if (input === null) return null
+  if (typeof input === "string") return input.length > 300 ? input.slice(0, 297) + "..." : input
+  if (typeof input === "number" || typeof input === "boolean") return input
+  if (Array.isArray(input)) return input.slice(0, 8).map(brief)
+  if (typeof input === "object") {
+    try {
+      const text = JSON.stringify(input)
+      return text.length > 300 ? text.slice(0, 297) + "..." : text
+    } catch {
+      return Object.prototype.toString.call(input)
+    }
+  }
+  return String(input)
+}
+
 function input(input: Record<string, any>, omit?: string[]): string {
   const primitives = Object.entries(input).filter(([key, value]) => {
     if (omit?.includes(key)) return false
@@ -2496,6 +2587,16 @@ function input(input: Record<string, any>, omit?: string[]): string {
   })
   if (primitives.length === 0) return ""
   return `[${primitives.map(([key, value]) => `${key}=${value}`).join(", ")}]`
+}
+
+function str<T>(input: T) {
+  if (input === undefined || input === null) return ""
+  if (typeof input === "object") {
+    try {
+      return JSON.stringify(input)
+    } catch {}
+  }
+  return String(input)
 }
 
 function filetype(input?: string) {

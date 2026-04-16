@@ -46,12 +46,18 @@ process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
     e: e instanceof Error ? e.message : e,
   })
+  try {
+    Log.captureCrashSync("cli.unhandledRejection", e instanceof Error ? e : String(e))
+  } catch {}
 })
 
 process.on("uncaughtException", (e) => {
   Log.Default.error("exception", {
     e: e instanceof Error ? e.message : e,
   })
+  try {
+    Log.captureCrashSync("cli.uncaughtException", e)
+  } catch {}
 })
 
 let cli = yargs(hideBin(process.argv))
@@ -212,10 +218,13 @@ try {
     })
   }
   Log.Default.error("fatal", data)
+  try {
+    Log.captureCrashSync("cli.fatal", e instanceof Error ? e : String(e))
+  } catch {}
   const formatted = FormatError(e)
   if (formatted) UI.error(formatted)
   if (formatted === undefined) {
-    UI.error("Unexpected error, check log file at " + Log.file() + " for more details" + EOL)
+    UI.error("Unexpected error, check log file at " + Log.crashFile() + " for more details" + EOL)
     process.stderr.write((e instanceof Error ? e.message : String(e)) + EOL)
   }
   process.exitCode = 1

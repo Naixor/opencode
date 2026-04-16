@@ -24,12 +24,18 @@ process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
     e: e instanceof Error ? e.message : e,
   })
+  try {
+    Log.captureCrashSync("tui.worker.unhandledRejection", e instanceof Error ? e : String(e))
+  } catch {}
 })
 
 process.on("uncaughtException", (e) => {
   Log.Default.error("exception", {
     e: e instanceof Error ? e.message : e,
   })
+  try {
+    Log.captureCrashSync("tui.worker.uncaughtException", e)
+  } catch {}
 })
 
 // Parse CLI arguments

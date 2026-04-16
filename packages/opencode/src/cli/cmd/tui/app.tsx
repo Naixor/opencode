@@ -40,6 +40,7 @@ import { writeHeapSnapshot } from "v8"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
+import { Log } from "@/util/log"
 
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
@@ -127,11 +128,33 @@ export function tui(input: {
       resolve()
     }
 
+    process.on("unhandledRejection", onReject)
+    process.on("uncaughtException", onCrash)
+
+    async function finish() {
+      process.off("unhandledRejection", onReject)
+      process.off("uncaughtException", onCrash)
+      await onExit()
+    }
+
+    function onReject(error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error))
+      try {
+        Log.captureCrashSync("tui.render.unhandledRejection", err)
+      } catch {}
+    }
+
+    function onCrash(error: Error) {
+      try {
+        Log.captureCrashSync("tui.render.uncaughtException", error)
+      } catch {}
+    }
+
     render(
       () => {
         return (
           <ErrorBoundary
-            fallback={(error, reset) => <ErrorComponent error={error} reset={reset} onExit={onExit} mode={mode} />}
+            fallback={(error, reset) => <ErrorComponent error={error} reset={reset} onExit={finish} mode={mode} />}
           >
             <ArgsProvider {...input.args}>
               <ExitProvider onExit={onExit}>
@@ -834,6 +857,13 @@ function ErrorComponent(props: {
   const term = useTerminalDimensions()
   const renderer = useRenderer()
 
+  try {
+    Log.captureCrashSync("tui.error_boundary", props.error, {
+      message: props.error.message,
+      crash_file: Log.crashFile(),
+    })
+  } catch {}
+
   const handleExit = async () => {
     renderer.setTerminalTitle("")
     renderer.destroy()
@@ -900,6 +930,7 @@ function ErrorComponent(props: {
           <text fg={colors.bg}>Exit</text>
         </box>
       </box>
+      <text fg={colors.muted}>Crash log: {Log.crashFile()}</text>
       <scrollbox height={Math.floor(term().height * 0.7)}>
         <text fg={colors.muted}>{props.error.stack}</text>
       </scrollbox>

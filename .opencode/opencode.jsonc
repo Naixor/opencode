@@ -11,6 +11,14 @@
       "enabled": false,
     },
   },
+  "memory": {
+    "hindsight": {
+      "enabled": true,
+      "llm_provider": "openai/gpt-5.4",
+      "startup_timeout_ms": 120000,
+      "query_timeout_ms": 20000,
+    },
+  },
   "tools": {
     "github-triage": false,
     "github-pr-search": false,
@@ -31,6 +39,16 @@
         "memory_forget": "allow",
         "edit": "deny",
         "write": "deny",
+      },
+    },
+    // Momus — Review Agent，专项检查 TUI renderable 问题
+    "momus": {
+      "permission": {
+        "skill": "allow",
+      },
+      "options": {
+        "enabled": true,
+        "prompt_append": "When reviewing changes that touch `packages/opencode/src/cli/cmd/tui/**/*.tsx`, OpenTUI components, or text rendering paths, load the `tui-renderable-review` skill and apply its checklist. Flag explicit `children={...}` on custom components, suspicious values flowing into `<text>...</text>`, and mixed control-flow/components that may produce non-renderable text nodes.",
       },
     },
   },

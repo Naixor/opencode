@@ -1039,6 +1039,10 @@ export namespace Config {
         .default("worktree")
         .describe("Scope Hindsight data to the current worktree"),
       bank_prefix: z.string().optional().describe("Prefix used when generating Hindsight bank ids"),
+      llm_provider: z.string().optional().describe("Override Hindsight daemon LLM provider"),
+      llm_model: z.string().optional().describe("Override Hindsight daemon LLM model or provider/model pair"),
+      llm_api_key: z.string().optional().describe("Override Hindsight daemon LLM API key"),
+      llm_base_url: z.string().optional().describe("Override Hindsight daemon LLM base URL"),
       startup_timeout_ms: z
         .number()
         .int()

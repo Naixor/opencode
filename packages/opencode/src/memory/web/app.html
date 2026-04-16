@@ -1,304 +1,423 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Memory Manager</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    .category-badge { @apply px-2 py-0.5 rounded text-xs font-medium; }
-    .oc-nav {
-      background: #111;
-      border-bottom: 1px solid #222;
-      padding: 0 24px;
-      height: 48px;
-      display: flex;
-      align-items: center;
-      gap: 24px;
-    }
-    .oc-nav-brand {
-      font-weight: 600;
-      color: #fff;
-      font-size: 0.95rem;
-      text-decoration: none;
-    }
-    .oc-nav-links { display: flex; gap: 4px; }
-    .oc-nav-link {
-      color: #888;
-      text-decoration: none;
-      font-size: 0.85rem;
-      padding: 6px 12px;
-      border-radius: 6px;
-      transition: all 0.15s;
-    }
-    .oc-nav-link:hover { color: #fff; background: #1a1a1a; }
-    .oc-nav-link.active { color: #5b9bd5; background: #1a1a2e; }
-  </style>
-</head>
-<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-  <nav class="oc-nav" id="oc-nav" style="display:none">
-    <a class="oc-nav-brand" href="/manager/app">OpenCode</a>
-    <div class="oc-nav-links" id="oc-nav-links">
-      <a class="oc-nav-link" href="/manager/app">Dashboard</a>
-      <a class="oc-nav-link active" href="/memory/app">Memory</a>
-    </div>
-  </nav>
-  <script>
-    fetch('/manager/services').then(r => r.json()).then(services => {
-      if (!services.length) return;
-      const nav = document.getElementById('oc-nav');
-      const links = document.getElementById('oc-nav-links');
-      nav.style.display = 'flex';
-      services.forEach(s => {
-        if (s.url === window.location.origin + '/memory/app' || s.url === '/memory/app') return;
-        const a = document.createElement('a');
-        a.href = s.url;
-        a.className = 'oc-nav-link';
-        a.textContent = s.name;
-        links.appendChild(a);
-      });
-    }).catch(() => {});
-  </script>
-  <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect, useCallback } = React;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Memory Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      .category-badge {
+        @apply px-2 py-0.5 rounded text-xs font-medium;
+      }
+      .oc-nav {
+        background: #111;
+        border-bottom: 1px solid #222;
+        padding: 0 24px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+      }
+      .oc-nav-brand {
+        font-weight: 600;
+        color: #fff;
+        font-size: 0.95rem;
+        text-decoration: none;
+      }
+      .oc-nav-links {
+        display: flex;
+        gap: 4px;
+      }
+      .oc-nav-link {
+        color: #888;
+        text-decoration: none;
+        font-size: 0.85rem;
+        padding: 6px 12px;
+        border-radius: 6px;
+        transition: all 0.15s;
+      }
+      .oc-nav-link:hover {
+        color: #fff;
+        background: #1a1a1a;
+      }
+      .oc-nav-link.active {
+        color: #5b9bd5;
+        background: #1a1a2e;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <nav class="oc-nav" id="oc-nav" style="display: none">
+      <a class="oc-nav-brand" href="/manager/app">OpenCode</a>
+      <div class="oc-nav-links" id="oc-nav-links">
+        <a class="oc-nav-link" href="/manager/app">Dashboard</a>
+        <a class="oc-nav-link active" href="/memory/app">Memory</a>
+      </div>
+    </nav>
+    <script>
+      fetch("/manager/services")
+        .then((r) => r.json())
+        .then((services) => {
+          if (!services.length) return
+          const nav = document.getElementById("oc-nav")
+          const links = document.getElementById("oc-nav-links")
+          nav.style.display = "flex"
+          services.forEach((s) => {
+            if (s.url === window.location.origin + "/memory/app" || s.url === "/memory/app") return
+            const a = document.createElement("a")
+            a.href = s.url
+            a.className = "oc-nav-link"
+            a.textContent = s.name
+            links.appendChild(a)
+          })
+        })
+        .catch(() => {})
+    </script>
+    <div id="root"></div>
+    <script type="text/babel">
+      const { useState, useEffect, useCallback } = React
 
-    const API_BASE = window.location.origin + '/memory';
+      const API_BASE = window.location.origin + "/memory"
+      const HINDSIGHT_URL = (() => {
+        const url = new URL(window.location.origin)
+        url.port = "9999"
+        url.pathname = "/"
+        url.search = ""
+        url.hash = ""
+        return url.toString()
+      })()
 
-    const CATEGORY_COLORS = {
-      style: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
-      pattern: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-      tool: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-      domain: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
-      workflow: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
-      correction: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
-      context: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
-    };
+      const CATEGORY_COLORS = {
+        style: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+        pattern: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+        tool: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        domain: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+        workflow: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+        correction: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+        context: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
+      }
 
-    function CategoryBadge({ category }) {
-      return (
-        <span className={`px-2 py-0.5 rounded text-xs font-medium ${CATEGORY_COLORS[category] || CATEGORY_COLORS.context}`}>
-          {category}
-        </span>
-      );
-    }
+      function CategoryBadge({ category }) {
+        return (
+          <span
+            className={`px-2 py-0.5 rounded text-xs font-medium ${CATEGORY_COLORS[category] || CATEGORY_COLORS.context}`}
+          >
+            {category}
+          </span>
+        )
+      }
 
-    function StatusBadge({ status }) {
-      return status === 'pending' ? (
-        <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">pending</span>
-      ) : (
-        <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">confirmed</span>
-      );
-    }
+      function StatusBadge({ status }) {
+        return status === "pending" ? (
+          <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">pending</span>
+        ) : (
+          <span className="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">confirmed</span>
+        )
+      }
 
-    function App() {
-      const [memories, setMemories] = useState([]);
-      const [stats, setStats] = useState(null);
-      const [filter, setFilter] = useState({ scope: '', category: '', status: '' });
-      const [search, setSearch] = useState('');
-      const [selected, setSelected] = useState(null);
-      const [editing, setEditing] = useState(false);
-      const [editContent, setEditContent] = useState('');
+      function App() {
+        const [memories, setMemories] = useState([])
+        const [stats, setStats] = useState(null)
+        const [filter, setFilter] = useState({ scope: "", category: "", status: "" })
+        const [search, setSearch] = useState("")
+        const [selected, setSelected] = useState(null)
+        const [editing, setEditing] = useState(false)
+        const [editContent, setEditContent] = useState("")
 
-      const fetchMemories = useCallback(async () => {
-        const params = new URLSearchParams();
-        if (filter.scope) params.set('scope', filter.scope);
-        if (filter.category) params.set('category', filter.category);
-        if (filter.status) params.set('status', filter.status);
-        const res = await fetch(`${API_BASE}?${params}`);
-        const data = await res.json();
-        setMemories(data);
-      }, [filter]);
+        const fetchMemories = useCallback(async () => {
+          const params = new URLSearchParams()
+          if (filter.scope) params.set("scope", filter.scope)
+          if (filter.category) params.set("category", filter.category)
+          if (filter.status) params.set("status", filter.status)
+          const res = await fetch(`${API_BASE}?${params}`)
+          const data = await res.json()
+          setMemories(data)
+        }, [filter])
 
-      const fetchStats = useCallback(async () => {
-        const res = await fetch(`${API_BASE}/stats`);
-        setStats(await res.json());
-      }, []);
+        const fetchStats = useCallback(async () => {
+          const res = await fetch(`${API_BASE}/stats`)
+          setStats(await res.json())
+        }, [])
 
-      useEffect(() => { fetchMemories(); fetchStats(); }, [fetchMemories, fetchStats]);
+        useEffect(() => {
+          fetchMemories()
+          fetchStats()
+        }, [fetchMemories, fetchStats])
 
-      const filtered = memories.filter(m =>
-        !search || m.content.toLowerCase().includes(search.toLowerCase()) ||
-        m.tags.some(t => t.toLowerCase().includes(search.toLowerCase()))
-      );
+        const filtered = memories.filter(
+          (m) =>
+            !search ||
+            m.content.toLowerCase().includes(search.toLowerCase()) ||
+            m.tags.some((t) => t.toLowerCase().includes(search.toLowerCase())),
+        )
 
-      const deleteMemory = async (id) => {
-        if (!confirm('Delete this memory?')) return;
-        await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
-        setSelected(null);
-        fetchMemories();
-        fetchStats();
-      };
+        const deleteMemory = async (id) => {
+          if (!confirm("Delete this memory?")) return
+          await fetch(`${API_BASE}/${id}`, { method: "DELETE" })
+          setSelected(null)
+          fetchMemories()
+          fetchStats()
+        }
 
-      const updateMemory = async (id, patch) => {
-        await fetch(`${API_BASE}/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patch),
-        });
-        setEditing(false);
-        fetchMemories();
-        fetchStats();
-      };
+        const updateMemory = async (id, patch) => {
+          await fetch(`${API_BASE}/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+          })
+          setEditing(false)
+          fetchMemories()
+          fetchStats()
+        }
 
-      const confirmMemory = async (id) => {
-        await updateMemory(id, { status: 'confirmed' });
-      };
+        const confirmMemory = async (id) => {
+          await updateMemory(id, { status: "confirmed" })
+        }
 
-      return (
-        <div className="max-w-6xl mx-auto p-6">
-          <header className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <span>Memory Manager</span>
-            </h1>
-            {stats && (
-              <div className="text-sm text-gray-500">
-                {stats.total} memories | {stats.pending} pending | pool: {stats.total}/{stats.poolLimit}
-              </div>
-            )}
-          </header>
-
-          {/* Filters */}
-          <div className="flex gap-3 mb-4 flex-wrap">
-            <input
-              type="text" placeholder="Search..."
-              className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 dark:border-gray-700 flex-1 min-w-[200px]"
-              value={search} onChange={e => setSearch(e.target.value)}
-            />
-            <select className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
-              value={filter.scope} onChange={e => setFilter(f => ({...f, scope: e.target.value}))}>
-              <option value="">All scopes</option>
-              <option value="personal">Personal</option>
-              <option value="team">Team</option>
-            </select>
-            <select className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
-              value={filter.category} onChange={e => setFilter(f => ({...f, category: e.target.value}))}>
-              <option value="">All categories</option>
-              {['style','pattern','tool','domain','workflow','correction','context'].map(c =>
-                <option key={c} value={c}>{c}</option>
-              )}
-            </select>
-            <select className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
-              value={filter.status} onChange={e => setFilter(f => ({...f, status: e.target.value}))}>
-              <option value="">All status</option>
-              <option value="pending">Pending</option>
-              <option value="confirmed">Confirmed</option>
-            </select>
-          </div>
-
-          <div className="flex gap-6">
-            {/* Memory list */}
-            <div className="flex-1 space-y-2 max-h-[70vh] overflow-y-auto">
-              {filtered.length === 0 ? (
-                <div className="text-center text-gray-400 py-12">No memories found</div>
-              ) : filtered.map(m => (
-                <div key={m.id}
-                  className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                    selected?.id === m.id
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 bg-white dark:bg-gray-800'
-                  }`}
-                  onClick={() => { setSelected(m); setEditing(false); }}
+        return (
+          <div className="max-w-6xl mx-auto p-6">
+            <header className="flex items-center justify-between mb-6">
+              <h1 className="text-2xl font-bold flex items-center gap-2">
+                <span>Memory Manager</span>
+              </h1>
+              <div className="flex items-center gap-3">
+                <a
+                  href={HINDSIGHT_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-medium text-sky-700 transition-colors hover:border-sky-300 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300"
+                  title="Start it with: opencode debug hindsight ui"
                 >
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <CategoryBadge category={m.category} />
-                        <StatusBadge status={m.status} />
-                        {m.scope === 'team' && (
-                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">team</span>
-                        )}
-                        {m.inject && (
-                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800">pinned</span>
-                        )}
-                      </div>
-                      <p className="text-sm">{m.content}</p>
-                      {m.tags.length > 0 && (
-                        <div className="flex gap-1 mt-1">
-                          {m.tags.map(t => (
-                            <span key={t} className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">{t}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-xs text-gray-400 whitespace-nowrap">
-                      score: {m.score.toFixed(1)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Detail panel */}
-            {selected && (
-              <div className="w-96 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 sticky top-6 self-start">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-gray-400 font-mono">{selected.id}</span>
-                  <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600">&times;</button>
-                </div>
-
-                {editing ? (
-                  <div className="space-y-3">
-                    <textarea
-                      className="w-full p-2 border rounded text-sm bg-white dark:bg-gray-900 dark:border-gray-600"
-                      rows={4} value={editContent} onChange={e => setEditContent(e.target.value)}
-                    />
-                    <div className="flex gap-2">
-                      <button onClick={() => updateMemory(selected.id, { content: editContent })}
-                        className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600">Save</button>
-                      <button onClick={() => setEditing(false)}
-                        className="px-3 py-1 border rounded text-sm hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-sm mb-3">{selected.content}</p>
-                    <div className="space-y-2 text-xs text-gray-500">
-                      <div className="flex justify-between"><span>Category</span><CategoryBadge category={selected.category} /></div>
-                      <div className="flex justify-between"><span>Status</span><StatusBadge status={selected.status} /></div>
-                      <div className="flex justify-between"><span>Score</span><span>{selected.score.toFixed(2)}</span></div>
-                      <div className="flex justify-between"><span>Uses</span><span>{selected.useCount}</span></div>
-                      <div className="flex justify-between"><span>Hits</span><span>{selected.hitCount}</span></div>
-                      <div className="flex justify-between"><span>Method</span><span>{selected.source?.method}</span></div>
-                      <div className="flex justify-between"><span>Created</span><span>{new Date(selected.createdAt).toLocaleDateString()}</span></div>
-                      {selected.lastUsedAt && (
-                        <div className="flex justify-between"><span>Last used</span><span>{new Date(selected.lastUsedAt).toLocaleDateString()}</span></div>
-                      )}
-                    </div>
-
-                    {selected.source?.contextSnapshot && (
-                      <details className="mt-3">
-                        <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Context snapshot</summary>
-                        <pre className="mt-1 p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs whitespace-pre-wrap max-h-40 overflow-y-auto">
-                          {selected.source.contextSnapshot}
-                        </pre>
-                      </details>
-                    )}
-
-                    <div className="flex gap-2 mt-4">
-                      <button onClick={() => { setEditing(true); setEditContent(selected.content); }}
-                        className="px-3 py-1 border rounded text-sm hover:bg-gray-100 dark:hover:bg-gray-700">Edit</button>
-                      {selected.status === 'pending' && (
-                        <button onClick={() => confirmMemory(selected.id)}
-                          className="px-3 py-1 bg-emerald-500 text-white rounded text-sm hover:bg-emerald-600">Confirm</button>
-                      )}
-                      <button onClick={() => deleteMemory(selected.id)}
-                        className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600">Delete</button>
-                    </div>
+                  <span>Open Hindsight UI</span>
+                  <span aria-hidden="true">↗</span>
+                </a>
+                {stats && (
+                  <div className="text-sm text-gray-500">
+                    {stats.total} memories | {stats.pending} pending | pool: {stats.total}/{stats.poolLimit}
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
-      );
-    }
+            </header>
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
-</body>
+            {/* Filters */}
+            <div className="flex gap-3 mb-4 flex-wrap">
+              <input
+                type="text"
+                placeholder="Search..."
+                className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 dark:border-gray-700 flex-1 min-w-[200px]"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <select
+                className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
+                value={filter.scope}
+                onChange={(e) => setFilter((f) => ({ ...f, scope: e.target.value }))}
+              >
+                <option value="">All scopes</option>
+                <option value="personal">Personal</option>
+                <option value="team">Team</option>
+              </select>
+              <select
+                className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
+                value={filter.category}
+                onChange={(e) => setFilter((f) => ({ ...f, category: e.target.value }))}
+              >
+                <option value="">All categories</option>
+                {["style", "pattern", "tool", "domain", "workflow", "correction", "context"].map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-gray-800 dark:border-gray-700"
+                value={filter.status}
+                onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value }))}
+              >
+                <option value="">All status</option>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+              </select>
+            </div>
+
+            <div className="flex gap-6">
+              {/* Memory list */}
+              <div className="flex-1 space-y-2 max-h-[70vh] overflow-y-auto">
+                {filtered.length === 0 ? (
+                  <div className="text-center text-gray-400 py-12">No memories found</div>
+                ) : (
+                  filtered.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                        selected?.id === m.id
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          : "border-gray-200 dark:border-gray-700 hover:border-gray-300 bg-white dark:bg-gray-800"
+                      }`}
+                      onClick={() => {
+                        setSelected(m)
+                        setEditing(false)
+                      }}
+                    >
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <CategoryBadge category={m.category} />
+                            <StatusBadge status={m.status} />
+                            {m.scope === "team" && (
+                              <span className="px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">
+                                team
+                              </span>
+                            )}
+                            {m.inject && (
+                              <span className="px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800">
+                                pinned
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm">{m.content}</p>
+                          {m.tags.length > 0 && (
+                            <div className="flex gap-1 mt-1">
+                              {m.tags.map((t) => (
+                                <span key={t} className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-400 whitespace-nowrap">score: {m.score.toFixed(1)}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Detail panel */}
+              {selected && (
+                <div className="w-96 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 sticky top-6 self-start">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs text-gray-400 font-mono">{selected.id}</span>
+                    <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600">
+                      &times;
+                    </button>
+                  </div>
+
+                  {editing ? (
+                    <div className="space-y-3">
+                      <textarea
+                        className="w-full p-2 border rounded text-sm bg-white dark:bg-gray-900 dark:border-gray-600"
+                        rows={4}
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => updateMemory(selected.id, { content: editContent })}
+                          className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditing(false)}
+                          className="px-3 py-1 border rounded text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm mb-3">{selected.content}</p>
+                      <div className="space-y-2 text-xs text-gray-500">
+                        <div className="flex justify-between">
+                          <span>Category</span>
+                          <CategoryBadge category={selected.category} />
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Status</span>
+                          <StatusBadge status={selected.status} />
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Score</span>
+                          <span>{selected.score.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Uses</span>
+                          <span>{selected.useCount}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Hits</span>
+                          <span>{selected.hitCount}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Method</span>
+                          <span>{selected.source?.method}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Created</span>
+                          <span>{new Date(selected.createdAt).toLocaleDateString()}</span>
+                        </div>
+                        {selected.lastUsedAt && (
+                          <div className="flex justify-between">
+                            <span>Last used</span>
+                            <span>{new Date(selected.lastUsedAt).toLocaleDateString()}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {selected.source?.contextSnapshot && (
+                        <details className="mt-3">
+                          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
+                            Context snapshot
+                          </summary>
+                          <pre className="mt-1 p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs whitespace-pre-wrap max-h-40 overflow-y-auto">
+                            {selected.source.contextSnapshot}
+                          </pre>
+                        </details>
+                      )}
+
+                      <div className="flex gap-2 mt-4">
+                        <button
+                          onClick={() => {
+                            setEditing(true)
+                            setEditContent(selected.content)
+                          }}
+                          className="px-3 py-1 border rounded text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          Edit
+                        </button>
+                        {selected.status === "pending" && (
+                          <button
+                            onClick={() => confirmMemory(selected.id)}
+                            className="px-3 py-1 bg-emerald-500 text-white rounded text-sm hover:bg-emerald-600"
+                          >
+                            Confirm
+                          </button>
+                        )}
+                        <button
+                          onClick={() => deleteMemory(selected.id)}
+                          className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />)
+    </script>
+  </body>
 </html>
