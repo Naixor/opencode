@@ -61,38 +61,30 @@
       </div>
     </nav>
     <script>
-      fetch("/manager/services")
+      window.ocManagerServices = fetch("/manager/services")
         .then((r) => r.json())
-        .then((services) => {
-          if (!services.length) return
-          const nav = document.getElementById("oc-nav")
-          const links = document.getElementById("oc-nav-links")
-          nav.style.display = "flex"
-          services.forEach((s) => {
-            if (s.url === window.location.origin + "/memory/app" || s.url === "/memory/app") return
-            const a = document.createElement("a")
-            a.href = s.url
-            a.className = "oc-nav-link"
-            a.textContent = s.name
-            links.appendChild(a)
-          })
+        .catch(() => [])
+
+      window.ocManagerServices.then((services) => {
+        if (!services.length) return
+        const nav = document.getElementById("oc-nav")
+        const links = document.getElementById("oc-nav-links")
+        nav.style.display = "flex"
+        services.forEach((s) => {
+          if (s.url === window.location.origin + "/memory/app" || s.url === "/memory/app") return
+          const a = document.createElement("a")
+          a.href = s.url
+          a.className = "oc-nav-link"
+          a.textContent = s.name
+          links.appendChild(a)
         })
-        .catch(() => {})
+      })
     </script>
     <div id="root"></div>
     <script type="text/babel">
       const { useState, useEffect, useCallback } = React
 
       const API_BASE = window.location.origin + "/memory"
-      const HINDSIGHT_URL = (() => {
-        const url = new URL(window.location.origin)
-        url.port = "9999"
-        url.pathname = "/"
-        url.search = ""
-        url.hash = ""
-        return url.toString()
-      })()
-
       const CATEGORY_COLORS = {
         style: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
         pattern: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
@@ -129,6 +121,7 @@
         const [selected, setSelected] = useState(null)
         const [editing, setEditing] = useState(false)
         const [editContent, setEditContent] = useState("")
+        const [hindsight, setHindsight] = useState()
 
         const fetchMemories = useCallback(async () => {
           const params = new URLSearchParams()
@@ -149,6 +142,16 @@
           fetchMemories()
           fetchStats()
         }, [fetchMemories, fetchStats])
+
+        useEffect(() => {
+          window.ocManagerServices
+            .then((services) => {
+              setHindsight(services.find((s) => s.id === "hindsight"))
+            })
+            .catch(() => {
+              setHindsight(null)
+            })
+        }, [])
 
         const filtered = memories.filter(
           (m) =>
@@ -187,16 +190,27 @@
                 <span>Memory Manager</span>
               </h1>
               <div className="flex items-center gap-3">
-                <a
-                  href={HINDSIGHT_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-medium text-sky-700 transition-colors hover:border-sky-300 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300"
-                  title="Start it with: opencode debug hindsight ui"
-                >
-                  <span>Open Hindsight UI</span>
-                  <span aria-hidden="true">↗</span>
-                </a>
+                {hindsight ? (
+                  <a
+                    href={hindsight.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-sm font-medium text-sky-700 transition-colors hover:border-sky-300 hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300"
+                    title="Open the Hindsight UI registered with manager"
+                  >
+                    <span>Open Hindsight UI</span>
+                    <span aria-hidden="true">↗</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-500 opacity-70 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400"
+                    title="Available when Hindsight is enabled and registered with manager"
+                  >
+                    <span>Hindsight unavailable</span>
+                  </button>
+                )}
                 {stats && (
                   <div className="text-sm text-gray-500">
                     {stats.total} memories | {stats.pending} pending | pool: {stats.total}/{stats.poolLimit}

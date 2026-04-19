@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
 import fs from "fs/promises"
+import { request } from "node:http"
 import path from "path"
 import { Auth } from "../../src/auth"
 import { Log } from "../../src/util/log"
@@ -36,6 +37,35 @@ const flags = {
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function post(url: string, body: unknown, auth?: string) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = request(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(auth ? { authorization: auth } : {}),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = []
+        res.on("data", (chunk) => chunks.push(Buffer.from(chunk)))
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf-8"),
+          })
+        })
+        res.on("error", reject)
+      },
+    )
+    req.on("error", reject)
+    req.write(JSON.stringify(body))
+    req.end()
+  })
 }
 
 async function logs(at = 0) {
@@ -108,6 +138,26 @@ mock.module("@vectorize-io/hindsight-client", () => ({
       this.opts = opts
       calls.client.push(opts)
     }
+  },
+  createConfig(input: { baseUrl: string }) {
+    return input
+  },
+  createClient(input: { baseUrl: string }) {
+    return { baseUrl: input.baseUrl }
+  },
+  sdk: {
+    async getDocument() {
+      return { data: {} }
+    },
+    async getDocuments() {
+      return { data: [] }
+    },
+    async getOperation() {
+      return { data: {} }
+    },
+    async getOperations() {
+      return { data: [] }
+    },
   },
 }))
 
@@ -231,6 +281,43 @@ describe("MemoryHindsightService", () => {
     })
   })
 
+  test("uses the primary opencode model when hindsight llm is not configured", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        model: "openai/gpt-5.4-responses",
+        provider: {
+          openai: {
+            options: {
+              baseURL: "https://api.openai.test/v1",
+            },
+          },
+        },
+        memory: {
+          hindsight: {
+            ...cfg({ startup_timeout_ms: 50, query_timeout_ms: 50 }),
+          },
+        },
+      },
+    })
+
+    await Auth.set("openai", { type: "api", key: "secret" })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        expect((await MemoryHindsightService.ready())?.status).toBe("ready")
+      },
+    })
+
+    expect(calls.server[0]?.env).toMatchObject({
+      HINDSIGHT_API_LLM_PROVIDER: "openai",
+      HINDSIGHT_API_LLM_MODEL: "gpt-5.4-responses",
+      HINDSIGHT_API_LLM_BASE_URL: "https://api.openai.test/v1",
+      HINDSIGHT_API_LLM_API_KEY: "secret",
+    })
+  })
+
   test("accepts provider slash model in llm_provider for backwards compatibility", async () => {
     await using tmp = await tmpdir({
       git: true,
@@ -268,7 +355,7 @@ describe("MemoryHindsightService", () => {
     })
   })
 
-  test("uses oauth access tokens for hindsight llm auth", async () => {
+  test("proxies oauth-backed openai auth for hindsight llm startup", async () => {
     await using tmp = await tmpdir({
       git: true,
       config: {
@@ -305,8 +392,147 @@ describe("MemoryHindsightService", () => {
     expect(calls.server[0]?.env).toMatchObject({
       HINDSIGHT_API_LLM_PROVIDER: "openai",
       HINDSIGHT_API_LLM_MODEL: "gpt-5.4-responses",
-      HINDSIGHT_API_LLM_BASE_URL: "https://api.openai.test/v1",
-      HINDSIGHT_API_LLM_API_KEY: "oauth-access",
+    })
+    expect(calls.server[0]?.env?.HINDSIGHT_API_LLM_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1$/)
+    expect(calls.server[0]?.env?.HINDSIGHT_API_LLM_API_KEY).toBeTruthy()
+    expect(calls.server[0]?.env?.HINDSIGHT_API_LLM_API_KEY).not.toBe("oauth-access")
+  })
+
+  test("translates hindsight chat completions through the oauth proxy", async () => {
+    const hit: Array<{
+      url: string
+      auth: string | null
+      originator: string | null
+      account: string | null
+      body: any
+    }> = []
+    const fn = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+      hit.push({
+        url: String(input),
+        auth: new Headers(init?.headers).get("authorization"),
+        originator: new Headers(init?.headers).get("originator"),
+        account: new Headers(init?.headers).get("ChatGPT-Account-Id"),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
+      return new Response(
+        [
+          `event: response.created\ndata: ${JSON.stringify({ type: "response.created", response: { id: "resp_1" } })}`,
+          `event: response.completed\ndata: ${JSON.stringify({
+            type: "response.completed",
+            response: {
+              id: "resp_1",
+              created_at: 123,
+              model: "gpt-5.4-responses",
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  id: "msg_1",
+                  content: [{ type: "output_text", text: "ok", annotations: [] }],
+                },
+              ],
+              usage: {
+                input_tokens: 7,
+                output_tokens: 3,
+                total_tokens: 10,
+              },
+            },
+          })}`,
+        ].join("\n\n") + "\n\n",
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        },
+      )
+    }, globalThis.fetch)
+    spyOn(globalThis, "fetch").mockImplementation(fn)
+
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        provider: {
+          openai: {
+            options: {
+              baseURL: "https://api.openai.test/v1",
+            },
+          },
+        },
+        memory: {
+          hindsight: {
+            ...cfg({ startup_timeout_ms: 50, query_timeout_ms: 50 }),
+            llm_model: "openai/gpt-5.4-responses",
+          },
+        },
+      },
+    })
+
+    await Auth.set("openai", {
+      type: "oauth",
+      access: "oauth-access",
+      refresh: "oauth-refresh",
+      expires: Date.now() + 60_000,
+      accountId: "acct_123",
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        expect((await MemoryHindsightService.ready())?.status).toBe("ready")
+        const base = calls.server[0]?.env?.HINDSIGHT_API_LLM_BASE_URL
+        const key = calls.server[0]?.env?.HINDSIGHT_API_LLM_API_KEY
+        expect(base).toBeTruthy()
+        expect(key).toBeTruthy()
+
+        const res = await post(
+          `${base}/chat/completions`,
+          {
+            model: "gpt-5.4-responses",
+            messages: [
+              { role: "system", content: "You are helpful." },
+              { role: "user", content: "Hello" },
+            ],
+            max_tokens: 123,
+            temperature: 0.2,
+          },
+          `Bearer ${key}`,
+        )
+
+        expect(res.status).toBe(200)
+        expect(JSON.parse(res.body)).toMatchObject({
+          object: "chat.completion",
+          model: "gpt-5.4-responses",
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: "ok",
+              },
+              finish_reason: "stop",
+            },
+          ],
+          usage: {
+            prompt_tokens: 7,
+            completion_tokens: 3,
+            total_tokens: 10,
+          },
+        })
+      },
+    })
+
+    expect(hit).toHaveLength(1)
+    expect(hit[0]).toMatchObject({
+      url: "https://chatgpt.com/backend-api/codex/responses",
+      auth: "Bearer oauth-access",
+      originator: "opencode",
+      account: "acct_123",
+      body: {
+        model: "gpt-5.4-responses",
+        instructions: expect.any(String),
+        input: [{ role: "user", content: [{ type: "input_text", text: "Hello" }] }],
+        temperature: 0.2,
+        store: false,
+        stream: true,
+      },
     })
   })
 
@@ -468,7 +694,39 @@ describe("MemoryHindsightService", () => {
     expect(calls.start).toBe(2)
     expect(calls.stop).toBe(2)
     expect(calls.server[0]?.env?.HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT).toBeUndefined()
+    expect(calls.server[1]?.env?.HINDSIGHT_API_ENABLE_OBSERVATIONS).toBe("true")
     expect(calls.server[1]?.env?.HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT).toBe("86400")
+  })
+
+  test("starts ui with llm muted when requested", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        memory: {
+          hindsight: {
+            ...cfg({ startup_timeout_ms: 50, query_timeout_ms: 50 }),
+            llm_model: "openai/gpt-5.4",
+          },
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        expect((await MemoryHindsightService.readyUi({ mute_llm: true }))?.status).toBe("ready")
+      },
+    })
+
+    expect(calls.start).toBe(1)
+    expect(calls.server[0]?.env).toMatchObject({
+      HINDSIGHT_API_LLM_PROVIDER: "none",
+      HINDSIGHT_API_LLM_MODEL: "",
+      HINDSIGHT_API_LLM_API_KEY: "",
+      HINDSIGHT_API_LLM_BASE_URL: "",
+      HINDSIGHT_API_ENABLE_OBSERVATIONS: "true",
+      HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: "86400",
+    })
   })
 
   test("retries ui startup without llm when daemon verification fails", async () => {
@@ -495,12 +753,14 @@ describe("MemoryHindsightService", () => {
 
     expect(calls.start).toBe(2)
     expect(calls.stop).toBe(3)
-    expect(calls.server[0]?.env?.HINDSIGHT_API_LLM_PROVIDER).toBeUndefined()
+    expect(calls.server[0]?.env?.HINDSIGHT_API_LLM_PROVIDER).not.toBe("none")
+    expect(calls.server[0]?.env?.HINDSIGHT_API_LLM_MODEL).toBeTruthy()
     expect(calls.server[1]?.env).toMatchObject({
       HINDSIGHT_API_LLM_PROVIDER: "none",
       HINDSIGHT_API_LLM_MODEL: "",
       HINDSIGHT_API_LLM_API_KEY: "",
       HINDSIGHT_API_LLM_BASE_URL: "",
+      HINDSIGHT_API_ENABLE_OBSERVATIONS: "true",
       HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: "86400",
     })
     const text = await logs(at)
@@ -556,6 +816,7 @@ describe("MemoryHindsightService", () => {
       HINDSIGHT_API_LLM_MODEL: "",
       HINDSIGHT_API_LLM_API_KEY: "",
       HINDSIGHT_API_LLM_BASE_URL: "",
+      HINDSIGHT_API_ENABLE_OBSERVATIONS: "true",
       HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: "86400",
     })
     const text = await logs(at)
@@ -590,6 +851,7 @@ describe("MemoryHindsightService", () => {
     expect(calls.start).toBe(2)
     expect(calls.stop).toBe(2)
     expect(calls.server[0]?.env?.HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT).toBeUndefined()
+    expect(calls.server[1]?.env?.HINDSIGHT_API_ENABLE_OBSERVATIONS).toBe("true")
     expect(calls.server[1]?.env?.HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT).toBe("86400")
   })
 

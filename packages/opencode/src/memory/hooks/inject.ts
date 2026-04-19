@@ -6,6 +6,7 @@ import { Memory } from "../memory"
 import { MemoryInject } from "../engine/injector"
 import { MemoryRecall } from "../engine/recall"
 import { MemoryEvent } from "../event"
+import { MemoryHindsightRecall } from "../hindsight/recall"
 
 const log = Log.create({ service: "memory.hooks.inject" })
 
@@ -19,7 +20,7 @@ const log = Log.create({ service: "memory.hooks.inject" })
  * so dynamic content (memory) must be at the end to avoid invalidating
  * the cache for stable prefix content (provider prompt, env, AGENTS.md).
  *
- * Phase 1 (early conversation): inject entire candidate pool
+ * Phase 1 (early conversation): use direct Hindsight recall
  * Phase 2 (after RECALL_THRESHOLD): use recall agent for precision filtering
  */
 export function registerMemoryInjector(): void {
@@ -77,24 +78,93 @@ export function registerMemoryInjector(): void {
 
         const phase = MemoryInject.getPhase(count)
 
-        if (phase === "full") {
-          // Phase 1: inject entire candidate pool + batch track usage
+        const recent = (ctx.messages ?? []).slice(-6).flatMap((msg) => {
+          if (typeof msg !== "object" || msg === null || !("role" in msg) || typeof msg.role !== "string") return []
+          if (!("content" in msg)) return []
+          return [
+            {
+              role: msg.role,
+              content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+            },
+          ]
+        })
+
+        const inject = async (
+          picked: Memory.Info[],
+          input?: { conflicts?: Array<{ memoryA: string; memoryB: string; reason: string }> },
+        ) => {
+          const memory = picked.length > 0 ? MemoryInject.formatMemoriesForPrompt(picked) : ""
+          if (picked.length > 0) {
+            ctx.system.push(memory)
+            await Memory.batchIncrementUseCount(picked.map((m) => m.id))
+          }
+
+          const conflicts = input?.conflicts ?? []
+          const conflict = conflicts.length > 0 ? MemoryInject.formatConflictWarning(conflicts) : ""
+          if (conflicts.length > 0) {
+            ctx.system.push(conflict)
+            await Bus.publish(MemoryEvent.ConflictDetected, {
+              sessionID: ctx.sessionID,
+              conflicts,
+            })
+          }
+
+          if (memory || conflict) {
+            MemoryInject.saveResolved(ctx.sessionID, {
+              memory,
+              conflict,
+              ids: picked.map((m) => m.id),
+              conflicts,
+              count,
+            })
+          } else {
+            MemoryInject.saveEmpty(ctx.sessionID, count)
+          }
+
+          await Bus.publish(MemoryEvent.RecallComplete, {
+            sessionID: ctx.sessionID,
+            injectedCount: picked.length,
+            recalledCount: picked.length,
+          })
+        }
+
+        const full = async () => {
           const picked = MemoryInject.selectForPrompt(pool, injectLimit)
           if (picked.length === 0) {
             MemoryInject.saveEmpty(ctx.sessionID, count)
             return
           }
-          const memory = MemoryInject.formatMemoriesForPrompt(picked)
-          ctx.system.push(memory)
-          await Memory.batchIncrementUseCount(picked.map((m) => m.id))
-          MemoryInject.saveResolved(ctx.sessionID, {
-            memory,
-            ids: picked.map((m) => m.id),
-            count,
+          await inject(picked)
+        }
+
+        if (phase === "full") {
+          const ranked = await MemoryHindsightRecall.query({
+            query: recent.map((item) => `[${item.role}]: ${item.content}`).join("\n---\n"),
+            pool,
+          }).catch((err) => {
+            log.warn("hindsight recall failed, falling back to full injection", { error: err })
+            return undefined
           })
-          log.info("phase 1 injection", {
+          if (ranked && ranked.candidates.length === 0) {
+            log.info("hindsight recall empty, falling back to full injection", {
+              sessionID: ctx.sessionID,
+              poolSize: pool.length,
+              hits: ranked.hits,
+            })
+          }
+          const picked = MemoryInject.selectForPrompt(
+            ranked && ranked.candidates.length > 0 ? ranked.candidates.map((item) => item.memory) : pool,
+            injectLimit,
+          )
+          if (picked.length === 0) {
+            await full()
+            return
+          }
+          await inject(picked)
+          log.info("hindsight recall completed", {
             sessionID: ctx.sessionID,
             poolSize: pool.length,
+            hits: ranked?.hits ?? 0,
             injected: picked.length,
           })
           return
@@ -103,41 +173,20 @@ export function registerMemoryInjector(): void {
         // Phase 2: use recall agent for filtering
         if (MemoryInject.shouldReRecall(ctx.sessionID, count)) {
           try {
-            const recent = (ctx.messages ?? []).slice(-6).flatMap((msg) => {
-              if (typeof msg !== "object" || msg === null || !("role" in msg) || typeof msg.role !== "string") return []
-              if (!("content" in msg)) return []
-              return [
-                {
-                  role: msg.role,
-                  content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
-                },
-              ]
-            })
             const result = await MemoryRecall.invoke({
               sessionID: ctx.sessionID,
               memories: pool,
               recentMessages: recent,
             })
             MemoryInject.cacheRecallResult(ctx.sessionID, result, count)
-            log.info("recall agent completed", {
+            log.info("llm recall completed", {
               sessionID: ctx.sessionID,
               relevant: result.relevant.length,
               conflicts: result.conflicts.length,
             })
           } catch (err) {
-            log.error("recall agent failed, falling back to full injection", { error: err })
-            const picked = MemoryInject.selectForPrompt(pool, injectLimit)
-            if (picked.length === 0) {
-              MemoryInject.saveEmpty(ctx.sessionID, count)
-              return
-            }
-            const memory = MemoryInject.formatMemoriesForPrompt(picked)
-            ctx.system.push(memory)
-            MemoryInject.saveResolved(ctx.sessionID, {
-              memory,
-              ids: picked.map((m) => m.id),
-              count,
-            })
+            log.error("llm recall failed, falling back to full injection", { error: err })
+            await full()
             return
           }
         }
@@ -145,57 +194,14 @@ export function registerMemoryInjector(): void {
         const cached = MemoryInject.getCachedRecall(ctx.sessionID)
         if (!cached) {
           // Cache miss — fallback to full injection
-          const picked = MemoryInject.selectForPrompt(pool, injectLimit)
-          if (picked.length === 0) {
-            MemoryInject.saveEmpty(ctx.sessionID, count)
-            return
-          }
-          const memory = MemoryInject.formatMemoriesForPrompt(picked)
-          ctx.system.push(memory)
-          MemoryInject.saveResolved(ctx.sessionID, {
-            memory,
-            ids: picked.map((m) => m.id),
-            count,
-          })
+          await full()
           return
         }
 
         // Inject filtered memories
         const relevant = allMemories.filter((m) => cached.relevant.includes(m.id))
         const picked = MemoryInject.selectForPrompt(relevant, injectLimit)
-        const memory = picked.length > 0 ? MemoryInject.formatMemoriesForPrompt(picked) : ""
-        if (picked.length > 0) {
-          ctx.system.push(memory)
-          await Memory.batchIncrementUseCount(picked.map((m) => m.id))
-        }
-
-        // Handle conflicts
-        const conflict = cached.conflicts.length > 0 ? MemoryInject.formatConflictWarning(cached.conflicts) : ""
-        if (cached.conflicts.length > 0) {
-          ctx.system.push(conflict)
-          await Bus.publish(MemoryEvent.ConflictDetected, {
-            sessionID: ctx.sessionID,
-            conflicts: cached.conflicts,
-          })
-        }
-
-        if (memory || conflict) {
-          MemoryInject.saveResolved(ctx.sessionID, {
-            memory,
-            conflict,
-            ids: picked.map((m) => m.id),
-            conflicts: cached.conflicts,
-            count,
-          })
-        } else {
-          MemoryInject.saveEmpty(ctx.sessionID, count)
-        }
-
-        await Bus.publish(MemoryEvent.RecallComplete, {
-          sessionID: ctx.sessionID,
-          injectedCount: picked.length,
-          recalledCount: cached.relevant.length,
-        })
+        await inject(picked, { conflicts: cached.conflicts })
       } catch (err) {
         throw err instanceof Error ? new Error(`memory injector failed: ${err.message}`, { cause: err }) : err
       }

@@ -14,8 +14,7 @@
   "memory": {
     "hindsight": {
       "enabled": true,
-      "llm_provider": "openai/gpt-5.4",
-      "startup_timeout_ms": 120000,
+      "startup_timeout_ms": 30000,
       "query_timeout_ms": 20000,
     },
   },

@@ -4,8 +4,34 @@ import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
 import { Lockfile } from "../../server/lockfile"
 import { Instance } from "../../project/instance"
+import { InstanceBootstrap } from "../../project/bootstrap"
 import { AuthToken } from "../../server/auth-token"
 import { Lifecycle } from "../../server/lifecycle"
+import { MemoryHindsightUI } from "../../memory/hindsight/ui"
+
+export async function startServe(args: Record<string, unknown>, auto: boolean) {
+  const opts = await resolveNetworkOptions(args as any)
+  const token = (() => {
+    if (AuthToken.loopback(opts.hostname)) return null
+    const val = (args["auth-token"] as string | undefined) ?? AuthToken.generate()
+    AuthToken.set(val)
+    if (!auto) console.log(`Auth token: ${val}`)
+    return val
+  })()
+
+  const server = Server.listen(opts)
+  const port = server.port!
+  const ui = auto ? undefined : await MemoryHindsightUI.start()
+
+  return {
+    dir: process.cwd(),
+    opts,
+    token,
+    server,
+    port,
+    ui,
+  }
+}
 
 export const ServeCommand = cmd({
   command: "serve",
@@ -30,52 +56,47 @@ export const ServeCommand = cmd({
 
     const dir = process.cwd()
 
-    const opts = await resolveNetworkOptions(args)
+    await Instance.provide({
+      directory: dir,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { token, server, port, ui } = await startServe(args as Record<string, unknown>, auto)
 
-    // Set up auth token when hostname is not loopback
-    const token = (() => {
-      if (AuthToken.loopback(opts.hostname)) return null
-      const val = ((args as Record<string, unknown>)["auth-token"] as string | undefined) ?? AuthToken.generate()
-      AuthToken.set(val)
-      if (!auto) console.log(`Auth token: ${val}`)
-      return val
-    })()
+        const ok = await Lockfile.create(dir, {
+          pid: process.pid,
+          port,
+          token,
+          createdAt: Date.now(),
+        })
 
-    const server = Server.listen(opts)
-    const port = server.port!
+        if (!ok) {
+          console.error("Error: failed to create lock file (race condition). Another worker may have just started.")
+          await server.stop()
+          process.exitCode = 1
+          return
+        }
 
-    const ok = await Lockfile.create(dir, {
-      pid: process.pid,
-      port,
-      token,
-      createdAt: Date.now(),
+        if (!auto) console.log(`opencode server listening on http://${server.hostname}:${port}`)
+        if (!auto && ui) console.log(`hindsight ui listening on ${ui.url}`)
+
+        const shutdown = async () => {
+          await Instance.disposeAll()
+          await server.stop()
+          await Lockfile.remove(dir)
+          process.exit(0)
+        }
+
+        // Enable auto-exit lifecycle when spawned by TUI
+        if (auto) {
+          Lifecycle.enable(shutdown)
+        }
+
+        process.on("SIGTERM", shutdown)
+        process.on("SIGINT", shutdown)
+
+        // Keep process alive
+        await new Promise(() => {})
+      },
     })
-
-    if (!ok) {
-      console.error("Error: failed to create lock file (race condition). Another worker may have just started.")
-      await server.stop()
-      process.exitCode = 1
-      return
-    }
-
-    if (!auto) console.log(`opencode server listening on http://${server.hostname}:${port}`)
-
-    const shutdown = async () => {
-      await Instance.disposeAll()
-      await server.stop()
-      await Lockfile.remove(dir)
-      process.exit(0)
-    }
-
-    // Enable auto-exit lifecycle when spawned by TUI
-    if (auto) {
-      Lifecycle.enable(shutdown)
-    }
-
-    process.on("SIGTERM", shutdown)
-    process.on("SIGINT", shutdown)
-
-    // Keep process alive
-    await new Promise(() => {})
   },
 })

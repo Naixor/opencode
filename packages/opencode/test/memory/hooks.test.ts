@@ -9,6 +9,8 @@ import { MemoryStorage } from "../../src/memory/storage"
 import { MemoryInject } from "../../src/memory/engine/injector"
 import { registerMemoryInjector } from "../../src/memory/hooks/inject"
 import { registerHitTracker } from "../../src/memory/hooks/hit-tracker"
+import { MemoryHindsightRetain } from "../../src/memory/hindsight/retain"
+import { MemoryHindsightRecall } from "../../src/memory/hindsight/recall"
 import { MemoryHindsightState } from "../../src/memory/hindsight/state"
 import { MemoryRecall } from "../../src/memory/engine/recall"
 import { HookChain } from "../../src/session/hooks"
@@ -284,12 +286,153 @@ describe("Memory Hooks (unit-level)", () => {
   })
 
   describe("authoritative lifecycle boundaries", () => {
+    test("early pre-llm injection uses hindsight recall when llm recall is not triggered", async () => {
+      await withInstance(
+        async () => {
+          HookChain.reset()
+          MemoryInject.reset()
+          registerMemoryInjector()
+
+          const retain = spyOn(MemoryHindsightRetain, "memory").mockResolvedValue({
+            status: "retained",
+            document_id: "mem:test",
+            result: { success: true, bank_id: "bank_test", items_count: 1, async: false },
+          })
+
+          const one = await Memory.create({
+            content: "Use Hono routes for APIs",
+            categories: ["tool"],
+            scope: "personal",
+            source: { sessionID: "ses_hs", method: "manual" },
+          })
+          const two = await Memory.create({
+            content: "Use Drizzle for schema changes",
+            categories: ["pattern"],
+            scope: "personal",
+            source: { sessionID: "ses_hs", method: "manual" },
+          })
+
+          const hs = spyOn(MemoryHindsightRecall, "query").mockResolvedValue({
+            raw: { results: [] } as never,
+            hits: 1,
+            candidates: [
+              {
+                memory: two,
+                memory_id: two.id,
+                document_id: `mem:test:${two.id}`,
+                rank: 1,
+                score: 0.91,
+                reason: "document_id",
+              },
+            ],
+            drops: [],
+          })
+          const llm = spyOn(MemoryRecall, "invoke")
+
+          try {
+            const ctx: HookChain.PreLLMContext = {
+              sessionID: "ses_hs",
+              system: ["base"],
+              agent: "sisyphus",
+              model: "claude-sonnet-4-5-20250929",
+              messages: [{ role: "user", content: "how should I wire routes?" }],
+            }
+
+            await HookChain.execute("pre-llm", ctx)
+
+            expect(hs).toHaveBeenCalled()
+            expect(llm).not.toHaveBeenCalled()
+            expect(ctx.system.some((item) => item.includes(two.content))).toBe(true)
+            expect(ctx.system.some((item) => item.includes(one.content))).toBe(false)
+          } finally {
+            retain.mockRestore()
+            hs.mockRestore()
+            llm.mockRestore()
+          }
+        },
+        {
+          memory: {
+            hindsight,
+          },
+        },
+      )
+    })
+
+    test("early pre-llm injection falls back to full pool when hindsight recall is empty", async () => {
+      await withInstance(
+        async () => {
+          HookChain.reset()
+          MemoryInject.reset()
+          registerMemoryInjector()
+
+          const retain = spyOn(MemoryHindsightRetain, "memory").mockResolvedValue({
+            status: "retained",
+            document_id: "mem:test",
+            result: { success: true, bank_id: "bank_test", items_count: 1, async: false },
+          })
+
+          const one = await Memory.create({
+            content: "Use Hono routes for APIs",
+            categories: ["tool"],
+            scope: "personal",
+            source: { sessionID: "ses_hs_empty", method: "manual" },
+          })
+          const two = await Memory.create({
+            content: "Use Drizzle for schema changes",
+            categories: ["pattern"],
+            scope: "personal",
+            source: { sessionID: "ses_hs_empty", method: "manual" },
+          })
+
+          const hs = spyOn(MemoryHindsightRecall, "query").mockResolvedValue({
+            raw: { results: [] } as never,
+            hits: 0,
+            candidates: [],
+            drops: [],
+          })
+          const llm = spyOn(MemoryRecall, "invoke")
+
+          try {
+            const ctx: HookChain.PreLLMContext = {
+              sessionID: "ses_hs_empty",
+              system: ["base"],
+              agent: "sisyphus",
+              model: "claude-sonnet-4-5-20250929",
+              messages: [{ role: "user", content: "how should I wire routes?" }],
+            }
+
+            await HookChain.execute("pre-llm", ctx)
+
+            expect(hs).toHaveBeenCalled()
+            expect(llm).not.toHaveBeenCalled()
+            expect(ctx.system.some((item) => item.includes(one.content))).toBe(true)
+            expect(ctx.system.some((item) => item.includes(two.content))).toBe(true)
+          } finally {
+            retain.mockRestore()
+            hs.mockRestore()
+            llm.mockRestore()
+          }
+        },
+        {
+          memory: {
+            hindsight,
+          },
+        },
+      )
+    })
+
     test("inject hook still consumes local memories when hindsight ranking is enabled", async () => {
       await withInstance(
         async () => {
           HookChain.reset()
           MemoryInject.reset()
           registerMemoryInjector()
+
+          const retain = spyOn(MemoryHindsightRetain, "memory").mockResolvedValue({
+            status: "retained",
+            document_id: "mem:test",
+            result: { success: true, bank_id: "bank_test", items_count: 1, async: false },
+          })
 
           const mem = await Memory.create({
             content: "Use Hono routes for APIs",
@@ -327,6 +470,7 @@ describe("Memory Hooks (unit-level)", () => {
             const next = await Memory.get(mem.id)
             expect(next?.useCount).toBe(1)
           } finally {
+            retain.mockRestore()
             stub.mockRestore()
           }
         },
@@ -344,6 +488,12 @@ describe("Memory Hooks (unit-level)", () => {
           HookChain.reset()
           MemoryInject.reset()
           registerHitTracker()
+
+          const retain = spyOn(MemoryHindsightRetain, "memory").mockResolvedValue({
+            status: "retained",
+            document_id: "mem:test",
+            result: { success: true, bank_id: "bank_test", items_count: 1, async: false },
+          })
 
           const mem = await Memory.create({
             content: "Hono routing conventions stay local",
@@ -375,6 +525,7 @@ describe("Memory Hooks (unit-level)", () => {
 
           const next = await Memory.get(mem.id)
           expect(next?.hitCount).toBe(1)
+          retain.mockRestore()
         },
         {
           memory: {

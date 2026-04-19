@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
+import { request } from "node:http"
 import path from "path"
 import { BunProc } from "../../src/bun"
 import {
+  free,
   loadHindsightInspect,
   loadHindsightUi,
   HindsightCommand,
   HindsightUiCommand,
+  patchHindsightUi,
+  startHindsightProxy,
 } from "../../src/cli/cmd/debug/hindsight"
+import { MemoryHindsightBackfill } from "../../src/memory/hindsight/backfill"
 import { MemoryHindsightBank } from "../../src/memory/hindsight/bank"
 import { MemoryHindsightService } from "../../src/memory/hindsight/service"
 import { MemoryHindsightState } from "../../src/memory/hindsight/state"
@@ -17,6 +22,27 @@ afterEach(async () => {
   mock.restore()
   await Instance.disposeAll()
 })
+
+function hit(url: string) {
+  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>(
+    (resolve, reject) => {
+      const req = request(url, (res) => {
+        const chunks: Buffer[] = []
+        res.on("data", (chunk) => chunks.push(Buffer.from(chunk)))
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString("utf-8"),
+          })
+        })
+        res.on("error", reject)
+      })
+      req.on("error", reject)
+      req.end()
+    },
+  )
+}
 
 function api() {
   const json = (body: unknown, status = 200) =>
@@ -188,6 +214,12 @@ describe("HindsightCommand", () => {
 
   test("builds control plane launch info from the ready service", async () => {
     api()
+    spyOn(MemoryHindsightBackfill, "run").mockResolvedValue({
+      status: "completed",
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+    })
     const ready = spyOn(MemoryHindsightService, "readyUi").mockResolvedValue({
       status: "ready",
       root: "/tmp/project",
@@ -204,25 +236,30 @@ describe("HindsightCommand", () => {
       hostname: "0.0.0.0",
     })
 
-    expect(result.dir).toBe("/tmp/hindsight-control-plane")
+    expect(result.dir).toBe("/tmp/hindsight-control-plane/standalone")
     expect(result.api_url).toBe("http://127.0.0.1:40123")
     expect(result.url).toBe("http://127.0.0.1:9999")
     expect(ready).toHaveBeenCalledTimes(1)
+    expect(ready).toHaveBeenCalledWith({
+      mute_llm: true,
+    })
     expect(BunProc.install).toHaveBeenCalledWith("@vectorize-io/hindsight-control-plane", "0.5.1")
-    expect(result.cmd).toEqual([
-      Bun.which("node")!,
-      path.join("/tmp/hindsight-control-plane", "bin", "cli.js"),
-      "--port",
-      "9999",
-      "--hostname",
-      "0.0.0.0",
-      "--api-url",
-      "http://127.0.0.1:40123",
-    ])
+    expect(result.cmd).toEqual([BunProc.which(), path.join("/tmp/hindsight-control-plane/standalone", "server.js")])
+    expect(result.env).toEqual({
+      PORT: "9999",
+      HOSTNAME: "0.0.0.0",
+      HINDSIGHT_CP_DATAPLANE_API_URL: "http://127.0.0.1:40123",
+    })
   })
 
   test("uses loopback address for curl-friendly url", async () => {
     api()
+    spyOn(MemoryHindsightBackfill, "run").mockResolvedValue({
+      status: "completed",
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+    })
     spyOn(MemoryHindsightService, "readyUi").mockResolvedValue({
       status: "ready",
       root: "/tmp/project",
@@ -244,6 +281,12 @@ describe("HindsightCommand", () => {
 
   test("formats ipv6 loopback url", async () => {
     api()
+    spyOn(MemoryHindsightBackfill, "run").mockResolvedValue({
+      status: "completed",
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+    })
     spyOn(MemoryHindsightService, "readyUi").mockResolvedValue({
       status: "ready",
       root: "/tmp/project",
@@ -264,6 +307,7 @@ describe("HindsightCommand", () => {
   })
 
   test("fails when hindsight is unavailable for the control plane", async () => {
+    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
     spyOn(MemoryHindsightService, "readyUi").mockResolvedValue(undefined)
     spyOn(MemoryHindsightService, "get").mockResolvedValue({
       status: "disabled",
@@ -278,6 +322,7 @@ describe("HindsightCommand", () => {
   })
 
   test("surfaces degraded hindsight startup errors for the control plane", async () => {
+    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
     spyOn(MemoryHindsightService, "readyUi").mockResolvedValue(undefined)
     spyOn(MemoryHindsightService, "get").mockResolvedValue({
       status: "degraded",
@@ -293,6 +338,12 @@ describe("HindsightCommand", () => {
   })
 
   test("fails when the hindsight dataplane probe fails", async () => {
+    spyOn(MemoryHindsightBackfill, "run").mockResolvedValue({
+      status: "completed",
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+    })
     const json = (body: unknown, status = 200) =>
       Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }))
     const fn = Object.assign((input: RequestInfo | URL) => {
@@ -327,5 +378,107 @@ describe("HindsightCommand", () => {
 
     await expect(loadHindsightUi({})).rejects.toThrow("install failed")
     expect(ready).not.toHaveBeenCalled()
+  })
+
+  test("can opt back into llm-backed ui startup", async () => {
+    api()
+    spyOn(MemoryHindsightBackfill, "run").mockResolvedValue({
+      status: "completed",
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+    })
+    const ready = spyOn(MemoryHindsightService, "readyUi").mockResolvedValue({
+      status: "ready",
+      root: "/tmp/project",
+      bank_id: "opencode:test",
+      profile: "opencode-test",
+      base_url: "http://127.0.0.1:40123",
+      port: 40123,
+      client: {} as never,
+    })
+    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
+
+    await loadHindsightUi({
+      mute_llm: false,
+    })
+
+    expect(ready).toHaveBeenCalledWith({
+      mute_llm: false,
+    })
+  })
+
+  test("returns 503 when the proxy upstream is unavailable", async () => {
+    spyOn(globalThis, "fetch").mockRejectedValue(new Error("connect failed"))
+    const port = await free("127.0.0.1")
+    const proxy = startHindsightProxy({
+      hostname: "127.0.0.1",
+      port,
+      target: "http://127.0.0.1:40123",
+      api_url: "http://127.0.0.1:40124",
+      bank_id: "opencode:test",
+    })
+
+    try {
+      const res = await hit(`http://127.0.0.1:${port}/`)
+      expect(res.status).toBe(503)
+      expect(res.body).toBe("Hindsight UI unavailable")
+    } finally {
+      proxy.stop()
+    }
+  })
+
+  test("strips encoding headers from proxied responses", async () => {
+    spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("ok", {
+        headers: {
+          "content-encoding": "gzip",
+          "content-length": "999",
+          "transfer-encoding": "chunked",
+          "content-type": "text/plain; charset=utf-8",
+        },
+      }),
+    )
+    const port = await free("127.0.0.1")
+    const proxy = startHindsightProxy({
+      hostname: "127.0.0.1",
+      port,
+      target: "http://127.0.0.1:40123",
+      api_url: "http://127.0.0.1:40124",
+      bank_id: "opencode:test",
+    })
+
+    try {
+      const res = await hit(`http://127.0.0.1:${port}/`)
+      expect(res.status).toBe(200)
+      expect(res.body).toBe("ok")
+      expect(res.headers["content-encoding"]).toBeUndefined()
+      expect(res.headers["transfer-encoding"]).toBeUndefined()
+    } finally {
+      proxy.stop()
+    }
+  })
+
+  test("patches reflect route to serialize sdk data safely", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        const file = path.join(dir, "route.js")
+        await Bun.write(file, "const x = () => { return g.NextResponse.json(R.data,{status:200}) }")
+        return file
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const body = await Bun.file(tmp.extra).text()
+    expect(body).toContain("console.error('[opencode][hindsight][reflect] upstream error',R.error)")
+    expect(body).toContain("return g.NextResponse.json({error:R.error},{status:500})")
+    expect(body).toContain("const j=JSON.stringify(R.data??null)")
+    expect(body).toContain("console.warn('[opencode][hindsight][reflect] payload stringified to undefined'")
+    expect(body).toContain("if(j===undefined){")
+    expect(body).toContain("return g.NextResponse.json(JSON.parse(j),{status:200})")
+    expect(body).toContain("console.error('[opencode][hindsight][reflect] serialization failed',e")
+    expect(body).toContain("return g.NextResponse.json({error:'reflect serialization failed'},{status:500})")
+    expect(body).not.toContain("return g.NextResponse.json(R.data,{status:200})")
   })
 })

@@ -1,17 +1,24 @@
 import { HindsightServer } from "@vectorize-io/hindsight-all"
 import { HindsightClient } from "@vectorize-io/hindsight-client"
+import { createServer } from "node:net"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { Global } from "@/global"
+import { Installation } from "@/installation"
+import { Provider } from "@/provider/provider"
 import { Instance } from "@/project/instance"
+import { SystemPrompt } from "@/session/system"
 import { Log } from "@/util/log"
 import { withTimeout } from "@/util/timeout"
+import crypto from "crypto"
+import os from "os"
 import path from "path"
 import { MemoryHindsightBank } from "./bank"
 
 export namespace MemoryHindsightService {
   const log = Log.create({ service: "memory.hindsight.service" })
   const host = "127.0.0.1"
+  const codex_url = "https://chatgpt.com/backend-api/codex/responses"
 
   type Root = Awaited<ReturnType<typeof Config.get>>
   type Cfg = NonNullable<NonNullable<Root["memory"]>["hindsight"]>
@@ -39,6 +46,9 @@ export namespace MemoryHindsightService {
     server?: HindsightServer
     client?: HindsightClient
     mode?: "default" | "ui"
+    proxy?: ReturnType<typeof Bun.serve>
+    proxy_url?: string
+    proxy_key?: string
   }
 
   function meta(root = Instance.worktree) {
@@ -99,6 +109,7 @@ export namespace MemoryHindsightService {
   function uiVars(vars: Record<string, string | undefined>): Record<string, string | undefined> {
     return {
       ...vars,
+      HINDSIGHT_API_ENABLE_OBSERVATIONS: "true",
       HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT: "86400",
     }
   }
@@ -171,11 +182,246 @@ export namespace MemoryHindsightService {
     }
   }
 
-  async function env(cfg: Root) {
+  async function chosen(opts: Cfg) {
+    if (opts.llm_model) {
+      const pair = opts.llm_model.includes("/") ? model(opts.llm_model) : undefined
+      return {
+        provider: pair?.provider ?? opts.llm_provider,
+        model: pair?.model ?? opts.llm_model,
+      }
+    }
+
+    if (opts.llm_provider?.includes("/")) {
+      return model(opts.llm_provider)
+    }
+
+    if (opts.llm_provider) {
+      return {
+        provider: opts.llm_provider,
+        model: "",
+      }
+    }
+
+    const ref = await Provider.defaultModel().catch(() => undefined)
+    if (!ref) return
+    return {
+      provider: ref.providerID,
+      model: ref.modelID,
+    }
+  }
+
+  async function free() {
+    return new Promise<number>((resolve, reject) => {
+      const srv = createServer()
+      srv.once("error", reject)
+      srv.listen(0, host, () => {
+        const addr = srv.address()
+        if (!addr || typeof addr === "string") {
+          srv.close(() => reject(new Error("Failed to allocate port")))
+          return
+        }
+        srv.close((err) => {
+          if (err) {
+            reject(err)
+            return
+          }
+          resolve(addr.port)
+        })
+      })
+    })
+  }
+
+  async function proxy(s: State, auth: Extract<Auth.Info, { type: "oauth" }>) {
+    if (s.proxy && s.proxy_url && s.proxy_key) {
+      return {
+        url: s.proxy_url,
+        key: s.proxy_key,
+      }
+    }
+
+    const port = await free()
+    const key = crypto.randomUUID()
+    type Msg = { role: string; content: unknown }
+    type Out =
+      | { role: "system" | "developer"; content: string }
+      | { role: "user" | "assistant"; content: { type: string; text: string }[] }
+
+    const text = (value: unknown): string => {
+      if (typeof value === "string") return value
+      if (!Array.isArray(value)) return ""
+      return value
+        .flatMap((item) => {
+          if (typeof item === "string") return [item]
+          if (!item || typeof item !== "object") return []
+          if ("text" in item && typeof item.text === "string") return [item.text]
+          return []
+        })
+        .join("")
+    }
+
+    const events = (body: string) =>
+      body
+        .split("\n\n")
+        .flatMap((chunk) => chunk.split("\n"))
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim())
+        .filter((line) => line && line !== "[DONE]")
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line)]
+          } catch {
+            return []
+          }
+        })
+
+    const pack = (messages: Msg[]) => {
+      const sys = messages
+        .filter((item) => item.role === "system" || item.role === "developer")
+        .map((item) => text(item.content))
+        .filter(Boolean)
+      const input = messages.flatMap((item): Out[] => {
+        if (item.role === "assistant") {
+          return [{ role: "assistant", content: [{ type: "output_text", text: text(item.content) }] }]
+        }
+        if (item.role === "user") {
+          return [{ role: "user", content: [{ type: "input_text", text: text(item.content) }] }]
+        }
+        return []
+      })
+      return {
+        instructions: [SystemPrompt.instructions(), ...sys].filter(Boolean).join("\n\n"),
+        input,
+      }
+    }
+
+    const output = (body: any) => {
+      const items: any[] = Array.isArray(body.output) ? body.output : []
+      const msg = items.find((item: any) => item?.type === "message" && item?.role === "assistant")
+      const calls = items.filter((item: any) => item?.type === "function_call")
+      return {
+        id: typeof body.id === "string" ? body.id : crypto.randomUUID(),
+        object: "chat.completion",
+        created: typeof body.created_at === "number" ? body.created_at : Math.floor(Date.now() / 1000),
+        model: typeof body.model === "string" ? body.model : "",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: Array.isArray(msg?.content)
+                ? msg.content
+                    .filter(
+                      (item: { type?: string; text?: string }) =>
+                        item?.type === "output_text" && typeof item.text === "string",
+                    )
+                    .map((item: { text?: string }) => item.text ?? "")
+                    .join("")
+                : "",
+              ...(calls.length
+                ? {
+                    tool_calls: calls.map((item: any, i: number) => ({
+                      id:
+                        typeof item.call_id === "string"
+                          ? item.call_id
+                          : typeof item.id === "string"
+                            ? item.id
+                            : `call_${i}`,
+                      type: "function",
+                      function: {
+                        name: typeof item.name === "string" ? item.name : "tool",
+                        arguments: typeof item.arguments === "string" ? item.arguments : "{}",
+                      },
+                    })),
+                  }
+                : {}),
+            },
+            finish_reason: calls.length ? "tool_calls" : "stop",
+          },
+        ],
+        usage: {
+          prompt_tokens: body.usage?.input_tokens ?? 0,
+          completion_tokens: body.usage?.output_tokens ?? 0,
+          total_tokens: body.usage?.total_tokens ?? (body.usage?.input_tokens ?? 0) + (body.usage?.output_tokens ?? 0),
+        },
+      }
+    }
+
+    s.proxy = Bun.serve({
+      hostname: host,
+      port,
+      async fetch(req) {
+        const authz = req.headers.get("authorization")
+        if (authz !== `Bearer ${key}`) {
+          return new Response("Unauthorized", { status: 401 })
+        }
+
+        const headers = new Headers(req.headers)
+        headers.delete("authorization")
+        headers.delete("host")
+        headers.set("authorization", `Bearer ${auth.access}`)
+        headers.set("originator", "opencode")
+        headers.set("User-Agent", `opencode/${Installation.VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`)
+        if (auth.accountId) headers.set("ChatGPT-Account-Id", auth.accountId)
+
+        const url = new URL(req.url)
+        if (req.method !== "POST" || url.pathname !== "/v1/chat/completions") {
+          return new Response("Not found", { status: 404 })
+        }
+
+        const body = await req.json().catch(() => undefined)
+        if (!body || typeof body !== "object" || !Array.isArray((body as any).messages)) {
+          return new Response("Bad request", { status: 400 })
+        }
+
+        const payload = pack((body as any).messages)
+        const res = await fetch(codex_url, {
+          method: req.method,
+          headers,
+          body: JSON.stringify({
+            model: typeof (body as any).model === "string" ? (body as any).model : "",
+            instructions: payload.instructions,
+            input: payload.input,
+            temperature: typeof (body as any).temperature === "number" ? (body as any).temperature : undefined,
+            top_p: typeof (body as any).top_p === "number" ? (body as any).top_p : undefined,
+            store: false,
+            stream: true,
+          }),
+          redirect: "manual",
+        })
+
+        if (!res.ok) {
+          return new Response(res.body, {
+            status: res.status,
+            statusText: res.statusText,
+            headers: res.headers,
+          })
+        }
+
+        const json = events(await res.text().catch(() => "")).findLast(
+          (item: any) => item?.type === "response.completed" || item?.type === "response.incomplete",
+        )?.response
+        if (!json) {
+          return new Response("Bad gateway", { status: 502 })
+        }
+
+        return Response.json(output(json), {
+          status: res.status,
+          statusText: res.statusText,
+        })
+      },
+    })
+    s.proxy_url = `http://${host}:${port}/v1`
+    s.proxy_key = key
+    return {
+      url: s.proxy_url,
+      key: s.proxy_key,
+    }
+  }
+
+  async function env(cfg: Root, s: State) {
     const opts = cfg.memory?.hindsight
     const out: Record<string, string | undefined> = {}
     if (!opts) return out
-    const ref = !opts.llm_model && opts.llm_provider?.includes("/") ? model(opts.llm_provider) : undefined
     if (opts.llm_provider === "none") {
       out.HINDSIGHT_API_LLM_PROVIDER = "none"
       out.HINDSIGHT_API_LLM_MODEL = ""
@@ -183,29 +429,20 @@ export namespace MemoryHindsightService {
       out.HINDSIGHT_API_LLM_BASE_URL = ""
       return out
     }
-    if (ref) out.HINDSIGHT_API_LLM_PROVIDER = ref.provider
-    else if (opts.llm_provider) out.HINDSIGHT_API_LLM_PROVIDER = opts.llm_provider
-    if (opts.llm_model) {
-      const pair = opts.llm_model.includes("/") ? model(opts.llm_model) : undefined
-      const provider = pair?.provider ?? opts.llm_provider
-      if (provider) out.HINDSIGHT_API_LLM_PROVIDER = provider
-      out.HINDSIGHT_API_LLM_MODEL = pair?.model ?? opts.llm_model
-      if (opts.llm_base_url) out.HINDSIGHT_API_LLM_BASE_URL = opts.llm_base_url
-      if (opts.llm_api_key) out.HINDSIGHT_API_LLM_API_KEY = opts.llm_api_key
-      const auth = provider ? await Auth.get(provider) : undefined
-      if (!out.HINDSIGHT_API_LLM_API_KEY && auth?.type === "api") out.HINDSIGHT_API_LLM_API_KEY = auth.key
-      if (!out.HINDSIGHT_API_LLM_API_KEY && auth?.type === "oauth") out.HINDSIGHT_API_LLM_API_KEY = auth.access
-      if (out.HINDSIGHT_API_LLM_BASE_URL) return out
-      if (!provider) return out
-      const base = cfg.provider?.[provider]?.options?.baseURL
-      if (typeof base === "string") out.HINDSIGHT_API_LLM_BASE_URL = base
-      return out
-    }
-    if (ref) out.HINDSIGHT_API_LLM_MODEL = ref.model
+    const ref = await chosen(opts)
+    if (ref?.provider) out.HINDSIGHT_API_LLM_PROVIDER = ref.provider
+    if (ref?.model) out.HINDSIGHT_API_LLM_MODEL = ref.model
     if (opts.llm_api_key) out.HINDSIGHT_API_LLM_API_KEY = opts.llm_api_key
     if (opts.llm_base_url) out.HINDSIGHT_API_LLM_BASE_URL = opts.llm_base_url
-    if (!ref) return out
+    if (!ref?.provider) return out
     const auth = await Auth.get(ref.provider)
+    if (ref.provider === "openai" && auth?.type === "oauth") {
+      const next = await proxy(s, auth)
+      out.HINDSIGHT_API_LLM_PROVIDER = "openai"
+      out.HINDSIGHT_API_LLM_BASE_URL = next.url
+      out.HINDSIGHT_API_LLM_API_KEY = next.key
+      return out
+    }
     if (!out.HINDSIGHT_API_LLM_API_KEY && auth?.type === "api") out.HINDSIGHT_API_LLM_API_KEY = auth.key
     if (!out.HINDSIGHT_API_LLM_API_KEY && auth?.type === "oauth") out.HINDSIGHT_API_LLM_API_KEY = auth.access
     if (out.HINDSIGHT_API_LLM_BASE_URL) return out
@@ -219,6 +456,10 @@ export namespace MemoryHindsightService {
     s.server = undefined
     s.client = undefined
     s.mode = undefined
+    s.proxy?.stop()
+    s.proxy = undefined
+    s.proxy_url = undefined
+    s.proxy_key = undefined
     if (!server) {
       s.info = info("stopped")
       return
@@ -245,12 +486,12 @@ export namespace MemoryHindsightService {
     })
   }
 
-  async function boot(s: State, cfg: Root, opts: Cfg, ui = false) {
+  async function boot(s: State, cfg: Root, opts: Cfg, ui = false, mute = false) {
     const at = Date.now()
     const clear = ui
     const next = info("starting")
-    const base = await env(cfg)
-    const vars = ui ? uiVars(base) : base
+    const base = await env(cfg, s)
+    const vars = mute ? muteVars(ui ? uiVars(base) : base) : ui ? uiVars(base) : base
 
     const make = (env: Record<string, string | undefined>) => {
       const server = new HindsightServer({
@@ -438,7 +679,7 @@ export namespace MemoryHindsightService {
     return s.boot
   }
 
-  export async function readyUi(): Promise<Ready | undefined> {
+  export async function readyUi(input?: { mute_llm?: boolean }): Promise<Ready | undefined> {
     const cfg = await Config.get()
     const opts = cfg.memory?.hindsight
     if (!opts?.enabled) return
@@ -454,12 +695,12 @@ export namespace MemoryHindsightService {
     if (s.boot) {
       return s.boot.then((result) => {
         if (!result) return result
-        return readyUi()
+        return readyUi(input)
       })
     }
     s.boot = (async () => {
       if (s.info.status === "ready" && s.client) await stop(s)
-      return boot(s, cfg, opts, true)
+      return boot(s, cfg, opts, true, input?.mute_llm === true)
     })().finally(() => {
       s.boot = undefined
     })

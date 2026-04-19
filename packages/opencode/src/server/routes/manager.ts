@@ -147,79 +147,86 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     </div>
   </div>
   <script>
-    fetch('/manager/services')
-      .then(r => r.json())
-      .then(services => {
-        const grid = document.getElementById('grid');
-        const nav = document.getElementById('nav-links');
-        const empty = document.getElementById('empty');
-        if (!services.length) { empty.style.display = 'block'; return; }
-        services.forEach(s => {
-          // Card
-          const a = document.createElement('a');
-          a.href = s.url;
-          a.className = 'card';
-          a.innerHTML = '<div class="card-header"><div class="card-icon">' + s.icon +
-            '</div><h2>' + s.name + '</h2></div><p>' + s.description +
-            '</p><span class="url">' + s.url + '</span>';
-          grid.appendChild(a);
-          // Nav link
-          if (s.id !== 'dashboard') {
-            const link = document.createElement('a');
-            link.href = s.url;
-            link.className = 'nav-link';
-            link.textContent = s.name;
-            nav.appendChild(link);
-          }
-        });
+    const grid = document.getElementById('grid');
+    const nav = document.getElementById('nav-links');
+    const empty = document.getElementById('empty');
+
+    function render(services) {
+      grid.innerHTML = '';
+      nav.innerHTML = '<a class="nav-link active" href="/manager/app">Dashboard</a>';
+      empty.style.display = services.length ? 'none' : 'block';
+      services.forEach(s => {
+        const a = document.createElement('a');
+        a.href = s.url;
+        a.className = 'card';
+        a.innerHTML = '<div class="card-header"><div class="card-icon">' + s.icon +
+          '</div><h2>' + s.name + '</h2></div><p>' + s.description +
+          '</p><span class="url">' + s.url + '</span>';
+        grid.appendChild(a);
+        if (s.id === 'dashboard') return;
+        const link = document.createElement('a');
+        link.href = s.url;
+        link.className = 'nav-link';
+        link.textContent = s.name;
+        nav.appendChild(link);
       });
+    }
+
+    function load() {
+      fetch('/manager/services')
+        .then(r => r.json())
+        .then(render)
+        .catch(() => {});
+    }
+
+    load();
+    setInterval(load, 2000);
   </script>
 </body>
 </html>`
 
-export const ManagerRoutes = lazy(
-  () =>
-    new Hono()
-      .get(
-        "/app",
-        describeRoute({
-          summary: "Manager Dashboard",
-          description: "Serve the Manager dashboard web interface.",
-          operationId: "manager.app",
-        }),
-        (c) => {
-          return c.html(DASHBOARD_HTML)
-        },
-      )
-      .get(
-        "/services",
-        describeRoute({
-          summary: "List registered services",
-          description: "Get the list of web services registered with the manager.",
-          operationId: "manager.services",
-          responses: {
-            200: {
-              description: "List of services",
-              content: {
-                "application/json": {
-                  schema: resolver(
-                    z.array(
-                      z.object({
-                        id: z.string(),
-                        name: z.string(),
-                        description: z.string(),
-                        url: z.string(),
-                        icon: z.string(),
-                      }),
-                    ),
+export const ManagerRoutes = lazy(() =>
+  new Hono()
+    .get(
+      "/app",
+      describeRoute({
+        summary: "Manager Dashboard",
+        description: "Serve the Manager dashboard web interface.",
+        operationId: "manager.app",
+      }),
+      (c) => {
+        return c.html(DASHBOARD_HTML)
+      },
+    )
+    .get(
+      "/services",
+      describeRoute({
+        summary: "List registered services",
+        description: "Get the list of web services registered with the manager.",
+        operationId: "manager.services",
+        responses: {
+          200: {
+            description: "List of services",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.array(
+                    z.object({
+                      id: z.string(),
+                      name: z.string(),
+                      description: z.string(),
+                      url: z.string(),
+                      icon: z.string(),
+                    }),
                   ),
-                },
+                ),
               },
             },
           },
-        }),
-        (c) => {
-          return c.json(ManagerState.list())
         },
-      ),
+      }),
+      (c) => {
+        return c.json(ManagerState.list())
+      },
+    ),
 )
