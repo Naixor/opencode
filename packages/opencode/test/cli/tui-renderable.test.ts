@@ -31,7 +31,7 @@ test("session inline spinner renders children through JSX slot", async () => {
   const file = path.join(tui, "routes", "session", "index.tsx")
   const text = await Bun.file(file).text()
 
-  expect(text).toContain("<Spinner color={fg()}>{props.label}</Spinner>")
+  expect(text).toContain("<Spinner color={fg()}>{label()}</Spinner>")
   expect(text).not.toContain("<Spinner color={fg()} children={props.label} />")
 })
 
@@ -42,6 +42,6 @@ test("session route stringifies risky text payloads before rendering", async () 
   expect(text).toContain("<text fg={theme.textMuted}>{str(props.message.error?.data.message)}</text>")
   expect(text).toContain("<text fg={theme.error}>{str(error())}</text>")
   expect(text).toContain("<text fg={theme.textMuted}>{str(q.question)}</text>")
-  expect(text).toContain("function str(input: unknown)")
+  expect(text).toContain("function str<T>(input: T)")
   expect(text).toContain("return JSON.stringify(input)")
 })
