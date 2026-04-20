@@ -6,6 +6,7 @@ import { Memory } from "../memory"
 import { MemoryInject } from "../engine/injector"
 import { MemoryRecall } from "../engine/recall"
 import { MemoryEvent } from "../event"
+import { composeRecallQuery, truncateRecallQuery } from "../hindsight/content"
 import { MemoryHindsightRecall } from "../hindsight/recall"
 
 const log = Log.create({ service: "memory.hooks.inject" })
@@ -88,6 +89,22 @@ export function registerMemoryInjector(): void {
             },
           ]
         })
+        const query = (() => {
+          const latest = [...recent]
+            .reverse()
+            .find((item) => item.role === "user")
+            ?.content.trim()
+          if (!latest) return ""
+          return truncateRecallQuery(
+            composeRecallQuery(
+              latest,
+              recent,
+              recent.filter((item) => item.role === "user" && item.content.trim()).length,
+            ),
+            latest,
+            800,
+          )
+        })()
 
         const inject = async (
           picked: Memory.Info[],
@@ -139,7 +156,7 @@ export function registerMemoryInjector(): void {
 
         if (phase === "full") {
           const ranked = await MemoryHindsightRecall.query({
-            query: recent.map((item) => `[${item.role}]: ${item.content}`).join("\n---\n"),
+            query,
             pool,
           }).catch((err) => {
             log.warn("hindsight recall failed, falling back to full injection", { error: err })

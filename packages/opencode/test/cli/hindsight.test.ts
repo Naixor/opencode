@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
+import fs from "node:fs/promises"
 import { request } from "node:http"
 import path from "path"
 import { BunProc } from "../../src/bun"
@@ -44,6 +45,37 @@ function hit(url: string) {
   )
 }
 
+function post(url: string, body: unknown) {
+  return new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>(
+    (resolve, reject) => {
+      const target = new URL(url)
+      const req = request(
+        {
+          method: "POST",
+          hostname: target.hostname,
+          port: target.port,
+          path: `${target.pathname}${target.search}`,
+          headers: { "content-type": "application/json" },
+        },
+        (res) => {
+          const chunks: Buffer[] = []
+          res.on("data", (chunk) => chunks.push(Buffer.from(chunk)))
+          res.on("end", () => {
+            resolve({
+              status: res.statusCode ?? 0,
+              headers: res.headers,
+              body: Buffer.concat(chunks).toString("utf-8"),
+            })
+          })
+          res.on("error", reject)
+        },
+      )
+      req.on("error", reject)
+      req.end(JSON.stringify(body))
+    },
+  )
+}
+
 function api() {
   const json = (body: unknown, status = 200) =>
     Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }))
@@ -58,6 +90,21 @@ function api() {
     return json({ error: "unexpected" }, 500)
   }, globalThis.fetch)
   spyOn(globalThis, "fetch").mockImplementation(fn)
+}
+
+async function install(dir = "/tmp/hindsight-control-plane") {
+  const root = path.join(dir, "standalone")
+  const file = path.join(root, "src", "app", "api", "reflect", "route.ts")
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await Bun.write(file, "const x = async () => { return NextResponse.json(response.data, { status: 200 }); }")
+  return dir
+}
+
+async function route(dir: string, ext: "js" | "ts", body: string) {
+  const file = path.join(dir, "src", "app", "api", "reflect", `route.${ext}`)
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await Bun.write(file, body)
+  return file
 }
 
 describe("HindsightCommand", () => {
@@ -229,7 +276,7 @@ describe("HindsightCommand", () => {
       port: 40123,
       client: {} as never,
     })
-    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
+    spyOn(BunProc, "install").mockImplementation(() => install())
 
     const result = await loadHindsightUi({
       port: 9999,
@@ -241,7 +288,7 @@ describe("HindsightCommand", () => {
     expect(result.url).toBe("http://127.0.0.1:9999")
     expect(ready).toHaveBeenCalledTimes(1)
     expect(ready).toHaveBeenCalledWith({
-      mute_llm: true,
+      mute_llm: false,
     })
     expect(BunProc.install).toHaveBeenCalledWith("@vectorize-io/hindsight-control-plane", "0.5.1")
     expect(result.cmd).toEqual([BunProc.which(), path.join("/tmp/hindsight-control-plane/standalone", "server.js")])
@@ -269,7 +316,7 @@ describe("HindsightCommand", () => {
       port: 40123,
       client: {} as never,
     })
-    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
+    spyOn(BunProc, "install").mockImplementation(() => install())
 
     const result = await loadHindsightUi({
       port: 9999,
@@ -296,7 +343,7 @@ describe("HindsightCommand", () => {
       port: 40123,
       client: {} as never,
     })
-    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
+    spyOn(BunProc, "install").mockImplementation(() => install())
 
     const result = await loadHindsightUi({
       port: 9999,
@@ -307,7 +354,7 @@ describe("HindsightCommand", () => {
   })
 
   test("fails when hindsight is unavailable for the control plane", async () => {
-    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
+    spyOn(BunProc, "install").mockImplementation(() => install())
     spyOn(MemoryHindsightService, "readyUi").mockResolvedValue(undefined)
     spyOn(MemoryHindsightService, "get").mockResolvedValue({
       status: "disabled",
@@ -322,7 +369,7 @@ describe("HindsightCommand", () => {
   })
 
   test("surfaces degraded hindsight startup errors for the control plane", async () => {
-    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
+    spyOn(BunProc, "install").mockImplementation(() => install())
     spyOn(MemoryHindsightService, "readyUi").mockResolvedValue(undefined)
     spyOn(MemoryHindsightService, "get").mockResolvedValue({
       status: "degraded",
@@ -366,7 +413,7 @@ describe("HindsightCommand", () => {
       port: 40123,
       client: {} as never,
     })
-    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
+    spyOn(BunProc, "install").mockImplementation(() => install())
 
     await expect(loadHindsightUi({})).rejects.toThrow("/version")
     await expect(loadHindsightUi({})).rejects.toThrow("HTTP 500")
@@ -380,7 +427,7 @@ describe("HindsightCommand", () => {
     expect(ready).not.toHaveBeenCalled()
   })
 
-  test("can opt back into llm-backed ui startup", async () => {
+  test("defaults to llm-backed ui startup", async () => {
     api()
     spyOn(MemoryHindsightBackfill, "run").mockResolvedValue({
       status: "completed",
@@ -397,14 +444,40 @@ describe("HindsightCommand", () => {
       port: 40123,
       client: {} as never,
     })
-    spyOn(BunProc, "install").mockResolvedValue("/tmp/hindsight-control-plane")
+    spyOn(BunProc, "install").mockImplementation(() => install())
 
-    await loadHindsightUi({
-      mute_llm: false,
-    })
+    await loadHindsightUi({})
 
     expect(ready).toHaveBeenCalledWith({
       mute_llm: false,
+    })
+  })
+
+  test("can explicitly mute llm-backed ui startup", async () => {
+    api()
+    spyOn(MemoryHindsightBackfill, "run").mockResolvedValue({
+      status: "completed",
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+    })
+    const ready = spyOn(MemoryHindsightService, "readyUi").mockResolvedValue({
+      status: "ready",
+      root: "/tmp/project",
+      bank_id: "opencode:test",
+      profile: "opencode-test",
+      base_url: "http://127.0.0.1:40123",
+      port: 40123,
+      client: {} as never,
+    })
+    spyOn(BunProc, "install").mockImplementation(() => install())
+
+    await loadHindsightUi({
+      mute_llm: true,
+    })
+
+    expect(ready).toHaveBeenCalledWith({
+      mute_llm: true,
     })
   })
 
@@ -459,12 +532,59 @@ describe("HindsightCommand", () => {
     }
   })
 
+  test("handles reflect directly through the dataplane proxy", async () => {
+    const spy = spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ text: "answer" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+    const port = await free("127.0.0.1")
+    const proxy = startHindsightProxy({
+      hostname: "127.0.0.1",
+      port,
+      target: "http://127.0.0.1:40123",
+      api_url: "http://127.0.0.1:40124",
+      bank_id: "opencode:test",
+    })
+
+    try {
+      const res = await post(`http://127.0.0.1:${port}/api/reflect`, {
+        bank_id: "bank_1",
+        query: "hello",
+        include_facts: true,
+        include_tool_calls: true,
+        thinking_budget: true,
+      })
+      expect(res.status).toBe(200)
+      expect(JSON.parse(res.body)).toEqual({ text: "answer" })
+      expect(spy).toHaveBeenCalledWith(new URL("/v1/default/banks/bank_1/reflect", "http://127.0.0.1:40124"), {
+        method: "POST",
+        headers: expect.any(Headers),
+        body: JSON.stringify({
+          query: "hello",
+          budget: "mid",
+          tags: undefined,
+          tags_match: undefined,
+          max_tokens: undefined,
+          fact_types: undefined,
+          exclude_mental_models: undefined,
+          exclude_mental_model_ids: undefined,
+          include: {
+            facts: {},
+            tool_calls: {},
+          },
+        }),
+      })
+    } finally {
+      proxy.stop()
+    }
+  })
+
   test("patches reflect route to serialize sdk data safely", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
-        const file = path.join(dir, "route.js")
-        await Bun.write(file, "const x = () => { return g.NextResponse.json(R.data,{status:200}) }")
-        return file
+        return route(dir, "js", "const x = () => { return g.NextResponse.json(R.data,{status:200}) }")
       },
     })
 
@@ -480,5 +600,219 @@ describe("HindsightCommand", () => {
     expect(body).toContain("console.error('[opencode][hindsight][reflect] serialization failed',e")
     expect(body).toContain("return g.NextResponse.json({error:'reflect serialization failed'},{status:500})")
     expect(body).not.toContain("return g.NextResponse.json(R.data,{status:200})")
+  })
+
+  test("patches bundled reflect route to serialize sdk data safely", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(
+          dir,
+          "js",
+          "const x = () => { return g.NextResponse.json(JSON.parse(JSON.stringify(R.data)),{status:200}) }",
+        )
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const body = await Bun.file(tmp.extra).text()
+    expect(body).toContain("console.error('[opencode][hindsight][reflect] upstream error',R.error)")
+    expect(body).toContain("const j=JSON.stringify(R.data??null)")
+    expect(body).toContain("return g.NextResponse.json(JSON.parse(j),{status:200})")
+    expect(body).not.toContain("return g.NextResponse.json(JSON.parse(JSON.stringify(R.data)),{status:200})")
+  })
+
+  test("patched bundled reflect route returns null for undefined payload", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(
+          dir,
+          "js",
+          "export const route = async (R,g) => { return g.NextResponse.json(JSON.parse(JSON.stringify(R.data)),{status:200}) }",
+        )
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const mod = await import(`${tmp.extra}?${Date.now()}`)
+    const res = await mod.route(
+      { data: undefined },
+      { NextResponse: { json: (body: unknown, init: { status: number }) => ({ body, init }) } },
+    )
+
+    expect(res).toEqual({ body: null, init: { status: 200 } })
+  })
+
+  test("patched reflect route returns null for undefined payload", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(
+          dir,
+          "js",
+          "export const route = async (R,g) => { return g.NextResponse.json(R.data,{status:200}) }",
+        )
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const mod = await import(`${tmp.extra}?${Date.now()}`)
+    const res = await mod.route(
+      { data: undefined },
+      { NextResponse: { json: (body: unknown, init: { status: number }) => ({ body, init }) } },
+    )
+
+    expect(res).toEqual({ body: null, init: { status: 200 } })
+  })
+
+  test("patched reflect route returns upstream errors directly", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(
+          dir,
+          "js",
+          "export const route = async (R,g) => { return g.NextResponse.json(R.data,{status:200}) }",
+        )
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const err = spyOn(console, "error").mockImplementation(() => {})
+    const mod = await import(`${tmp.extra}?${Date.now()}`)
+    const res = await mod.route(
+      { error: "upstream failed", data: undefined },
+      { NextResponse: { json: (body: unknown, init: { status: number }) => ({ body, init }) } },
+    )
+
+    expect(res).toEqual({ body: { error: "upstream failed" }, init: { status: 500 } })
+    expect(err).toHaveBeenCalled()
+  })
+
+  test("patched reflect route returns 500 when payload serialization fails", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(
+          dir,
+          "js",
+          "export const route = async (R,g) => { return g.NextResponse.json(R.data,{status:200}) }",
+        )
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const mod = await import(`${tmp.extra}?${Date.now()}`)
+    const body: Record<string, unknown> = {}
+    body.self = body
+    const res = await mod.route(
+      { data: body },
+      { NextResponse: { json: (body: unknown, init: { status: number }) => ({ body, init }) } },
+    )
+
+    expect(res).toEqual({ body: { error: "reflect serialization failed" }, init: { status: 500 } })
+  })
+
+  test("patches reflect source route to serialize sdk data safely", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(dir, "ts", "const x = async () => { return NextResponse.json(response.data, { status: 200 }); }")
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const body = await Bun.file(tmp.extra).text()
+    expect(body).toContain("console.error('[opencode][hindsight][reflect] upstream error', response.error)")
+    expect(body).toContain("return NextResponse.json({ error: response.error }, { status: 500 });")
+    expect(body).toContain("const json = JSON.stringify(response.data ?? null);")
+    expect(body).toContain("console.warn('[opencode][hindsight][reflect] payload stringified to undefined'")
+    expect(body).toContain("if (json === undefined) {")
+    expect(body).toContain("return NextResponse.json(JSON.parse(json), { status: 200 });")
+    expect(body).toContain("console.error('[opencode][hindsight][reflect] serialization failed', err")
+    expect(body).toContain("return NextResponse.json({ error: 'reflect serialization failed' }, { status: 500 });")
+    expect(body).not.toContain("return NextResponse.json(response.data, { status: 200 });")
+  })
+
+  test("patched source reflect route returns null for undefined payload", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(
+          dir,
+          "ts",
+          "export const route = async (response, NextResponse) => { return NextResponse.json(response.data, { status: 200 }); }",
+        )
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const mod = await import(`${tmp.extra}?${Date.now()}`)
+    const res = await mod.route(
+      { data: undefined },
+      { json: (body: unknown, init: { status: number }) => ({ body, init }) },
+    )
+
+    expect(res).toEqual({ body: null, init: { status: 200 } })
+  })
+
+  test("patched source reflect route returns upstream errors directly", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(
+          dir,
+          "ts",
+          "export const route = async (response, NextResponse) => { return NextResponse.json(response.data, { status: 200 }); }",
+        )
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const err = spyOn(console, "error").mockImplementation(() => {})
+    const mod = await import(`${tmp.extra}?${Date.now()}`)
+    const res = await mod.route(
+      { error: "upstream failed", data: undefined },
+      { json: (body: unknown, init: { status: number }) => ({ body, init }) },
+    )
+
+    expect(res).toEqual({ body: { error: "upstream failed" }, init: { status: 500 } })
+    expect(err).toHaveBeenCalled()
+  })
+
+  test("patched source reflect route returns 500 when payload serialization fails", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        return route(
+          dir,
+          "ts",
+          "export const route = async (response, NextResponse) => { return NextResponse.json(response.data, { status: 200 }); }",
+        )
+      },
+    })
+
+    await patchHindsightUi(tmp.path)
+
+    const err = spyOn(console, "error").mockImplementation(() => {})
+    const mod = await import(`${tmp.extra}?${Date.now()}`)
+    const body: Record<string, unknown> = {}
+    body.self = body
+    const res = await mod.route({ data: body }, { json: (body: unknown, init: { status: number }) => ({ body, init }) })
+
+    expect(res).toEqual({ body: { error: "reflect serialization failed" }, init: { status: 500 } })
+    expect(err).toHaveBeenCalled()
+  })
+
+  test("does nothing when no reflect route can be patched", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        const file = path.join(dir, "route.js")
+        await Bun.write(file, "const x = () => 'ok'")
+        return file
+      },
+    })
+
+    await expect(patchHindsightUi(tmp.path)).resolves.toBeUndefined()
   })
 })

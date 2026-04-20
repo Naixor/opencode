@@ -10,6 +10,7 @@ import { ConfigPaths } from "@/config/paths"
 import { Instance } from "@/project/instance"
 import { Session } from "@/session"
 import { SessionPrompt } from "@/session/prompt"
+import { composeRecallQuery, truncateRecallQuery } from "../hindsight/content"
 import { MemoryHindsightRecall } from "../hindsight/recall"
 
 export namespace MemoryRecall {
@@ -94,8 +95,24 @@ export namespace MemoryRecall {
     try {
       const recent = input.recentMessages.slice(-6).map((m) => `[${m.role}]: ${m.content}`)
       const context = recent.join("\n---\n")
+      const latest =
+        [...input.recentMessages]
+          .reverse()
+          .find((item) => item.role === "user")
+          ?.content.trim() ?? ""
+      const query = latest
+        ? truncateRecallQuery(
+            composeRecallQuery(
+              latest,
+              input.recentMessages.slice(-6),
+              input.recentMessages.slice(-6).filter((item) => item.role === "user" && item.content.trim()).length,
+            ),
+            latest,
+            800,
+          )
+        : context
       const ranked = await MemoryHindsightRecall.query({
-        query: context,
+        query,
         pool: input.memories,
       }).catch((err) => {
         log.warn("hindsight ranking failed, using full candidate pool", { error: error(err) })

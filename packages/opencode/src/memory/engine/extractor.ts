@@ -11,6 +11,7 @@ import { Instance } from "@/project/instance"
 import { Session } from "@/session"
 import { SessionPrompt } from "@/session/prompt"
 import { Token } from "@/util/token"
+import { composeRecallQuery, prepareRetentionTranscript, truncateRecallQuery } from "../hindsight/content"
 import { MemoryHindsightRetain } from "../hindsight/retain"
 import { MemoryHindsightRecall } from "../hindsight/recall"
 
@@ -222,20 +223,18 @@ export namespace MemoryExtractor {
     return lines.join("\n")
   }
 
-  async function retain(
-    sessionID: string,
-    messages: Array<{ role: string; content: string }>,
-    snapshot: string,
-    name: Prompt,
-  ) {
-    if (name !== "extract-hindsight" || !snapshot) return
+  async function retain(sessionID: string, messages: Array<{ role: string; content: string }>, name: Prompt) {
+    if (name !== "extract-hindsight") return
     const start = Math.max(messages.length - Math.min(messages.length, 20), 0)
+    const view = messages.slice(start)
+    const transcript = prepareRetentionTranscript(view, true).transcript
+    if (!transcript) return
     const now = Date.now()
     const result = await MemoryHindsightRetain.session({
       session_id: sessionID,
       start,
       end: messages.length,
-      content: snapshot,
+      content: transcript,
       created_at: now,
       updated_at: now,
     })
@@ -249,12 +248,20 @@ export namespace MemoryExtractor {
   }
 
   function query(messages: Array<{ role: string; content: string }>) {
-    return messages
-      .slice(-6)
-      .filter((item) => item.role === "user")
-      .map((item) => item.content.replace(/\s+/g, " ").trim())
-      .filter(Boolean)
-      .join("\n")
+    const latest = [...messages]
+      .reverse()
+      .find((item) => item.role === "user")
+      ?.content.trim()
+    if (!latest) return ""
+    return truncateRecallQuery(
+      composeRecallQuery(
+        latest,
+        messages,
+        messages.filter((item) => item.role === "user" && item.content.trim()).length,
+      ),
+      latest,
+      800,
+    )
   }
 
   /**
@@ -285,7 +292,7 @@ export namespace MemoryExtractor {
     try {
       const cfg = await prompt()
       const existing = await Memory.list()
-      await retain(sessionID, messages, contextSnapshot, cfg.name)
+      await retain(sessionID, messages, cfg.name)
 
       const base = options?.context ?? []
       const extra =

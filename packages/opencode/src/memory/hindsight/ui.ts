@@ -12,8 +12,25 @@ import { MemoryHindsightService } from "./service"
 const pkg = "@vectorize-io/hindsight-control-plane"
 const ver = "0.5.1"
 const reflect_before = "return g.NextResponse.json(R.data,{status:200})"
+const reflect_bundle_before = "return g.NextResponse.json(JSON.parse(JSON.stringify(R.data)),{status:200})"
+const reflect_source_before = "return NextResponse.json(response.data, { status: 200 });"
 const reflect_after =
   "if(R.error){console.error('[opencode][hindsight][reflect] upstream error',R.error);return g.NextResponse.json({error:R.error},{status:500})}try{const j=JSON.stringify(R.data??null);if(j===undefined){console.warn('[opencode][hindsight][reflect] payload stringified to undefined',{type:typeof R.data,tag:Object.prototype.toString.call(R.data)});return g.NextResponse.json(null,{status:200})}return g.NextResponse.json(JSON.parse(j),{status:200})}catch(e){console.error('[opencode][hindsight][reflect] serialization failed',e,{type:typeof R.data,tag:Object.prototype.toString.call(R.data)});return g.NextResponse.json({error:'reflect serialization failed'},{status:500})}"
+const reflect_source_after =
+  "if (response.error) {\n      console.error('[opencode][hindsight][reflect] upstream error', response.error);\n      return NextResponse.json({ error: response.error }, { status: 500 });\n    }\n\n    try {\n      const json = JSON.stringify(response.data ?? null);\n      if (json === undefined) {\n        console.warn('[opencode][hindsight][reflect] payload stringified to undefined', {\n          type: typeof response.data,\n          tag: Object.prototype.toString.call(response.data),\n        });\n        return NextResponse.json(null, { status: 200 });\n      }\n      return NextResponse.json(JSON.parse(json), { status: 200 });\n    } catch (err) {\n      console.error('[opencode][hindsight][reflect] serialization failed', err, {\n        type: typeof response.data,\n        tag: Object.prototype.toString.call(response.data),\n      });\n      return NextResponse.json({ error: 'reflect serialization failed' }, { status: 500 });\n    }"
+
+function reflectFiles(dir: string) {
+  return [
+    path.join(dir, "src", "app", "api", "reflect", "route.ts"),
+    path.join(dir, "src", "app", "api", "reflect", "route.js"),
+    path.join(dir, "app", "api", "reflect", "route.ts"),
+    path.join(dir, "app", "api", "reflect", "route.js"),
+    path.join(dir, ".next", "server", "app", "api", "reflect", "route.ts"),
+    path.join(dir, ".next", "server", "app", "api", "reflect", "route.js"),
+    path.join(dir, "server", "app", "api", "reflect", "route.ts"),
+    path.join(dir, "server", "app", "api", "reflect", "route.js"),
+  ]
+}
 
 function display(host: string) {
   if (host === "0.0.0.0") return "127.0.0.1"
@@ -71,24 +88,58 @@ async function send(req: Request, url: URL) {
 }
 
 export async function patchHindsightUi(dir: string) {
-  const walk = async (root: string): Promise<string[]> => {
-    const items = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
-    const files = await Promise.all(
-      items.map((item) => {
-        const next = path.join(root, item.name)
-        if (item.isDirectory()) return walk(next)
-        if (item.isFile() && next.endsWith(".js")) return [next]
-        return []
-      }),
-    )
-    return files.flat()
+  let hits = 0
+  for (const file of reflectFiles(dir)) {
+    if (!(await Bun.file(file).exists())) continue
+    const text = await Bun.file(file).text()
+    const next = text
+      .replaceAll(reflect_before, reflect_after)
+      .replaceAll(reflect_bundle_before, reflect_after)
+      .replaceAll(reflect_source_before, reflect_source_after)
+    if (next === text) continue
+    hits++
+    await fs.writeFile(file, next)
+  }
+  if (hits > 0) return
+}
+
+async function reflect(req: Request, api_url: string) {
+  const body = await req.json().catch(() => undefined)
+  if (!body || typeof body !== "object") {
+    return new Response("Bad request", {
+      status: 400,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    })
   }
 
-  for (const file of await walk(dir)) {
-    const text = await Bun.file(file).text()
-    if (!text.includes(reflect_before)) continue
-    await fs.writeFile(file, text.replaceAll(reflect_before, reflect_after))
+  const input = body as Record<string, unknown>
+  const bank =
+    (typeof input.bank_id === "string" && input.bank_id) ||
+    (typeof input.agent_id === "string" && input.agent_id) ||
+    "default"
+  const include = {
+    ...(input.include_facts ? { facts: {} } : {}),
+    ...(input.include_tool_calls ? { tool_calls: {} } : {}),
   }
+  const headers = new Headers()
+  headers.set("content-type", "application/json")
+  const res = await fetch(join(api_url, `/v1/default/banks/${encodeURIComponent(bank)}/reflect`), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      query: input.query,
+      budget: input.budget ?? (input.thinking_budget ? "mid" : "low"),
+      tags: input.tags,
+      tags_match: input.tags_match,
+      max_tokens: input.max_tokens || undefined,
+      fact_types: input.fact_types || undefined,
+      exclude_mental_models: input.exclude_mental_models || undefined,
+      exclude_mental_model_ids: input.exclude_mental_model_ids || undefined,
+      ...(Object.keys(include).length > 0 ? { include } : {}),
+    }),
+  }).catch(() => undefined)
+  if (!res) return fail()
+  return clone(res)
 }
 
 export async function free(host: string) {
@@ -131,6 +182,9 @@ export function startHindsightProxy(input: {
         const res = await send(req, join(input.api_url, "/version"))
         if (res?.ok) return clone(res)
         return json({ version: ver })
+      }
+      if (req.method === "POST" && url.pathname === "/api/reflect") {
+        return reflect(req, input.api_url)
       }
       const res = await send(req, join(input.target, url.pathname + url.search))
       if (!res) return fail()
@@ -178,7 +232,7 @@ export async function loadHindsightUi(opts: { port?: number; hostname?: string; 
   await patchHindsightUi(root)
 
   const svc = await MemoryHindsightService.readyUi({
-    mute_llm: opts.mute_llm !== false,
+    mute_llm: opts.mute_llm === true,
   })
   if (!svc) {
     const info = await MemoryHindsightService.get()

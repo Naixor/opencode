@@ -155,6 +155,11 @@ describe("MemoryExtractor", () => {
           document_id: "sess:test:sess_9:0:2",
           result: { success: true, bank_id: "bank_1", items_count: 1, async: false },
         }),
+        spyOn(MemoryHindsightRetain, "memory").mockResolvedValue({
+          status: "retained",
+          document_id: "mem:test:mem_1",
+          result: { success: true, bank_id: "bank_1", items_count: 1, async: false },
+        }),
         spyOn(MemoryHindsightRecall, "context").mockResolvedValue({
           raw: { results: [] } as never,
           hits: 0,
@@ -463,8 +468,11 @@ describe("MemoryExtractor", () => {
       expect(calls[0].session_id).toBe("sess_11")
       expect(calls[0].start).toBe(0)
       expect(calls[0].end).toBe(2)
-      expect(calls[0].content).toContain("[user]: Keep Hono for API routes")
-      expect(calls[0].content).toContain("[assistant]: Okay.")
+      expect(calls[0].content).toContain("[role: user]")
+      expect(calls[0].content).toContain("Keep Hono for API routes")
+      expect(calls[0].content).toContain("[role: assistant]")
+      expect(calls[0].content).toContain("Okay.")
+      expect(calls[0].content).toContain("[assistant:end]")
     })
 
     test("keeps extraction non-fatal when session-slice retain fails", async () => {
