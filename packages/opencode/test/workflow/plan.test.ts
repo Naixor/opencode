@@ -2,7 +2,7 @@ import path from "path"
 import fs from "fs/promises"
 import { describe, expect, test } from "bun:test"
 import { pathToFileURL } from "url"
-import { runtime } from "../../src/workflow-api"
+import { runtime } from "@lark-opencode/workflow-api"
 import { tmpdir } from "../fixture/fixture"
 
 describe("plan workflow", () => {

@@ -52,15 +52,15 @@ Type hints for workflow files are provided by:
 .opencode/workflows.d.ts
 ```
 
-That file should stay thin and forward to the public workflow interface library:
+That file should stay thin and forward to the public workflow interface package:
 
 ```text
-packages/opencode/src/workflow-api.ts
+@lark-opencode/workflow-api
 ```
 
-Use that module as the public source of truth for workflow types and helpers. `workflows.d.ts` should expose it to local workflow files, but the actual interface should live in the shared library so other users and tools can read it directly.
+Use that package as the public source of truth for workflow types and helpers. `workflows.d.ts` should expose it to local workflow files, but the actual interface should live in the shared package so other users and tools can install and read it directly.
 
-That means workflow files can use the global `opencode.workflow(...)` helper directly, while external readers can inspect the public interface module.
+That means workflow files can use the global `opencode.workflow(...)` helper directly, while external readers can inspect the public interface package.
 
 ---
 
@@ -86,20 +86,13 @@ import z from "zod"
 
 ### Public interface imports
 
-If you are documenting, generating, analyzing, or reusing the workflow contract outside the local workflow runtime, import from the public interface module:
+If you are documenting, generating, analyzing, or reusing the workflow contract outside the local workflow runtime, import from the public interface package:
 
 ```ts
-import {
-  Args,
-  File,
-  Result,
-  define,
-  type WorkflowContext,
-  type WorkflowDefinition,
-} from "../packages/opencode/src/workflow-api"
+import { Args, File, Result, define, type WorkflowContext, type WorkflowDefinition } from "@lark-opencode/workflow-api"
 ```
 
-Use the public module when you want a stable source of truth for workflow helpers and types.
+Use the public package when you want a stable source of truth for workflow helpers and types.
 
 ---
 
@@ -399,13 +392,13 @@ If the workflow accepts file attachments, attach them in the current prompt befo
 
 ## Third-Party Reuse
 
-If another repo, tool, or documentation generator wants to understand the workflow contract, it should read:
+If another repo, tool, or documentation generator wants to understand the workflow contract, it should install and read:
 
 ```text
-packages/opencode/src/workflow-api.ts
+@lark-opencode/workflow-api
 ```
 
-That file is the public interface library for:
+That package is the public interface library for:
 
 - default workflow args
 - workflow result shape
@@ -417,9 +410,9 @@ Recommended reuse patterns:
 
 - Import its exported types to build editor support, docs, or validation helpers
 - Treat `.opencode/workflows.d.ts` as the local bridge, not the canonical interface definition
-- If you need to mirror the contract elsewhere, mirror `workflow-api.ts`, not a copied ad hoc type block
+- If you need to mirror the contract elsewhere, mirror `@lark-opencode/workflow-api`, not a copied ad hoc type block
 
-For local authoring, keep using `opencode.workflow(...)`. For public integrations and references, point people at `workflow-api.ts`.
+For local authoring, keep using `opencode.workflow(...)`. For public integrations and references, point people at `@lark-opencode/workflow-api`.
 
 ---
 

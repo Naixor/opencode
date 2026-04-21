@@ -1,11 +1,4 @@
-import {
-  Args,
-  File,
-  define,
-  result,
-  type WorkflowContext,
-  type WorkflowDefinition,
-} from "../packages/opencode/src/workflow-api"
+import { Args, File, define, result, type WorkflowContext, type WorkflowDefinition } from "@lark-opencode/workflow-api"
 
 declare global {
   const Bun: {

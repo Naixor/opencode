@@ -21,6 +21,73 @@ describe("workflow", () => {
     })
   })
 
+  test("registers the /workflow:init command", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const cmd = await Command.get(Command.Default.WORKFLOW_INIT)
+        expect(cmd?.name).toBe("workflow:init")
+        expect(cmd?.description).toContain("workflow")
+      },
+    })
+  })
+
+  test("scaffolds workflow starter files with /workflow:init", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await SessionPrompt.command({
+          sessionID: session.id,
+          command: "workflow:init",
+          arguments: "",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+
+        const text = msg.parts.findLast((part) => part.type === "text")
+        expect(text?.type).toBe("text")
+        if (text?.type !== "text") throw new Error("expected text output")
+        expect(text.text).toContain("Workflow init complete")
+
+        expect(await Bun.file(path.join(tmp.path, ".opencode", "workflows.d.ts")).exists()).toBe(true)
+        expect(await Bun.file(path.join(tmp.path, ".opencode", "workflows", "example.ts")).exists()).toBe(true)
+        expect(await Bun.file(path.join(tmp.path, "docs", "workflow-authoring.md")).exists()).toBe(true)
+
+        const pkg = JSON.parse(await Bun.file(path.join(tmp.path, "package.json")).text()) as {
+          dependencies?: Record<string, string>
+        }
+        expect(pkg.dependencies?.["@lark-opencode/workflow-api"]).toBe("latest")
+
+        const again = await SessionPrompt.command({
+          sessionID: session.id,
+          command: "workflow:init",
+          arguments: "",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+        const next = again.parts.findLast((part) => part.type === "text")
+        expect(next?.type).toBe("text")
+        if (next?.type !== "text") throw new Error("expected text output")
+        expect(next.text).toContain("Kept:")
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+
   test("loads and runs a local workflow from .opencode/workflows", async () => {
     await using tmp = await tmpdir({
       git: true,

@@ -71,6 +71,7 @@ export namespace Command {
     TEST: "test",
     EXPLAIN: "explain",
     WORKFLOW: "workflow",
+    WORKFLOW_INIT: "workflow:init",
     RALPH_LOOP: "ralph-loop",
     ULTRAWORK: "ultrawork",
     MEMORY_REMEMBER: "memory:remember",
@@ -147,6 +148,15 @@ export namespace Command {
           return "Run the requested workflow"
         },
         hints: ["$ARGUMENTS"],
+      },
+      [Default.WORKFLOW_INIT]: {
+        name: Default.WORKFLOW_INIT,
+        description: "scaffold workflow files for the current project",
+        source: "command",
+        get template() {
+          return "Initialize workflow scaffolding for this project"
+        },
+        hints: [],
       },
       [Default.RALPH_LOOP]: {
         name: Default.RALPH_LOOP,

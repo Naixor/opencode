@@ -81,5 +81,8 @@ await import(`../packages/sdk/js/script/publish.ts`)
 console.log("\n=== plugin ===\n")
 await import(`../packages/plugin/script/publish.ts`)
 
+console.log("\n=== workflow-api ===\n")
+await import(`../packages/workflow-api/script/publish.ts`)
+
 const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@lark-opencode/workflow-api",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}

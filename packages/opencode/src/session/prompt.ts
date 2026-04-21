@@ -1992,8 +1992,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
   export async function command(input: CommandInput) {
     log.info("command", input)
-    if (input.command === Command.Default.WORKFLOW) {
+    if (input.command === Command.Default.WORKFLOW || input.command === Command.Default.WORKFLOW_INIT) {
       const { Workflow } = await import("../workflow")
+      if (input.command === Command.Default.WORKFLOW_INIT) return Workflow.init(input)
       return Workflow.run(input)
     }
     const command = await Command.get(input.command)

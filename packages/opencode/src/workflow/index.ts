@@ -29,12 +29,19 @@ import {
   type WorkflowInput,
   type WorkflowResult,
   runtime,
-} from "../workflow-api"
+} from "@lark-opencode/workflow-api"
 import { iife } from "@/util/iife"
 
 export { define }
 export { PublicArgs as Args, PublicFile as File, PublicResult as Result }
-export type { Context, Definition, TaskInput, TaskResult, WorkflowInput, WorkflowResult } from "../workflow-api"
+export type {
+  Context,
+  Definition,
+  TaskInput,
+  TaskResult,
+  WorkflowInput,
+  WorkflowResult,
+} from "@lark-opencode/workflow-api"
 
 const log = Log.create({ service: "workflow" })
 const argsRegex = /(?:\[Image\s+\d+\]|"[^"]*"|'[^']*'|[^\s"']+)/gi
@@ -78,6 +85,7 @@ type Failed = {
 }
 
 type CommandInput = {
+  command: string
   sessionID: string
   messageID?: string
   agent?: string
@@ -88,6 +96,103 @@ type CommandInput = {
 }
 
 Reflect.set(globalThis, "opencode", runtime)
+
+const api = "@lark-opencode/workflow-api"
+const ver = "latest"
+const docs = [
+  "# Workflow authoring",
+  "",
+  "Run `/workflow:init` to scaffold workflow files for this project.",
+  "",
+  "## What it adds",
+  "",
+  "- `.opencode/workflows.d.ts` for local workflow typing",
+  "- `docs/workflow-authoring.md` with the local authoring guide",
+  "- `.opencode/workflows/example.ts` as a minimal starting point",
+  `- \`${api}\` in \`package.json\``,
+  "",
+  "## Minimal workflow",
+  "",
+  "Local workflow files can use the injected `opencode.workflow(...)` helper directly.",
+  "",
+  "```ts",
+  "export default opencode.workflow({",
+  '  description: "Echo workflow args",',
+  "  run(ctx, input) {",
+  '    return { title: "Args", output: `raw=${input.raw}` }',
+  "  },",
+  "})",
+  "```",
+  "",
+  "## Default input",
+  "",
+  "Workflows receive `{ raw, argv, files }` unless they define a custom Zod schema.",
+  "",
+  "- `raw`: raw argument string after the workflow name",
+  "- `argv`: parsed argument list",
+  "- `files`: attached file parts from the invoking message",
+  "",
+  "## Return values",
+  "",
+  "A workflow can return either:",
+  "",
+  "- a string",
+  "- or `{ title?, output?, metadata? }`",
+  "",
+  "## Context helpers",
+  "",
+  "Inside `run(ctx, input)`, these helpers are available:",
+  "",
+  "- `ctx.status({ title?, metadata? })` for progress updates",
+  "- `ctx.ask({ questions })` for explicit user choices",
+  "- `ctx.task({ ... })` for focused subagent work",
+  "- `ctx.workflow({ ... })` for nested workflow reuse",
+  "",
+  "## Next steps",
+  "",
+  "1. Run your package manager install command so the new dependency is available.",
+  "2. Edit `.opencode/workflows/example.ts` or add more workflows under `.opencode/workflows/`.",
+  "3. Run `/workflow example hello` to verify the setup.",
+  "",
+].join("\n")
+const decl = [
+  `import { Args, File, define, result, type WorkflowContext, type WorkflowDefinition } from \"${api}\"`,
+  "",
+  "declare global {",
+  "  const Bun: {",
+  "    file(path: string | URL): {",
+  "      text(): Promise<string>",
+  "      exists(): Promise<boolean>",
+  "    }",
+  "    write(path: string | URL, data: string): Promise<number>",
+  "  }",
+  "",
+  "  const opencode: {",
+  "    workflow: typeof define",
+  "    args: typeof Args",
+  "    file: typeof File",
+  "    result: typeof result",
+  "  }",
+  "}",
+  "",
+  "export { Args, File, define, result }",
+  "export type { WorkflowContext, WorkflowDefinition }",
+  "",
+].join("\n")
+const example = [
+  "export default opencode.workflow({",
+  '  description: "Summarize workflow args",',
+  "  run(ctx, input) {",
+  '    const argv = input.argv.length > 0 ? input.argv.join(", ") : "(none)"',
+  "    return {",
+  '      title: "Example workflow",',
+  '      output: [`name=${ctx.name}`, `raw=${input.raw || \"(empty)\"}`, `argv=${argv}`].join("\\n"),',
+  "      metadata: { files: input.files.length },",
+  "    }",
+  "  },",
+  "})",
+  "",
+].join("\n")
 
 export namespace Workflow {
   const state = Instance.state(async () => {
@@ -151,97 +256,57 @@ export namespace Workflow {
     return state().then((x) => x.err[name])
   }
 
+  export async function init(input: CommandInput) {
+    const run = await begin(input, {
+      tool: "workflow:init",
+      input: {},
+      parts: input.parts ?? [],
+    })
+    const res = await scaffold().catch((err: unknown) => ({
+      title: "Workflow init failed",
+      output: `Workflow init failed: ${err instanceof Error ? err.message : String(err)}`,
+      metadata: { error: err instanceof Error ? err.message : String(err) },
+    }))
+    await finish(run, res)
+    return MessageV2.get({ sessionID: input.sessionID, messageID: run.assistant.id })
+  }
+
   export async function run(input: CommandInput) {
     const raw = input.arguments.trim()
     const argv = (raw.match(argsRegex) ?? []).map((item) => item.replace(quoteTrimRegex, ""))
     const name = argv[0]
     const rest = name ? raw.slice(raw.indexOf(name) + name.length).trim() : ""
     const files = input.parts ?? []
-    const model = await resolveModel(input)
-    const agent = input.agent ?? (await Agent.defaultAgent())
-    const { SessionPrompt } = await import("../session/prompt")
-    const user = await SessionPrompt.prompt({
-      sessionID: input.sessionID,
-      messageID: input.messageID,
-      agent,
-      model,
-      variant: input.variant,
-      noReply: true,
-      parts: [
-        {
-          type: "text",
-          text: raw ? `/workflow ${raw}` : "/workflow",
-        },
-        ...files,
-      ],
-    })
-    if (user.info.role !== "user") throw new Error("expected workflow invocation to create a user message")
-
-    const assistant = (await Session.updateMessage({
-      id: Identifier.ascending("message"),
-      sessionID: input.sessionID,
-      parentID: user.info.id,
-      role: "assistant",
-      mode: user.info.agent,
-      agent: user.info.agent,
-      modelID: user.info.model.modelID,
-      providerID: user.info.model.providerID,
-      path: {
-        cwd: Instance.directory,
-        root: Instance.worktree,
-      },
-      cost: 0,
-      tokens: {
-        input: 0,
-        output: 0,
-        reasoning: 0,
-        cache: { read: 0, write: 0 },
-      },
-      time: {
-        created: Date.now(),
-      },
-    })) as MessageV2.Assistant
-
-    let part = (await Session.updatePart({
-      id: Identifier.ascending("part"),
-      messageID: assistant.id,
-      sessionID: assistant.sessionID,
-      type: "tool",
-      callID: crypto.randomUUID(),
+    const run = await begin(input, {
       tool: "workflow",
-      state: {
-        status: "running",
-        input: {
-          name: name ?? "",
-          raw: rest,
-          argv: argv.slice(1),
-        },
-        time: {
-          start: Date.now(),
-        },
+      input: {
+        name: name ?? "",
+        raw: rest,
+        argv: argv.slice(1),
       },
-    })) as MessageV2.ToolPart
+      parts: files,
+    })
 
-    const ctx = init({
+    const ctx = context({
       name: name ?? "",
       raw: rest,
       argv: argv.slice(1),
       files,
       sessionID: input.sessionID,
-      assistantID: assistant.id,
-      userID: user.info.id,
-      model: user.info.model,
+      assistantID: run.assistant.id,
+      userID: run.user.info.id,
+      model: run.user.info.model,
       stack: [],
-      update: async (val) => {
-        if (part.state.status !== "running") return
-        part = (await Session.updatePart({
-          ...part,
+      update: async (val: { title?: string; metadata?: Record<string, unknown> }) => {
+        if (run.part.state.status !== "running") return
+        run.part = (await Session.updatePart({
+          ...run.part,
           state: {
             status: "running",
-            input: part.state.input,
+            input: run.part.state.input,
             title: val.title,
             metadata: val.metadata,
-            time: part.state.time,
+            time: run.part.state.time,
           },
         })) as MessageV2.ToolPart
       },
@@ -258,51 +323,198 @@ export namespace Workflow {
       } satisfies WorkflowResultShape
     })
 
-    const end = Date.now()
-    const fail = res.metadata?.error
-    const start = part.state.status === "running" ? part.state.time.start : Date.now()
-    part = (await Session.updatePart({
-      ...part,
-      state: fail
-        ? {
-            status: "error",
-            input: part.state.input,
-            error: String(fail),
-            metadata: res.metadata,
-            time: {
-              start,
-              end,
-            },
-          }
-        : {
-            status: "completed",
-            input: part.state.input,
-            title: res.title ?? name ?? "workflow",
-            metadata: res.metadata ?? {},
-            output: res.output ?? "",
-            time: {
-              start,
-              end,
-            },
-          },
-    })) as MessageV2.ToolPart
-
-    if (res.output) {
-      await Session.updatePart({
-        id: Identifier.ascending("part"),
-        messageID: assistant.id,
-        sessionID: assistant.sessionID,
-        type: "text",
-        text: res.output,
-        metadata: res.metadata,
-      })
-    }
-
-    assistant.finish = "stop"
-    assistant.time.completed = end
-    await Session.updateMessage(assistant)
-    return MessageV2.get({ sessionID: input.sessionID, messageID: assistant.id })
+    await finish(run, res)
+    return MessageV2.get({ sessionID: input.sessionID, messageID: run.assistant.id })
   }
+}
+
+async function scaffold() {
+  const made: string[] = []
+  const kept: string[] = []
+  const deps = await pkg()
+  const files = [
+    [".opencode/workflows.d.ts", decl],
+    ["docs/workflow-authoring.md", docs],
+    [".opencode/workflows/example.ts", example],
+  ] as const
+
+  for (const [file, body] of files) {
+    const ok = await ensure(path.join(Instance.worktree, file), body)
+    ;(ok ? made : kept).push(file)
+  }
+
+  const out = [
+    "Workflow init complete.",
+    "",
+    made.length > 0 ? ["Created:", ...made.map((item) => `- ${item}`)].join("\n") : undefined,
+    kept.length > 0 ? ["Kept:", ...kept.map((item) => `- ${item}`)].join("\n") : undefined,
+    ["Updated:", `- package.json (${deps})`].join("\n"),
+    "",
+    "Next:",
+    "1. Run your package manager install command.",
+    "2. Edit `.opencode/workflows/example.ts`.",
+    "3. Run `/workflow example hello`.",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  return {
+    title: "Workflow init",
+    output: out,
+    metadata: {
+      created: made,
+      kept,
+      package_json: deps,
+    },
+  } satisfies WorkflowResultShape
+}
+
+async function ensure(file: string, body: string) {
+  if (await Filesystem.exists(file)) return false
+  await Filesystem.write(file, body)
+  return true
+}
+
+async function pkg() {
+  const file = path.join(Instance.worktree, "package.json")
+  const data = (await Filesystem.exists(file))
+    ? JSON.parse(await Filesystem.readText(file))
+    : {
+        private: true,
+      }
+  const deps = record(data.dependencies)
+  const cur = typeof deps[api] === "string" ? deps[api] : undefined
+  deps[api] = cur ?? ver
+  data.dependencies = deps
+  await Filesystem.write(file, JSON.stringify(data, null, 2) + "\n")
+  return cur ? `dependency already set to ${cur}` : `added ${api}@${deps[api]}`
+}
+
+function record(input: unknown) {
+  return input && typeof input === "object" && !Array.isArray(input) ? { ...(input as Record<string, unknown>) } : {}
+}
+
+async function begin(
+  input: CommandInput,
+  tool: {
+    tool: string
+    input: Record<string, unknown>
+    parts: Array<z.infer<typeof FileSchema>>
+  },
+) {
+  const model = await resolveModel(input)
+  const agent = input.agent ?? (await Agent.defaultAgent())
+  const { SessionPrompt } = await import("../session/prompt")
+  const text = input.arguments.trim() ? `/${input.command} ${input.arguments.trim()}` : `/${input.command}`
+  const user = await SessionPrompt.prompt({
+    sessionID: input.sessionID,
+    messageID: input.messageID,
+    agent,
+    model,
+    variant: input.variant,
+    noReply: true,
+    parts: [{ type: "text", text }, ...tool.parts],
+  })
+  if (user.info.role !== "user") throw new Error("expected workflow invocation to create a user message")
+
+  const assistant = (await Session.updateMessage({
+    id: Identifier.ascending("message"),
+    sessionID: input.sessionID,
+    parentID: user.info.id,
+    role: "assistant",
+    mode: user.info.agent,
+    agent: user.info.agent,
+    modelID: user.info.model.modelID,
+    providerID: user.info.model.providerID,
+    path: {
+      cwd: Instance.directory,
+      root: Instance.worktree,
+    },
+    cost: 0,
+    tokens: {
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache: { read: 0, write: 0 },
+    },
+    time: {
+      created: Date.now(),
+    },
+  })) as MessageV2.Assistant
+
+  const part = (await Session.updatePart({
+    id: Identifier.ascending("part"),
+    messageID: assistant.id,
+    sessionID: assistant.sessionID,
+    type: "tool",
+    callID: crypto.randomUUID(),
+    tool: tool.tool,
+    state: {
+      status: "running",
+      input: tool.input,
+      time: {
+        start: Date.now(),
+      },
+    },
+  })) as MessageV2.ToolPart
+
+  return {
+    user,
+    assistant,
+    part,
+  }
+}
+
+async function finish(
+  run: {
+    assistant: MessageV2.Assistant
+    part: MessageV2.ToolPart
+  },
+  res: WorkflowResultShape,
+) {
+  const end = Date.now()
+  const fail = res.metadata?.error
+  const start = run.part.state.status === "running" ? run.part.state.time.start : Date.now()
+  run.part = (await Session.updatePart({
+    ...run.part,
+    state: fail
+      ? {
+          status: "error",
+          input: run.part.state.input,
+          error: String(fail),
+          metadata: res.metadata,
+          time: {
+            start,
+            end,
+          },
+        }
+      : {
+          status: "completed",
+          input: run.part.state.input,
+          title: res.title ?? run.part.tool,
+          metadata: res.metadata ?? {},
+          output: res.output ?? "",
+          time: {
+            start,
+            end,
+          },
+        },
+  })) as MessageV2.ToolPart
+
+  if (res.output) {
+    await Session.updatePart({
+      id: Identifier.ascending("part"),
+      messageID: run.assistant.id,
+      sessionID: run.assistant.sessionID,
+      type: "text",
+      text: res.output,
+      metadata: res.metadata,
+    })
+  }
+
+  run.assistant.finish = "stop"
+  run.assistant.time.completed = end
+  await Session.updateMessage(run.assistant)
 }
 
 function parse(input: unknown): WorkflowDefinition<any> | undefined {
@@ -373,7 +585,7 @@ async function execute(
           : `Workflow \`${input.name}\` was not found. Create one in .opencode/workflows/<name>.ts.`,
     }
   }
-  const next = init({
+  const next = context({
     name: input.name,
     raw: input.raw,
     argv: input.argv,
@@ -390,7 +602,7 @@ async function execute(
   return typeof out === "string" ? { output: out } : ResultSchema.parse(out)
 }
 
-function init(input: {
+function context(input: {
   name: string
   raw: string
   argv: string[]
