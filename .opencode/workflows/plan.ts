@@ -1,4 +1,5 @@
 import type { TaskInput, WorkflowContext } from "../workflows"
+import { glob } from "glob"
 import z from "zod"
 
 const issue = z
@@ -73,6 +74,8 @@ const roles = [
   { id: "muse", name: "Muse" },
 ] as const
 
+const builtin = new Set(["general", "explore", "omo-explore", "oracle"])
+
 type Base = z.infer<typeof opencode.args>
 type Ctx = WorkflowContext
 type Job = TaskInput
@@ -126,6 +129,7 @@ export default opencode.workflow({
     }
 
     const sys = await loadRoles()
+    const use = await loadAgents(ctx.worktree)
     const slugged = slug(input.goal)
     const stamp = time()
     const file = `tasks/prds/prd-${slugged}.md`
@@ -150,7 +154,7 @@ export default opencode.workflow({
 
     await ctx.status({
       title: "Initialize roles",
-      metadata: { roles: roles.map((item) => item.name), file, dir },
+      metadata: { roles: roles.map((item) => item.name), agents: use, file, dir },
     })
 
     for (let i = 1; i <= input.max_rounds; i++) {
@@ -183,8 +187,7 @@ export default opencode.workflow({
             min: input.min_rounds,
             max: input.max_rounds,
           }),
-          subagent: "general",
-          category: "deep",
+          subagent: use.pm,
           load_skills: ["prd"],
         },
         pmres,
@@ -229,8 +232,7 @@ export default opencode.workflow({
                 items,
                 refs,
               }),
-              subagent: "general",
-              category: item.id === "muse" ? "deep" : "quick",
+              subagent: use[item.id],
             },
             roleres,
             `${item.name} round ${i}`,
@@ -245,8 +247,7 @@ export default opencode.workflow({
         {
           description: `Judge round ${i}`,
           prompt: judgePrompt({ goal: input.goal, items, ans }),
-          subagent: "general",
-          category: "deep",
+          subagent: use.judge,
         },
         judge,
         `Judge round ${i}`,
@@ -276,7 +277,7 @@ export default opencode.workflow({
       }
 
       if (notify) {
-        note = await send(ctx, notify, message({ goal: input.goal, file, round: i, cmp, ans })).catch(
+        note = await send(ctx, ctx.worktree, notify, message({ goal: input.goal, file, round: i, cmp, ans })).catch(
           (err: unknown) => `Lark notification failed: ${err instanceof Error ? err.message : String(err)}`,
         )
         log.notification = note
@@ -651,7 +652,8 @@ function message(input: {
   ].join("\n")
 }
 
-async function send(ctx: Pick<Ctx, "task">, target: string, body: string) {
+async function send(ctx: Pick<Ctx, "task">, root: string, target: string, body: string) {
+  const use = await loadAgents(root)
   return (
     await ctx.task({
       description: "Send Lark decision note",
@@ -664,9 +666,74 @@ async function send(ctx: Pick<Ctx, "task">, target: string, body: string) {
         "",
         "Return a one-line confirmation or the exact failure reason.",
       ].join("\n"),
-      subagent: "general",
-      category: "quick",
+      subagent: use.notify,
       load_skills: ["lark-shared", "lark-im"],
     })
   ).text
+}
+
+async function loadAgents(root: string) {
+  const have = new Set(builtin)
+  await Promise.all([
+    scan(join(root, ".opencode", "agent"), have),
+    scan(join(root, ".opencode", "agents"), have),
+    conf(join(root, "lark-opencode.json"), have),
+    conf(join(root, "lark-opencode.jsonc"), have),
+    conf(join(root, "opencode.json"), have),
+    conf(join(root, "opencode.jsonc"), have),
+    conf(join(root, ".opencode", "opencode.json"), have),
+    conf(join(root, ".opencode", "opencode.jsonc"), have),
+  ])
+  return {
+    pm: pick(have, ["pm", "product-manager", "general"]),
+    architect: pick(have, ["architect", "oracle", "general"]),
+    fe: pick(have, ["fe", "frontend", "web", "general"]),
+    qa: pick(have, ["qa", "test-runner", "general"]),
+    dba: pick(have, ["dba", "database", "general"]),
+    muse: pick(have, ["muse", "omo-explore", "explore", "general"]),
+    judge: pick(have, ["judge", "oracle", "general"]),
+    notify: pick(have, ["lark", "general"]),
+  }
+}
+
+function pick(have: Set<string>, list: string[]) {
+  return list.find((item) => have.has(item)) ?? "general"
+}
+
+async function scan(dir: string, out: Set<string>) {
+  const file = Bun.file(dir)
+  if (!(await file.exists())) return
+  for (const item of await glob("**/*.md", { cwd: dir, dot: true })) {
+    out.add(item.replace(/\\/g, "/").replace(/\.md$/, ""))
+  }
+}
+
+async function conf(file: string, out: Set<string>) {
+  const src = Bun.file(file)
+  if (!(await src.exists())) return
+  const raw = parseJson(await src.text())
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return
+  const cfg = raw as Record<string, unknown>
+  if (!cfg.agent || typeof cfg.agent !== "object" || Array.isArray(cfg.agent)) return
+  Object.entries(cfg.agent).forEach(([key, val]) => {
+    if (!val || typeof val !== "object" || Array.isArray(val)) {
+      out.add(key)
+      return
+    }
+    if ((val as Record<string, unknown>).disable === true) return
+    out.add(key)
+  })
+}
+
+function join(...parts: string[]) {
+  return parts.filter(Boolean).join("/").replace(/\\/g, "/").replace(/\/+/g, "/")
+}
+
+function parseJson(input: string) {
+  return JSON.parse(
+    input
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "")
+      .replace(/,\s*([}\]])/g, "$1"),
+  )
 }
