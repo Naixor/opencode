@@ -1,4 +1,12 @@
-import { Args, File, define, result, type WorkflowContext, type WorkflowDefinition } from "@lark-opencode/workflow-api"
+import {
+  Args,
+  File,
+  define,
+  result,
+  type TaskInput,
+  type WorkflowContext,
+  type WorkflowDefinition,
+} from "@lark-opencode/workflow-api"
 
 declare global {
   const Bun: {
@@ -18,4 +26,4 @@ declare global {
 }
 
 export { Args, File, define, result }
-export type { WorkflowContext, WorkflowDefinition }
+export type { TaskInput, WorkflowContext, WorkflowDefinition }

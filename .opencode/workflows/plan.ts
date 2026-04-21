@@ -1,3 +1,4 @@
+import type { TaskInput, WorkflowContext } from "../workflows"
 import z from "zod"
 
 const issue = z
@@ -72,45 +73,51 @@ const roles = [
   { id: "muse", name: "Muse" },
 ] as const
 
+type Base = z.infer<typeof opencode.args>
+type Ctx = WorkflowContext
+type Job = TaskInput
+
+const args = opencode.args.transform((input: Base) => {
+  let notify: string | undefined
+  let max = 20
+  const goal: string[] = []
+
+  for (let i = 0; i < input.argv.length; i++) {
+    const item = input.argv[i]
+    if (item === "--notify" && input.argv[i + 1]) {
+      notify = input.argv[i + 1]
+      i += 1
+      continue
+    }
+    if (item.startsWith("--notify=")) {
+      notify = item.slice("--notify=".length)
+      continue
+    }
+    if (item === "--max-rounds" && input.argv[i + 1]) {
+      max = clamp(input.argv[i + 1])
+      i += 1
+      continue
+    }
+    if (item.startsWith("--max-rounds=")) {
+      max = clamp(item.slice("--max-rounds=".length))
+      continue
+    }
+    goal.push(item)
+  }
+
+  return {
+    ...input,
+    notify,
+    max_rounds: max,
+    min_rounds: 3,
+    goal: goal.join(" ").trim(),
+  }
+})
+
 export default opencode.workflow({
   description: "Drive a multi-role PRD planning loop until open questions converge",
-  input: opencode.args.transform((input) => {
-    let notify: string | undefined
-    let max = 5
-    const goal: string[] = []
-
-    for (let i = 0; i < input.argv.length; i++) {
-      const item = input.argv[i]
-      if (item === "--notify" && input.argv[i + 1]) {
-        notify = input.argv[i + 1]
-        i += 1
-        continue
-      }
-      if (item.startsWith("--notify=")) {
-        notify = item.slice("--notify=".length)
-        continue
-      }
-      if (item === "--max-rounds" && input.argv[i + 1]) {
-        max = clamp(input.argv[i + 1])
-        i += 1
-        continue
-      }
-      if (item.startsWith("--max-rounds=")) {
-        max = clamp(item.slice("--max-rounds=".length))
-        continue
-      }
-      goal.push(item)
-    }
-
-    return {
-      ...input,
-      notify,
-      max_rounds: max,
-      min_rounds: 3,
-      goal: goal.join(" ").trim(),
-    }
-  }),
-  async run(ctx, input) {
+  input: args,
+  async run(ctx: Ctx, input: z.infer<typeof args>) {
     if (!input.goal) {
       return {
         title: "Plan workflow",
@@ -388,22 +395,18 @@ async function loadRoles() {
   return Object.fromEntries(rows) as Record<(typeof roles)[number]["id"], string>
 }
 
-async function save(
-  ctx: {
-    write(input: { file: string; content: string }): Promise<void>
-  },
-  file: string,
-  body: string,
-) {
+async function save(ctx: Pick<Ctx, "write">, file: string, body: string) {
   await ctx.write({ file, content: body })
   return "saved"
 }
 
-function files(items: typeof opencode.args._output.files) {
+function files(items: Ctx["files"]) {
   if (items.length === 0) return "No attached files."
   return [
     "Attached files:",
-    ...items.map((item, idx) => `- [${idx + 1}] ${item.filename ?? item.url} (${item.mime})`),
+    ...items.map(
+      (item: Ctx["files"][number], idx: number) => `- [${idx + 1}] ${item.filename ?? item.url} (${item.mime})`,
+    ),
   ].join("\n")
 }
 
@@ -418,22 +421,8 @@ function parse(input: string) {
 }
 
 async function json<T extends z.ZodTypeAny>(
-  ctx: {
-    task(input: {
-      description: string
-      prompt: string
-      subagent: string
-      category?: string
-      load_skills?: string[]
-    }): Promise<{ text: string }>
-  },
-  input: {
-    description: string
-    prompt: string
-    subagent: string
-    category?: string
-    load_skills?: string[]
-  },
+  ctx: Pick<Ctx, "task">,
+  input: Job,
   schema: T,
   label: string,
   kind: "pm" | "role" | "judge",
@@ -662,19 +651,7 @@ function message(input: {
   ].join("\n")
 }
 
-async function send(
-  ctx: {
-    task(input: {
-      description: string
-      prompt: string
-      subagent: string
-      category?: string
-      load_skills?: string[]
-    }): Promise<{ text: string }>
-  },
-  target: string,
-  body: string,
-) {
+async function send(ctx: Pick<Ctx, "task">, target: string, body: string) {
   return (
     await ctx.task({
       description: "Send Lark decision note",

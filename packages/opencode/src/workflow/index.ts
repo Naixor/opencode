@@ -156,7 +156,7 @@ const docs = [
   "",
 ].join("\n")
 const decl = [
-  `import { Args, File, define, result, type WorkflowContext, type WorkflowDefinition } from \"${api}\"`,
+  `import { Args, File, define, result, type TaskInput, type WorkflowContext, type WorkflowDefinition } from \"${api}\"`,
   "",
   "declare global {",
   "  const Bun: {",
@@ -176,7 +176,7 @@ const decl = [
   "}",
   "",
   "export { Args, File, define, result }",
-  "export type { WorkflowContext, WorkflowDefinition }",
+  "export type { TaskInput, WorkflowContext, WorkflowDefinition }",
   "",
 ].join("\n")
 const example = [

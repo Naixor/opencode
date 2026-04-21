@@ -2,7 +2,7 @@ import path from "path"
 import fs from "fs/promises"
 import { describe, expect, test } from "bun:test"
 import { pathToFileURL } from "url"
-import { runtime } from "@lark-opencode/workflow-api"
+import { runtime, type TaskInput, type WorkflowContext } from "@lark-opencode/workflow-api"
 import { tmpdir } from "../fixture/fixture"
 
 describe("plan workflow", () => {
@@ -16,7 +16,7 @@ describe("plan workflow", () => {
     await using tmp = await tmpdir({ git: true, config: {} })
 
     let pm = 0
-    const ctx = {
+    const ctx: WorkflowContext = {
       name: "plan",
       raw: "ship roadmap",
       argv: ["ship", "roadmap"],
@@ -27,13 +27,19 @@ describe("plan workflow", () => {
       directory: tmp.path,
       worktree: tmp.path,
       async status() {},
+      async write(input) {
+        const file = path.isAbsolute(input.file) ? input.file : path.join(tmp.path, input.file)
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(file, input.content, "utf8")
+      },
       async ask() {
         throw new Error("ask should not be called in this test")
       },
-      async task(input: { description: string; prompt: string }) {
+      async task(input: TaskInput) {
         if (input.description.startsWith("PM round")) {
           pm += 1
           return {
+            session_id: "sess_pm",
             text: JSON.stringify({
               summary: `pm round ${pm}`,
               prd_markdown: `# PRD\n\nround ${pm}`,
@@ -51,7 +57,7 @@ describe("plan workflow", () => {
           const file = path.join(tmp.path, match[1])
           await fs.mkdir(path.dirname(file), { recursive: true })
           await fs.writeFile(file, match[2], "utf8")
-          return { text: `saved ${match[1]}` }
+          return { session_id: "sess_write", text: `saved ${match[1]}` }
         }
 
         throw new Error(`unexpected task: ${input.description}`)
