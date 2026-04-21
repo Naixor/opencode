@@ -430,6 +430,87 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("ignores non-provider metadata on assistant parts", () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [
+          {
+            ...basePart(userID, "u1"),
+            type: "text",
+            text: "run workflow",
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1"),
+            type: "text",
+            text: "done",
+            metadata: {
+              file: "tasks/prds/test.md",
+              log_dir: ".workflows/logs/test",
+            },
+          },
+          {
+            ...basePart(assistantID, "a2"),
+            type: "tool",
+            callID: "call-1",
+            tool: "workflow",
+            state: {
+              status: "completed",
+              input: { name: "plan" },
+              output: "ok",
+              title: "Workflow",
+              metadata: {},
+              time: { start: 0, end: 1 },
+            },
+            metadata: {
+              rounds: ["one"],
+              notify: "chat-id",
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    expect(MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "run workflow" }],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "done" },
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "workflow",
+            input: { name: "plan" },
+            providerExecuted: undefined,
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "workflow",
+            output: { type: "text", value: "ok" },
+          },
+        ],
+      },
+    ])
+  })
+
   test("replaces compacted tool output with placeholder", () => {
     const userID = "m-user"
     const assistantID = "m-assistant"

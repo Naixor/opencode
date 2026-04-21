@@ -17,6 +17,15 @@ import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 
 export namespace MessageV2 {
+  function provider(input: unknown) {
+    if (!input || typeof input !== "object" || Array.isArray(input)) return
+    const out = Object.fromEntries(
+      Object.entries(input).filter(([, value]) => value && typeof value === "object" && !Array.isArray(value)),
+    )
+    if (Object.keys(out).length === 0) return
+    return out
+  }
+
   export function isMedia(mime: string) {
     return mime.startsWith("image/") || mime === "application/pdf"
   }
@@ -632,7 +641,7 @@ export namespace MessageV2 {
             assistantMessage.parts.push({
               type: "text",
               text: part.text,
-              ...(differentModel ? {} : { providerMetadata: part.metadata }),
+              ...(differentModel ? {} : provider(part.metadata) ? { providerMetadata: provider(part.metadata) } : {}),
             })
           if (part.type === "step-start")
             assistantMessage.parts.push({
@@ -671,7 +680,11 @@ export namespace MessageV2 {
                 toolCallId: part.callID,
                 input: part.state.input,
                 output,
-                ...(differentModel ? {} : { callProviderMetadata: part.metadata }),
+                ...(differentModel
+                  ? {}
+                  : provider(part.metadata)
+                    ? { callProviderMetadata: provider(part.metadata) }
+                    : {}),
               })
             }
             if (part.state.status === "error")
@@ -681,7 +694,11 @@ export namespace MessageV2 {
                 toolCallId: part.callID,
                 input: part.state.input,
                 errorText: part.state.error,
-                ...(differentModel ? {} : { callProviderMetadata: part.metadata }),
+                ...(differentModel
+                  ? {}
+                  : provider(part.metadata)
+                    ? { callProviderMetadata: provider(part.metadata) }
+                    : {}),
               })
             // Handle pending/running tool calls to prevent dangling tool_use blocks
             // Anthropic/Claude APIs require every tool_use to have a corresponding tool_result
@@ -692,7 +709,11 @@ export namespace MessageV2 {
                 toolCallId: part.callID,
                 input: part.state.input,
                 errorText: "[Tool execution was interrupted]",
-                ...(differentModel ? {} : { callProviderMetadata: part.metadata }),
+                ...(differentModel
+                  ? {}
+                  : provider(part.metadata)
+                    ? { callProviderMetadata: provider(part.metadata) }
+                    : {}),
               })
           }
           if (part.type === "reasoning") {
@@ -709,7 +730,7 @@ export namespace MessageV2 {
             assistantMessage.parts.push({
               type: "reasoning",
               text: part.text,
-              ...(differentModel ? {} : { providerMetadata: part.metadata }),
+              ...(differentModel ? {} : provider(part.metadata) ? { providerMetadata: provider(part.metadata) } : {}),
             })
           }
         }
