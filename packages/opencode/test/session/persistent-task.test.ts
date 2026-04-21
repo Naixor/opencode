@@ -17,16 +17,25 @@ async function withInstance(fn: (tmpPath: string) => Promise<void>) {
 
 describe("PersistentTask", () => {
   describe("create", () => {
-    test("creates a JSON file in .opencode/tasks/ with T-{uuid} format", async () => {
+    test("creates a JSON file in .lark-opencode/tasks/ with T-{uuid} format", async () => {
       await withInstance(async (tmpPath) => {
         const task = await PersistentTask.create({ subject: "Test task" })
         expect(task.id).toMatch(/^T-[0-9a-f-]+$/)
-        const filePath = path.join(tmpPath, ".opencode", "tasks", `${task.id}.json`)
+        const filePath = path.join(tmpPath, ".lark-opencode", "tasks", `${task.id}.json`)
         const exists = await Bun.file(filePath).exists()
         expect(exists).toBe(true)
         const stored = await Bun.file(filePath).json()
         expect(stored.id).toBe(task.id)
         expect(stored.subject).toBe("Test task")
+      })
+    })
+
+    test("falls back to .opencode/tasks when legacy directory exists", async () => {
+      await withInstance(async (tmpPath) => {
+        await fs.mkdir(path.join(tmpPath, ".opencode", "tasks"), { recursive: true })
+        const task = await PersistentTask.create({ subject: "Legacy task" })
+        expect(await Bun.file(path.join(tmpPath, ".opencode", "tasks", `${task.id}.json`)).exists()).toBe(true)
+        expect(await Bun.file(path.join(tmpPath, ".lark-opencode", "tasks", `${task.id}.json`)).exists()).toBe(false)
       })
     })
 
@@ -164,7 +173,7 @@ describe("PersistentTask", () => {
     test("removes file", async () => {
       await withInstance(async (tmpPath) => {
         const task = await PersistentTask.create({ subject: "Delete me" })
-        const filePath = path.join(tmpPath, ".opencode", "tasks", `${task.id}.json`)
+        const filePath = path.join(tmpPath, ".lark-opencode", "tasks", `${task.id}.json`)
         expect(await Bun.file(filePath).exists()).toBe(true)
 
         await PersistentTask.remove(task.id)
@@ -260,10 +269,7 @@ describe("PersistentTask", () => {
           metadata: () => {},
           ask: async () => {},
         } as any
-        const result = await tool.execute(
-          { operation: "create", subject: "Tool test" },
-          ctx,
-        )
+        const result = await tool.execute({ operation: "create", subject: "Tool test" }, ctx)
         expect(result.title).toContain("Created task")
         const parsed = JSON.parse(result.output)
         expect(parsed.subject).toBe("Tool test")
@@ -334,10 +340,7 @@ describe("PersistentTask", () => {
         } as any
 
         const task = await PersistentTask.create({ subject: "Update task" })
-        const result = await tool.execute(
-          { operation: "update", id: task.id, status: "in_progress" },
-          ctx,
-        )
+        const result = await tool.execute({ operation: "update", id: task.id, status: "in_progress" }, ctx)
         expect(result.title).toContain("Updated task")
         const parsed = JSON.parse(result.output)
         expect(parsed.status).toBe("in_progress")
@@ -360,10 +363,7 @@ describe("PersistentTask", () => {
         } as any
 
         const task = await PersistentTask.create({ subject: "Delete task" })
-        const result = await tool.execute(
-          { operation: "delete", id: task.id },
-          ctx,
-        )
+        const result = await tool.execute({ operation: "delete", id: task.id }, ctx)
         expect(result.title).toContain("Deleted task")
         expect(result.output).toContain("deleted successfully")
       })
@@ -389,10 +389,7 @@ describe("PersistentTask", () => {
         await PersistentTask.create({ subject: "Ready task" })
         await PersistentTask.create({ subject: "Blocked", blockedBy: [dep.id] })
 
-        const result = await tool.execute(
-          { operation: "list", filter: "ready" },
-          ctx,
-        )
+        const result = await tool.execute({ operation: "list", filter: "ready" }, ctx)
         const parsed = JSON.parse(result.output)
         // "Ready task" is pending with no deps (ready), "Dep" is in_progress (not pending, excluded), "Blocked" is pending but dep not completed
         expect(parsed.length).toBe(1)

@@ -10,6 +10,7 @@ import { BoardTask } from "../../board/task"
 import { BoardSignal } from "../../board/signal"
 import { Discussion } from "../../board/discussion"
 import { SwarmState } from "../swarm-state"
+import { ConfigPaths } from "@/config/paths"
 
 const STRATEGY_FILE = "conductor-strategy.md"
 const SWARM_DIR = "swarm"
@@ -28,7 +29,7 @@ export namespace SwarmHooks {
   // Search order: project .opencode/swarm/ → global ~/.config/opencode/swarm/
   function strategyCandidates(): string[] {
     return [
-      path.join(Instance.worktree, ".opencode", SWARM_DIR, STRATEGY_FILE),
+      ...ConfigPaths.directoriesIn(Instance.worktree, true).map((dir) => path.join(dir, SWARM_DIR, STRATEGY_FILE)),
       path.join(Global.Path.config, SWARM_DIR, STRATEGY_FILE),
     ]
   }
@@ -58,7 +59,7 @@ export namespace SwarmHooks {
         "",
         "  Customizable files:",
         `    Global:  ${fp}`,
-        `    Project: ${path.join(Instance.worktree, ".opencode", SWARM_DIR, STRATEGY_FILE)}`,
+        `    Project: ${path.join(ConfigPaths.resolveDirectory(Instance.worktree), SWARM_DIR, STRATEGY_FILE)}`,
         "",
         "  Quick start:",
         "    /swarm launch <goal>     — start a multi-agent swarm",

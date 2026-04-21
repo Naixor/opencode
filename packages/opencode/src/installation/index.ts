@@ -60,6 +60,7 @@ export namespace Installation {
   const PKG = "lark-opencode"
 
   export async function method() {
+    if (process.execPath.includes(path.join(".lark-opencode", "bin"))) return "npm"
     if (process.execPath.includes(path.join(".opencode", "bin"))) return "npm"
     if (process.execPath.includes(path.join(".local", "bin"))) return "npm"
     const exec = process.execPath.toLowerCase()

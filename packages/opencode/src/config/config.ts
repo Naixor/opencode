@@ -46,11 +46,11 @@ export namespace Config {
   function systemManagedConfigDir(): string {
     switch (process.platform) {
       case "darwin":
-        return "/Library/Application Support/opencode"
+        return "/Library/Application Support/lark-opencode"
       case "win32":
-        return path.join(process.env.ProgramData || "C:\\ProgramData", "opencode")
+        return path.join(process.env.ProgramData || "C:\\ProgramData", "lark-opencode")
       default:
-        return "/etc/opencode"
+        return "/etc/lark-opencode"
     }
   }
 
@@ -162,7 +162,7 @@ export namespace Config {
     const deps = []
 
     for (const dir of unique(directories)) {
-      if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
+      if (ConfigPaths.isDirectory(dir) || dir === Flag.OPENCODE_CONFIG_DIR) {
         // lark-opencode variants loaded after opencode to take priority
         for (const file of ["opencode.jsonc", "opencode.json", "lark-opencode.jsonc", "lark-opencode.json"]) {
           log.debug(`loading config from ${path.join(dir, file)}`)

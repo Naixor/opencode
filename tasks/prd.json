@@ -1,308 +1,200 @@
 {
   "project": "OpenCode",
-  "branchName": "ralph/hindsight-local-memory-companion-integration",
-  "sourcePrdFile": "tasks/prds/prd-hindsight-local-memory-integration.md",
-  "description": "Add a local embedded Hindsight companion that improves memory recall and extraction while keeping OpenCode's local JSON memory store authoritative.",
+  "branchName": "ralph/workflow-tui-workflow-agent-visibility",
+  "sourcePrdFile": "tasks/prds/prd-workflow-tui-workflow-agent.md",
+  "description": "Add a versioned workflow progress schema and unified TUI projection so workflow runs expose phase, step, agent, round, and waiting state clearly while remaining read-only and safe on partial metadata.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Add Hindsight config schema and defaults",
-      "description": "As a maintainer, I want explicit Hindsight config so that rollout, fallback, and resource budgets are controlled by validated settings.",
+      "title": "Define workflow rendering schema v1",
+      "description": "As a workflow author, I want one versioned progress schema so that built-in and external workflows can target the same TUI contract.",
       "acceptanceCriteria": [
-        "Add `memory.hindsight` config in `packages/opencode/src/config/config.ts` with `enabled`, `mode`, `extract`, `recall`, `backfill`, `workspace_scope`, `bank_prefix`, `startup_timeout_ms`, `query_timeout_ms`, `retain_limit`, `recall_limit`, `observation_limit`, `context_max_items`, `context_max_tokens`, and `log_level`",
-        "Default values are `enabled: false`, `mode: \"embedded\"`, `extract: true`, `recall: true`, `backfill: true`, `workspace_scope: \"worktree\"`, `context_max_items: 6`, and `context_max_tokens: 1200`",
-        "Invalid Hindsight config fails during parsing instead of later runtime use",
-        "Tests pass",
+        "Add a schema definition with explicit `version`, `name`, `status`, and `phase` fields",
+        "Define optional schema sections for `round`, `steps`, `agents`, and `history`",
+        "Document required fields, optional fields, and fallback behavior for missing sections",
+        "Built-in and external workflows use the same schema module or type definition",
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "Added a validated `memory.hindsight` config schema with phase-1 defaults and config tests covering default application plus invalid-mode rejection."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Add embedded Hindsight service lifecycle",
-      "description": "As a user, I want OpenCode to start and reuse a local embedded Hindsight service so that semantic retrieval works without a cloud dependency.",
+      "title": "Add unified workflow progress projection",
+      "description": "As a developer, I want one read model for workflow progress so that the TUI renders from a single projection instead of transcript parsing.",
       "acceptanceCriteria": [
-        "Add workspace-scoped Hindsight service module under `packages/opencode/src/memory/hindsight/`",
-        "Use `@vectorize-io/hindsight-all` as the default embedded path and bind only to loopback",
-        "Service starts lazily, reuses one handle per worktree, and supports health, timeout, degraded, and shutdown behavior",
-        "Startup or health failure falls back without crashing memory flows",
-        "Tests pass",
+        "Add a projection that stores header, step, agent, round, and wait-state data for the active workflow run",
+        "Projection updates incrementally from workflow execution state and task state",
+        "Projection is the render source for workflow header, timeline, agent summary, and round history",
+        "TUI workflow rendering no longer reconstructs state from raw transcript text on each paint",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Added a workspace-scoped embedded Hindsight service that lazily boots one loopback-bound daemon per worktree, reuses the same ready handle, exposes ready or health or degraded state, shuts down on instance disposal, and falls back without throwing on startup or health timeout failures."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Add Hindsight client wrapper",
-      "description": "As a developer, I want one client wrapper around Hindsight SDK calls so that recall, retain, and backfill share the same timeout and error handling.",
+      "title": "Add fallback mapping for partial workflow metadata",
+      "description": "As a user, I want older or simpler workflows to render safely so that missing metadata does not break the workflow view.",
       "acceptanceCriteria": [
-        "Add client wrapper module that connects through the embedded service using `@vectorize-io/hindsight-client`",
-        "Expose thin wrappers for retain, batch retain, recall, and document or operation inspection calls needed by backfill",
-        "Apply shared timeout and non-fatal error handling in the wrapper instead of scattering SDK calls across engine code",
-        "Tests pass",
+        "Projection accepts minimal status-only progress updates without throwing",
+        "Missing round data renders `Round unknown`",
+        "Missing step, agent, or history data is omitted or replaced with stable fallback labels",
+        "Fallback mapping distinguishes `running`, `waiting`, `failed`, and `done` states",
+        "Unknown schema fields are ignored without crashing the TUI",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Added a single Hindsight client wrapper that reuses the embedded service, shares timeout or warning fallback handling across retain, batch retain, recall, and document or operation inspection calls, and exposes non-fatal helpers for downstream recall or backfill flows."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Add worktree bank identity and stable document mapping",
-      "description": "As a developer, I want deterministic bank and document mapping so that retain, recall, and backfill stay idempotent.",
+      "title": "Emit minimal schema payload from workflow runtime",
+      "description": "As a developer, I want active workflow runs to publish normalized progress metadata so that the TUI can render deterministic state.",
       "acceptanceCriteria": [
-        "Add deterministic worktree hash and bank id helpers such as `opencode:${worktreeHash}`",
-        "Generate stable `mem:`, `sess:`, and `obs:` document ids plus string-only metadata and normalized tags",
-        "Resolve recall hits by preferring reversible `document_id` parsing and then `metadata.memory_id`, while rejecting cross-worktree hits",
-        "Tests pass",
+        "Workflow runtime emits schema v1 payloads with workflow name, status, phase, and start time when a run starts",
+        "Round-based workflows emit current round and total rounds when those values are known",
+        "Waiting-for-user, waiting-for-agents, and retrying states emit distinct status and reason fields",
+        "Built-in workflows without richer metadata still produce a minimal payload through the fallback path",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Added dedicated Hindsight bank and mapping helpers for deterministic worktree bank ids, stable mem/sess/obs document ids, normalized memory metadata or tags, and resolve rules that prefer reversible mem document ids while rejecting cross-worktree hits and keeping sess or obs hits indirect."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Add retain wrapper for authoritative memory documents",
-      "description": "As a developer, I want local memory records normalized into Hindsight retain calls so that the companion bank mirrors authoritative memory content safely.",
+      "title": "Render workflow progress header",
+      "description": "As a user, I want a persistent workflow header so that I can identify what is running and which phase it is in right away.",
       "acceptanceCriteria": [
-        "Add retain or upsert wrapper that maps one local memory record to one Hindsight document in the worktree bank",
-        "Use stable `mem:` document ids, string-only metadata, normalized tags, and replace-style idempotent updates",
-        "Retain failures are logged and returned as non-fatal results instead of blocking local memory writes",
-        "Tests pass",
-        "Typecheck passes"
+        "Render a dedicated workflow header whenever a workflow run is active",
+        "Header shows workflow name, goal or input summary, current status, and start time",
+        "Header shows a deterministic phase label from the workflow projection",
+        "Header shows current round and max rounds when available, otherwise `Round unknown`",
+        "Header renders no pause, resume, cancel, retry, or edit controls",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "Added `MemoryHindsightRetain.memory()` as the single authoritative-memory retain wrapper that maps one local memory record into one stable `mem:` Hindsight document with string-only metadata, normalized tags, replace-style updates, and non-fatal failure results for downstream memory flows."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Add Hindsight recall query and resolve pipeline",
-      "description": "As a developer, I want ranked Hindsight hits resolved back to local memory ids so that downstream recall logic only sees authoritative candidates.",
+      "title": "Render current workflow step timeline",
+      "description": "As a user, I want a visible step timeline so that I can tell which workflow step is active, done, blocked, or pending.",
       "acceptanceCriteria": [
-        "Add Hindsight recall wrapper with timeout handling and ranked result parsing",
-        "Resolve hits into local memory ids while dropping unresolved, stale, cross-worktree, `sess:`, and `obs:` hits from direct injection",
-        "Preserve both raw relevance score and ranked order on resolved candidates for downstream selection",
-        "Tests pass",
-        "Typecheck passes"
+        "Render a step list or timeline for the current workflow run",
+        "Each step shows exactly one normalized state: `pending`, `active`, `completed`, `blocked`, `failed`, or `waiting`",
+        "Active step styling is distinct from completed and pending styling",
+        "Completed steps remain visible until the workflow run ends",
+        "Blocked, failed, or waiting steps show a one-line reason when a reason is available",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Added `packages/opencode/src/memory/hindsight/recall.ts` as the Hindsight recall query wrapper that tolerates current SDK result shapes, preserves hit rank plus raw relevance score on resolved authoritative candidates, and drops unresolved, stale, cross-worktree, and indirect `sess:` or `obs:` hits before downstream recall selection."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Integrate Hindsight ranking into memory recall",
-      "description": "As a user, I want recall to use Hindsight-ranked authoritative candidates so that the assistant selects more relevant existing memories.",
+      "title": "Render waiting and retry states clearly",
+      "description": "As a user, I want waiting and retry states to be explicit so that I do not mistake idle time for a broken workflow.",
       "acceptanceCriteria": [
-        "Update `packages/opencode/src/memory/engine/recall.ts` to query Hindsight when `memory.hindsight.enabled` and `memory.hindsight.recall` are true",
-        "Pass resolved authoritative local memory candidates plus raw score and rank into `memory-recall` for final selection",
-        "Fallback to the current recall path on startup failure, timeout, or unusable Hindsight results",
-        "Tests pass",
-        "Typecheck passes"
+        "When the projection reports user wait, the TUI shows `waiting for user` and the decision topic",
+        "When the projection reports agent wait, the TUI shows `waiting for agents` and the related step or round",
+        "When the projection reports retrying, the TUI shows a retrying state and the retried step label",
+        "Waiting-state styling is visually distinct from failed-state styling",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Updated `packages/opencode/src/memory/engine/recall.ts` so memory recall now actually queries Hindsight when enabled, passes authoritative ranked candidates with optional `rank` and `score` hints into the `memory-recall` agent, and falls back to the existing full candidate pool whenever Hindsight is unavailable or returns no usable authority candidates; added focused regression coverage in `packages/opencode/test/memory/recall.test.ts` for both ranked-candidate propagation and full-pool fallback."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Preserve local authority lifecycle boundaries",
-      "description": "As a maintainer, I want Hindsight integration to leave lifecycle ownership on local memory so that retrieval improves without rewriting storage, inject, hit tracking, or decay rules.",
+      "title": "Project per-agent activity metadata",
+      "description": "As a developer, I want agent activity captured in the workflow projection so that the UI can show what each agent has done without transcript synthesis.",
       "acceptanceCriteria": [
-        "Keep `packages/opencode/src/memory/storage.ts` as the authoritative store in phase 1",
-        "Keep `inject`, `hit-tracker`, and decay paths operating on local authoritative memory records instead of raw Hindsight responses",
-        "Enable Hindsight recall and extract participation without changing local lifecycle field ownership such as `status`, `score`, `useCount`, or `hitCount`",
-        "Tests pass",
+        "Projection stores one entry per participating agent with name or role, state, summary, and last-updated time",
+        "Projection marks active agents and agents that completed work in the current round from structured metadata",
+        "Agents with no activity expose the fallback state `not started`",
+        "Projection allows early-round summaries to contain questions, hypotheses, or next decisions without rewriting the text",
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "Added authority-boundary regression coverage proving `personal.json` remains authoritative storage and that inject, hit tracking, and decay continue to operate on local memory records even when Hindsight recall is enabled."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Add a Hindsight-aware extractor variant",
-      "description": "As a maintainer, I want a dedicated Hindsight-aware extractor path so that extract integration stays aligned with the existing memory-extractor contract.",
+      "title": "Render per-agent activity summary",
+      "description": "As a user, I want a compact per-agent summary so that I can understand contributions without reading full transcripts.",
       "acceptanceCriteria": [
-        "Add a dedicated Hindsight-aware extractor variant instead of bolting unbounded context onto the existing extractor prompt",
-        "Keep the variant compatible with current authoritative memory create or update outputs",
-        "If Hindsight context is unavailable, the extractor path can still run without failing memory extraction",
-        "Tests pass",
-        "Typecheck passes"
+        "Render one row or card per participating agent for the current workflow run",
+        "Each agent entry shows name or role, current state, latest action summary, and last updated time",
+        "Active agents are visually marked as active",
+        "Agents that completed work in the current round are visibly marked for that round",
+        "Agents with no activity render the label `not started`",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "Added a dedicated `extract-hindsight` prompt variant plus extractor routing that switches variants only when Hindsight extract is enabled, while preserving the existing `memory-extractor` contract and authoritative local create or update flows with graceful fallback to no extra context."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Add extractor context budget enforcement",
-      "description": "As a maintainer, I want explicit item and token budgets for Hindsight extractor context so that extraction quality stays bounded.",
+      "title": "Project compact round history data",
+      "description": "As a developer, I want round summaries stored in the workflow projection so that the UI can show how the workflow changed over time.",
       "acceptanceCriteria": [
-        "Enforce both `context_max_items` and `context_max_tokens` budgets in the Hindsight-aware extractor path",
-        "Use defaults of `6` items and `1200` tokens when no override is provided",
-        "Discard or trim excess Hindsight context before prompt construction instead of exceeding the configured budget",
-        "Tests pass",
+        "Projection stores completed rounds with round number, status, participating agents, and a short summary",
+        "Projection keeps the current round separately addressable from completed rounds",
+        "Round summaries update incrementally as rounds complete",
+        "Projection retains enough data to answer which agents contributed in each recorded round",
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "Added `MemoryExtractor.formatHints()` plus optional extractor context input so the Hindsight-aware path now enforces both item and token budgets before prompt construction, trimming only the final included hint when needed and covering defaults plus bounded prompt assembly in extractor tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Retain session slices for extraction context",
-      "description": "As a developer, I want session slices retained with stable ids so that extraction can query semantically related local context.",
+      "title": "Render compact round history",
+      "description": "As a user, I want a compact round history so that I can review completed rounds without losing sight of the current work.",
       "acceptanceCriteria": [
-        "Retain current session slices with stable `sess:` document ids before or alongside extraction",
-        "Use the worktree bank, string-only metadata, and normalized tags for session-slice retention",
-        "Retention failure stays non-fatal to the extract flow",
-        "Tests pass",
-        "Typecheck passes"
+        "Render a history section for completed rounds in the current workflow run",
+        "Current round is expanded by default",
+        "Older completed rounds are collapsed or compacted by default",
+        "Each round entry shows round number, status, participating agents, and a short summary",
+        "History layout keeps the current round, active step, and active agents visible in standard terminal width",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 11,
-      "passes": true,
-      "notes": "Extended Hindsight mapping and retain helpers with stable `sess:` session-slice metadata or tags, then retained the active extractor message window before the Hindsight-aware prompt is built while keeping retain failures non-fatal and covered by extractor or retain regression tests."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-012",
-      "title": "Inject Hindsight context into extraction",
-      "description": "As a user, I want extraction to see semantically related context from retained sessions so that new memories and updates are more accurate.",
+      "title": "Document external schema adoption and phased rollout",
+      "description": "As a product and platform team, we want clear compatibility and rollout guidance so that workflows can adopt the schema incrementally without custom TUI branches.",
       "acceptanceCriteria": [
-        "Query Hindsight for related documents or observations and pass a bounded `Hindsight context` section into the Hindsight-aware extractor",
-        "Local memory writes still go through authoritative `Memory.create()` and `Memory.update()` paths",
-        "Extractor falls back cleanly when Hindsight returns no usable context",
-        "Tests pass",
+        "Document schema v1 field definitions with example payloads for minimal and enriched workflow updates",
+        "Document compatibility rules for older, newer, and partial schema payloads",
+        "Document Phase 1 as header plus active-step visibility plus waiting-state clarity",
+        "Document Phase 2 as per-agent activity summary",
+        "Document Phase 3 as compact round history and richer schema adoption",
+        "Document that each phase can ship independently without requiring every workflow to emit the richest metadata",
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": true,
-      "notes": "Updated extraction to query Hindsight for related source facts, chunks, or direct hit text before prompt construction, inject only bounded deduplicated context into the Hindsight-aware extractor, and fall back cleanly when no usable context is returned."
-    },
-    {
-      "id": "US-013",
-      "title": "Retain authoritative memory writes after create and update",
-      "description": "As a developer, I want changed local memories upserted into Hindsight so that recall stays aligned with the authoritative store over time.",
-      "acceptanceCriteria": [
-        "Hook memory create and update flows to upsert the affected authoritative memory document into Hindsight",
-        "Repeated updates reuse the same stable `mem:` document id instead of creating duplicates",
-        "Retain failure never blocks the local authoritative memory write path",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "Updated `Memory.create()` and `Memory.update()` to upsert the affected authoritative local memory into Hindsight through `MemoryHindsightRetain.memory()` after the local save succeeds, while reusing the same stable `mem:` document id and keeping retain failures non-fatal to the authoritative write path."
-    },
-    {
-      "id": "US-014",
-      "title": "Add Hindsight sidecar state persistence",
-      "description": "As a developer, I want structured per-worktree Hindsight state stored outside the authority file so that backfill can resume safely.",
-      "acceptanceCriteria": [
-        "Add sidecar state helpers that read and write a per-worktree `hindsight.json` file next to local memory data",
-        "Persist bank identity, scope, timestamps, and structured backfill state including status, cursor, counts, operation ids, and failure samples",
-        "Do not change the shape of the existing authoritative local memory file to store Hindsight state",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": "Added `packages/opencode/src/memory/hindsight/state.ts` as the structured per-worktree sidecar state helper for `hindsight.json`, persisting bank identity, scope, timestamps, backfill cursor or counts, operation ids, and trimmed failure samples beside `personal.json` without changing the authoritative local memory file shape."
-    },
-    {
-      "id": "US-015",
-      "title": "Add resumable backfill runner for local memories",
-      "description": "As an existing user, I want current local memories imported into Hindsight so that semantic recall is useful immediately after enablement.",
-      "acceptanceCriteria": [
-        "Add backfill runner that reads local memories and imports them through Hindsight retain APIs using stable `mem:` document ids",
-        "Persist cursor, progress, and failures in the Hindsight sidecar while using replace-style idempotent upserts",
-        "Re-running backfill resumes safely and does not create duplicate authoritative mappings",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": "Added `packages/opencode/src/memory/hindsight/backfill.ts` as the resumable local-memory backfill runner that imports authoritative memories in stable batches through `retainBatch`, persists cursor or counts and failure samples in `hindsight.json`, and resumes idempotently by falling back to sequential `mem:` retains when batch import is unavailable."
-    },
-    {
-      "id": "US-016",
-      "title": "Auto-start and resume backfill on enable",
-      "description": "As a user, I want backfill to begin automatically when Hindsight is enabled so that the companion becomes useful without extra manual setup.",
-      "acceptanceCriteria": [
-        "Enabling Hindsight starts backfill automatically unless a config escape hatch disables auto-start for testing or recovery",
-        "Interrupted backfill resumes from saved sidecar state instead of starting over blindly",
-        "Disabling Hindsight after backfill does not break local memory reads or prompt injection",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 16,
-      "passes": true,
-      "notes": "Added startup-triggered backfill boot through `InstanceBootstrap()` and `MemoryHindsightBackfill.boot()`, with a `memory.hindsight.auto_start` escape hatch, per-worktree in-flight gating, resume-from-cursor coverage, and regression coverage proving disabled Hindsight still leaves local reads and prompt injection intact after backfill state exists."
-    },
-    {
-      "id": "US-017",
-      "title": "Add observability and degraded-mode behavior",
-      "description": "As a developer, I want structured logs and safe degraded behavior so that rollout issues are visible without breaking sessions.",
-      "acceptanceCriteria": [
-        "Add structured logs for service startup, health, retain, recall query, extractor assist, stale drops, fallback, and backfill progress",
-        "Mark Hindsight degraded after startup failure and keep local memory create, update, and injection flows running",
-        "Include durations, counts, and fallback reasons without logging more content than current memory logs allow",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 17,
-      "passes": true,
-      "notes": "Added structured Hindsight observability across service startup or health, client fallback, retain, recall query, extract assist, and backfill progress with explicit duration or fallback or reason fields, while preserving degraded-mode local-memory fallback and adding focused log assertions for the new behavior."
-    },
-    {
-      "id": "US-018",
-      "title": "Add a read-only Hindsight inspect command",
-      "description": "As a maintainer, I want a minimal status command so that I can inspect Hindsight service health and backfill state during rollout.",
-      "acceptanceCriteria": [
-        "Add a minimal internal read-only command or entrypoint that reports service health, bank identity, scope, and backfill state",
-        "The inspect command does not mutate Hindsight data or local memory state",
-        "Output is sufficient to diagnose whether enablement, service startup, and backfill are healthy",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 18,
-      "passes": true,
-      "notes": "Added a read-only `debug hindsight` inspect command plus `loadHindsightInspect()` so maintainers can report config, bank identity, service health, and backfill sidecar state without mutating Hindsight data or creating `hindsight.json` during inspection."
-    },
-    {
-      "id": "US-019",
-      "title": "Add mapping and recall regression coverage",
-      "description": "As a maintainer, I want targeted regression coverage for config, mapping, and recall resolution so that future changes do not silently break recall behavior.",
-      "acceptanceCriteria": [
-        "Add unit coverage for config parsing, bank id generation, document id generation, metadata normalization, and resolve rules",
-        "Add regression coverage for recall fallback, stale-hit dropping, and score or rank propagation into `memory-recall`",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 19,
-      "passes": true,
-      "notes": "Added targeted regression coverage for explicit Hindsight config parsing, stable bank-id generation, metadata-normalized resolve rules, direct vs indirect hit resolution, and engine-level recall fallback so future changes cannot silently break ranked-authority selection."
-    },
-    {
-      "id": "US-020",
-      "title": "Add extract and backfill regression coverage",
-      "description": "As a maintainer, I want targeted regression coverage for extract integration and backfill recovery so that future changes do not silently break the companion flow.",
-      "acceptanceCriteria": [
-        "Add regression coverage for Hindsight-aware extraction, context budget enforcement, and authoritative memory write behavior",
-        "Add regression coverage for backfill resume, idempotent rerun, and degraded behavior when the embedded service is unavailable",
-        "Keep any real embedded-daemon smoke path opt-in for CI or local verification instead of making it a hard default test requirement",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 20,
-      "passes": true,
-      "notes": "Added extractor regression coverage proving the Hindsight-aware path can update one authoritative memory in place, merge tags and citations, and keep bounded context trimming, plus backfill regression coverage for degraded `service_unavailable` fallback state and an opt-in `OPENCODE_HINDSIGHT_SMOKE=1` embedded-daemon smoke path."
+      "passes": false,
+      "notes": ""
     }
   ]
 }

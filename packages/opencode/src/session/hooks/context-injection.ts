@@ -4,6 +4,7 @@ import { HookChain } from "./index"
 import { Instance } from "../../project/instance"
 import { InstructionPrompt } from "../instruction"
 import { Token } from "@/util/token"
+import { ConfigPaths } from "@/config/paths"
 
 export namespace ContextInjectionHooks {
   const log = Log.create({ service: "hooks.context-injection" })
@@ -39,7 +40,10 @@ export namespace ContextInjectionHooks {
 
   async function findAgentsMd(): Promise<Array<{ path: string; content: string }>> {
     const dir = Instance.directory
-    const candidates = [path.join(dir, "AGENTS.md"), path.join(dir, ".opencode", "AGENTS.md")]
+    const candidates = [
+      path.join(dir, "AGENTS.md"),
+      ...ConfigPaths.directoriesIn(dir, true).map((item) => path.join(item, "AGENTS.md")),
+    ]
     const result: Array<{ path: string; content: string }> = []
 
     for (const candidate of candidates) {
@@ -133,7 +137,10 @@ export namespace ContextInjectionHooks {
 
   async function findRuleFiles(): Promise<Array<{ path: string; content: string }>> {
     const dir = Instance.directory
-    const rulesDirs = [path.join(dir, ".opencode", "rules"), path.join(dir, ".claude", "rules")]
+    const rulesDirs = [
+      ...ConfigPaths.directoriesIn(dir, true).map((item) => path.join(item, "rules")),
+      path.join(dir, ".claude", "rules"),
+    ]
 
     const results: Array<{ path: string; content: string }> = []
 

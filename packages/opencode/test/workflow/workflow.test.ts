@@ -62,8 +62,8 @@ describe("workflow", () => {
         if (text?.type !== "text") throw new Error("expected text output")
         expect(text.text).toContain("Workflow init complete")
 
-        expect(await Bun.file(path.join(tmp.path, ".opencode", "workflows.d.ts")).exists()).toBe(true)
-        expect(await Bun.file(path.join(tmp.path, ".opencode", "workflows", "example.ts")).exists()).toBe(true)
+        expect(await Bun.file(path.join(tmp.path, ".lark-opencode", "workflows.d.ts")).exists()).toBe(true)
+        expect(await Bun.file(path.join(tmp.path, ".lark-opencode", "workflows", "example.ts")).exists()).toBe(true)
         expect(await Bun.file(path.join(tmp.path, "docs", "workflow-authoring.md")).exists()).toBe(true)
 
         const pkg = JSON.parse(await Bun.file(path.join(tmp.path, "package.json")).text()) as {
@@ -132,6 +132,50 @@ describe("workflow", () => {
         expect(text?.type).toBe("text")
         if (text?.type !== "text") throw new Error("expected text output")
         expect(text.text).toBe("hello world")
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+
+  test("prefers .lark-opencode/workflows over .opencode/workflows", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+      init: async (dir) => {
+        await Filesystem.write(
+          path.join(dir, ".opencode", "workflows", "hello.ts"),
+          ["export default opencode.workflow({", '  run() { return { output: "legacy" } },', "})"].join("\n"),
+        )
+        await Filesystem.write(
+          path.join(dir, ".lark-opencode", "workflows", "hello.ts"),
+          ["export default opencode.workflow({", '  run() { return { output: "fork" } },', "})"].join("\n"),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await SessionPrompt.command({
+          sessionID: session.id,
+          command: "workflow",
+          arguments: "hello",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+
+        const text = msg.parts.findLast((part) => part.type === "text")
+        expect(text?.type).toBe("text")
+        if (text?.type !== "text") throw new Error("expected text output")
+        expect(text.text).toBe("fork")
 
         await Session.remove(session.id)
       },

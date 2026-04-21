@@ -67,12 +67,12 @@ export async function generateBuiltins(projectRoot: string): Promise<string> {
 
   // --- Writable: opencode internal directories ---
   // Config/skill directories that opencode needs read-write access to:
-  // project-level: .opencode/, .claude/, .agents/
-  // global home: ~/.opencode/, ~/.claude/, ~/.agents/
+  // project-level: .lark-opencode/, .opencode/, .claude/, .agents/
+  // global home: ~/.lark-opencode/, ~/.opencode/, ~/.claude/, ~/.agents/
   // XDG dirs: data, config, state, cache (DB, auth, plans, logs, etc.)
   lines.push(";; --- opencode internal directories (rw) ---")
   const home = Global.Path.home
-  for (const dir of [".opencode", ".claude", ".agents"]) {
+  for (const dir of [".lark-opencode", ".opencode", ".claude", ".agents"]) {
     lines.push(`(allow file-write* ${subpath(await realpath(path.join(resolvedRoot, dir)))})`)
     const global = path.join(home, dir)
     if (global !== path.join(resolvedRoot, dir)) {

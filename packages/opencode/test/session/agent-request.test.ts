@@ -13,7 +13,7 @@
  *
  * Auth resolution order:
  *   1. ANTHROPIC_API_KEY env var (standard)
- *   2. OAuth access token from ~/.local/share/opencode/auth.json
+ *   2. OAuth access token from ~/.local/share/lark-opencode/auth.json
  *
  * Uses claude-haiku-4-5 (cheapest) with minimal prompts to keep cost low.
  */
@@ -73,7 +73,7 @@ type AuthEntry =
 
 /** Read stored auth entry from auth.json */
 async function readAuth(): Promise<AuthEntry | undefined> {
-  for (const dir of [Global.Path.data, path.join(process.env.HOME ?? "", ".local/share/opencode")]) {
+  for (const dir of [Global.Path.data, path.join(process.env.HOME ?? "", ".local/share/lark-opencode")]) {
     const file = path.join(dir, "auth.json")
     const data = await Filesystem.readJson<Record<string, any>>(file).catch(() => null)
     if (data?.[PROVIDER]) return data[PROVIDER] as AuthEntry

@@ -6,6 +6,7 @@ import { Bus } from "@/bus"
 import { Instance } from "../project/instance"
 import { Lock } from "../util/lock"
 import { Log } from "../util/log"
+import { ConfigPaths } from "@/config/paths"
 
 export namespace PersistentTask {
   const log = Log.create({ service: "persistent-task" })
@@ -37,22 +38,13 @@ export namespace PersistentTask {
   export type Info = z.infer<typeof Info>
 
   export const Event = {
-    Created: BusEvent.define(
-      "persistent-task.created",
-      z.object({ task: Info }),
-    ),
-    Updated: BusEvent.define(
-      "persistent-task.updated",
-      z.object({ task: Info }),
-    ),
-    Deleted: BusEvent.define(
-      "persistent-task.deleted",
-      z.object({ id: z.string() }),
-    ),
+    Created: BusEvent.define("persistent-task.created", z.object({ task: Info })),
+    Updated: BusEvent.define("persistent-task.updated", z.object({ task: Info })),
+    Deleted: BusEvent.define("persistent-task.deleted", z.object({ id: z.string() })),
   }
 
   function tasksDir(): string {
-    return path.join(Instance.directory, ".opencode", "tasks")
+    return path.join(ConfigPaths.resolveDirectory(Instance.directory), "tasks")
   }
 
   function taskPath(id: string): string {
@@ -146,7 +138,9 @@ export namespace PersistentTask {
 
   export async function update(
     id: string,
-    changes: Partial<Pick<Info, "subject" | "description" | "status" | "blockedBy" | "blocks" | "owner" | "metadata" | "activeForm">>,
+    changes: Partial<
+      Pick<Info, "subject" | "description" | "status" | "blockedBy" | "blocks" | "owner" | "metadata" | "activeForm">
+    >,
   ): Promise<Info> {
     const filePath = taskPath(id)
     using _ = await Lock.write(lockKey(id))

@@ -14,6 +14,7 @@ import { Skill } from "../skill"
 import { Glob } from "../util/glob"
 import { Log } from "../util/log"
 import { Filesystem } from "../util/filesystem"
+import { ConfigPaths } from "../config/paths"
 import {
   Args as PublicArgs,
   File as PublicFile,
@@ -106,9 +107,9 @@ const docs = [
   "",
   "## What it adds",
   "",
-  "- `.opencode/workflows.d.ts` for local workflow typing",
+  "- `.lark-opencode/workflows.d.ts` for local workflow typing",
   "- `docs/workflow-authoring.md` with the local authoring guide",
-  "- `.opencode/workflows/example.ts` as a minimal starting point",
+  "- `.lark-opencode/workflows/example.ts` as a minimal starting point",
   `- \`${api}\` in \`package.json\``,
   "",
   "## Minimal workflow",
@@ -151,7 +152,7 @@ const docs = [
   "## Next steps",
   "",
   "1. Run your package manager install command so the new dependency is available.",
-  "2. Edit `.opencode/workflows/example.ts` or add more workflows under `.opencode/workflows/`.",
+  "2. Edit `.lark-opencode/workflows/example.ts` or add more workflows under `.lark-opencode/workflows/`.",
   "3. Run `/workflow example hello` to verify the setup.",
   "",
 ].join("\n")
@@ -209,7 +210,14 @@ export namespace Workflow {
 
     for (const item of files) {
       const file =
-        rel(item, ["/.opencode/workflow/", "/.opencode/workflows/", "/workflow/", "/workflows/"]) ?? path.basename(item)
+        rel(item, [
+          "/.lark-opencode/workflow/",
+          "/.lark-opencode/workflows/",
+          "/.opencode/workflow/",
+          "/.opencode/workflows/",
+          "/workflow/",
+          "/workflows/",
+        ]) ?? path.basename(item)
       const name = trim(file)
       const mod = await import(pathToFileURL(item).href).catch((cause: unknown) => {
         const error = cause instanceof Error ? cause.message : String(cause)
@@ -332,10 +340,11 @@ async function scaffold() {
   const made: string[] = []
   const kept: string[] = []
   const deps = await pkg()
+  const dir = ConfigPaths.resolveDirectory(Instance.worktree)
   const files = [
-    [".opencode/workflows.d.ts", decl],
+    [path.relative(Instance.worktree, path.join(dir, "workflows.d.ts")), decl],
     ["docs/workflow-authoring.md", docs],
-    [".opencode/workflows/example.ts", example],
+    [path.relative(Instance.worktree, path.join(dir, "workflows", "example.ts")), example],
   ] as const
 
   for (const [file, body] of files) {
@@ -352,7 +361,7 @@ async function scaffold() {
     "",
     "Next:",
     "1. Run your package manager install command.",
-    "2. Edit `.opencode/workflows/example.ts`.",
+    `2. Edit \`${path.relative(Instance.worktree, path.join(dir, "workflows", "example.ts"))}\`.`,
     "3. Run `/workflow example hello`.",
   ]
     .filter(Boolean)
@@ -550,7 +559,7 @@ function help(): WorkflowResultShape {
   return {
     title: "Workflow help",
     output:
-      "Run `/workflow <name> [args]` to execute a local workflow from `.opencode/workflows/*.ts`. Use the file path without the extension as the workflow name.",
+      "Run `/workflow <name> [args]` to execute a local workflow from `.lark-opencode/workflows/*.ts` or `.opencode/workflows/*.ts`. Use the file path without the extension as the workflow name.",
   }
 }
 
@@ -582,7 +591,7 @@ async function execute(
       output:
         names.length > 0
           ? `Workflow \`${input.name}\` was not found. Available workflows: ${names.join(", ")}`
-          : `Workflow \`${input.name}\` was not found. Create one in .opencode/workflows/<name>.ts.`,
+          : `Workflow \`${input.name}\` was not found. Create one in .lark-opencode/workflows/<name>.ts or .opencode/workflows/<name>.ts.`,
     }
   }
   const next = context({

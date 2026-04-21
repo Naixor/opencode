@@ -15,6 +15,7 @@ import { Global } from "../../global"
 import { modify, applyEdits } from "jsonc-parser"
 import { Filesystem } from "../../util/filesystem"
 import { Bus } from "../../bus"
+import { ConfigPaths } from "../../config/paths"
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -391,10 +392,12 @@ async function resolveConfigPath(baseDir: string, global = false) {
 
   if (!global) {
     candidates.push(
-      path.join(baseDir, ".opencode", "lark-opencode.jsonc"),
-      path.join(baseDir, ".opencode", "lark-opencode.json"),
-      path.join(baseDir, ".opencode", "opencode.json"),
-      path.join(baseDir, ".opencode", "opencode.jsonc"),
+      ...ConfigPaths.directoriesIn(baseDir, true).flatMap((dir) => [
+        path.join(dir, "lark-opencode.jsonc"),
+        path.join(dir, "lark-opencode.json"),
+        path.join(dir, "opencode.json"),
+        path.join(dir, "opencode.jsonc"),
+      ]),
     )
   }
 

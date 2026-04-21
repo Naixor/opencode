@@ -1,5 +1,6 @@
 import path from "path"
 import os from "os"
+import { existsSync } from "fs"
 import z from "zod"
 import { type ParseError as JsoncParseError, parse as parseJsonc, printParseErrorCode } from "jsonc-parser"
 import { NamedError } from "@opencode-ai/util/error"
@@ -8,10 +9,29 @@ import { Flag } from "@/flag/flag"
 import { Global } from "@/global"
 
 export namespace ConfigPaths {
+  const DIRS = [".opencode", ".lark-opencode"]
+  const PRIORITY_DIRS = [".lark-opencode", ".opencode"]
+
   // Config file name variants in priority order (low → high).
   // "lark-opencode" variants override "opencode" to avoid sharing
   // the same config between opencode and lark-opencode.
   const NAMES = ["opencode", "lark-opencode"]
+
+  export function isDirectory(dir: string) {
+    return DIRS.some((item) => dir.endsWith(item))
+  }
+
+  export function directoriesIn(base: string, priority = false) {
+    const list = priority ? PRIORITY_DIRS : DIRS
+    return list.map((item) => path.join(base, item))
+  }
+
+  export function resolveDirectory(base: string) {
+    for (const dir of directoriesIn(base, true)) {
+      if (existsSync(dir)) return dir
+    }
+    return path.join(base, ".lark-opencode")
+  }
 
   export async function projectFiles(name: string, directory: string, worktree: string) {
     const names = name === "opencode" ? NAMES : [name]
@@ -33,7 +53,7 @@ export namespace ConfigPaths {
       ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
         ? await Array.fromAsync(
             Filesystem.up({
-              targets: [".opencode"],
+              targets: DIRS,
               start: directory,
               stop: worktree,
             }),
@@ -41,7 +61,7 @@ export namespace ConfigPaths {
         : []),
       ...(await Array.fromAsync(
         Filesystem.up({
-          targets: [".opencode"],
+          targets: DIRS,
           start: Global.Path.home,
           stop: Global.Path.home,
         }),
