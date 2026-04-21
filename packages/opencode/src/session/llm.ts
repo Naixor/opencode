@@ -2,6 +2,7 @@ import { Installation } from "@/installation"
 import { Provider } from "@/provider/provider"
 import { Log } from "@/util/log"
 import {
+  convertToModelMessages,
   streamText,
   generateObject,
   wrapLanguageModel,
@@ -9,6 +10,7 @@ import {
   type StreamTextResult,
   type Tool,
   type ToolSet,
+  type UIMessage,
   tool,
   jsonSchema,
 } from "ai"
@@ -36,6 +38,29 @@ export namespace LLM {
   const log = Log.create({ service: "llm" })
   export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
+  function normalize(input: ModelMessage[] | UIMessage[]): ModelMessage[] {
+    if (input.length === 0) return []
+    const first = input[0] as Record<string, unknown>
+    if (!("parts" in first)) return input as ModelMessage[]
+
+    const tools = Object.fromEntries(
+      input.flatMap((msg) => {
+        const ui = msg as UIMessage
+        if (!ui.parts) return []
+        return ui.parts.flatMap((part) => {
+          if (!part.type.startsWith("tool-")) return []
+          const name = part.type.slice(5)
+          return [[name, { toModelOutput: (output: unknown) => ({ type: "json", value: output as never }) }]]
+        })
+      }),
+    )
+
+    return convertToModelMessages(input as UIMessage[], {
+      // @ts-expect-error convertToModelMessages only uses tools[name]?.toModelOutput here
+      tools,
+    })
+  }
+
   export type StreamInput = {
     user: MessageV2.User
     sessionID: string
@@ -43,7 +68,7 @@ export namespace LLM {
     agent: Agent.Info
     system: string[]
     abort: AbortSignal
-    messages: ModelMessage[]
+    messages: ModelMessage[] | UIMessage[]
     small?: boolean
     tools: Record<string, Tool>
     retries?: number
@@ -53,6 +78,7 @@ export namespace LLM {
   export type StreamOutput = StreamTextResult<ToolSet, unknown>
 
   export async function stream(input: StreamInput) {
+    const messages = normalize(input.messages)
     const l = log
       .clone()
       .tag("providerID", input.model.providerID)
@@ -118,7 +144,7 @@ export namespace LLM {
       injectors: input.agent.pre_llm_injectors,
       model: input.model.id,
       variant: input.user.variant,
-      messages: input.messages,
+      messages,
       providerOptions: options,
       metadata: SessionMetadata.get(input.sessionID),
     }
@@ -189,7 +215,7 @@ export namespace LLM {
       input.model.providerID.toLowerCase().includes("litellm") ||
       input.model.api.id.toLowerCase().includes("litellm")
 
-    if (isLiteLLMProxy && Object.keys(tools).length === 0 && hasToolCalls(input.messages)) {
+    if (isLiteLLMProxy && Object.keys(tools).length === 0 && hasToolCalls(messages)) {
       tools["_noop"] = tool({
         description:
           "Placeholder for LiteLLM/Anthropic proxy compatibility - required when message history contains tool calls but no active tools are needed",
@@ -269,7 +295,7 @@ export namespace LLM {
             content: x,
           }),
         ),
-        ...input.messages,
+        ...messages,
       ],
       model: wrapLanguageModel({
         model: language,
@@ -303,7 +329,7 @@ export namespace LLM {
     model: Provider.Model
     agent: Agent.Info
     system: string[]
-    messages: ModelMessage[]
+    messages: ModelMessage[] | UIMessage[]
     schema: ZodType<T>
   }
 
@@ -313,6 +339,7 @@ export namespace LLM {
    * headers, and plugin hooks — then calls generateObject instead of streamText.
    */
   export async function generate<T>(input: GenerateInput<T>) {
+    const messages = normalize(input.messages)
     const l = log
       .clone()
       .tag("providerID", input.model.providerID)
@@ -355,7 +382,7 @@ export namespace LLM {
       level: input.agent.prompt_level ?? (input.agent.lite ? "lite" : "full"),
       injectors: input.agent.pre_llm_injectors,
       model: input.model.id,
-      messages: input.messages,
+      messages,
       providerOptions: options,
       metadata: SessionMetadata.get(input.sessionID) ?? {},
     }
@@ -391,10 +418,7 @@ export namespace LLM {
       { headers: {} },
     )
 
-    const msgs: ModelMessage[] = [
-      ...system.map((x): ModelMessage => ({ role: "system", content: x })),
-      ...input.messages,
-    ]
+    const msgs: ModelMessage[] = [...system.map((x): ModelMessage => ({ role: "system", content: x })), ...messages]
 
     const po = ProviderTransform.providerOptions(input.model, params.options)
     l.info("generate: before generateObject", {

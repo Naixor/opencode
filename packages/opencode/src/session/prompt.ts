@@ -1992,6 +1992,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
   export async function command(input: CommandInput) {
     log.info("command", input)
+    if (input.command === Command.Default.WORKFLOW) {
+      const { Workflow } = await import("../workflow")
+      return Workflow.run(input)
+    }
     const command = await Command.get(input.command)
     const agentName = command.agent ?? input.agent ?? (await Agent.defaultAgent())
 

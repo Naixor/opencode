@@ -70,6 +70,7 @@ export namespace Command {
     DEBUG: "debug",
     TEST: "test",
     EXPLAIN: "explain",
+    WORKFLOW: "workflow",
     RALPH_LOOP: "ralph-loop",
     ULTRAWORK: "ultrawork",
     MEMORY_REMEMBER: "memory:remember",
@@ -137,6 +138,15 @@ export namespace Command {
           return PROMPT_EXPLAIN
         },
         hints: hints(PROMPT_EXPLAIN),
+      },
+      [Default.WORKFLOW]: {
+        name: Default.WORKFLOW,
+        description: "run a local workflow from .opencode/workflows",
+        source: "command",
+        get template() {
+          return "Run the requested workflow"
+        },
+        hints: ["$ARGUMENTS"],
       },
       [Default.RALPH_LOOP]: {
         name: Default.RALPH_LOOP,
