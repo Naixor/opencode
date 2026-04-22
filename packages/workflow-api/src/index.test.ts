@@ -9,9 +9,13 @@ import {
   WorkflowProgressStatus,
   WorkflowProgressWorkflowTargetId,
   WorkflowProgressTransitionLevel,
+  WorkflowProgressTransitionRecord,
   WorkflowProgressV2,
   WorkflowRoundStatus,
   WorkflowStepKind,
+  WorkflowProgressMachineMetadata,
+  WorkflowProgressParticipantMetadata,
+  WorkflowProgressWorkflowMetadata,
   WorkflowStatus,
   WorkflowStepStatus,
   mergeWorkflowProgress,
@@ -281,6 +285,41 @@ describe("workflow progress schema", () => {
     }
 
     expect(WorkflowProgress.parse(expected)).toEqual(expected)
+  })
+
+  test("exports metadata aliases for external workflow emitters", () => {
+    expect(WorkflowProgressWorkflowMetadata.parse({ status: "running", name: "demo" })).toEqual({
+      status: "running",
+      name: "demo",
+    })
+
+    expect(WorkflowProgressMachineMetadata.parse({ active_step_id: "plan", active_run_id: "run-1" })).toEqual({
+      active_step_id: "plan",
+      active_run_id: "run-1",
+    })
+
+    expect(WorkflowProgressParticipantMetadata.parse({ id: "agent-1", run_id: "run-1" })).toEqual({
+      id: "agent-1",
+      run_id: "run-1",
+    })
+
+    expect(
+      WorkflowProgressTransitionRecord.parse({
+        id: "trans-1",
+        seq: 1,
+        level: "step",
+        target_id: "plan",
+        run_id: "run-1",
+        to_state: "active",
+      }),
+    ).toEqual({
+      id: "trans-1",
+      seq: 1,
+      level: "step",
+      target_id: "plan",
+      run_id: "run-1",
+      to_state: "active",
+    })
   })
 
   test("uses section-specific normalized status enums", () => {
@@ -611,7 +650,7 @@ describe("workflow progress schema", () => {
       machine: {},
       step_definitions: [
         { id: "root", kind: "group", children: ["child", "child", "root"] },
-        { id: "child", kind: "task", parent_id: "other" },
+        { id: "child", kind: "task", parent_id: "missing" },
         { id: "other", kind: "group" },
       ],
       step_runs: [],
@@ -647,7 +686,7 @@ describe("workflow progress schema", () => {
     expect(out.error.issues.some((item) => item.path.join(".") === "step_definitions.0.children.0")).toBe(false)
     expect(out.error.issues.some((item) => item.path.join(".") === "step_definitions.0.children.1")).toBe(true)
     expect(out.error.issues.some((item) => item.path.join(".") === "step_definitions.0.children.2")).toBe(true)
-    expect(out.error.issues.some((item) => item.path.join(".") === "step_definitions.1.parent_id")).toBe(true)
+    expect(out.error.issues.some((item) => item.path.join(".") === "step_definitions.1.parent_id")).toBe(false)
   })
 
   test("accepts transition source references when they resolve", () => {

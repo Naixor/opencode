@@ -27,6 +27,16 @@
   - Restricting phase-1 enums like Hindsight `mode` and `workspace_scope` at schema time gives immediate parse failures and keeps rollout guards centralized.
 ---
 
+## 2026-04-22 23:25:38 CST - US-001
+- Locked the shared `workflow-progress.v2` contract in `packages/workflow-api/src/index.ts` by exporting external metadata aliases for workflow, machine, participant, and transition records while clarifying the v1 migration contract and v2 deterministic reducer expectations.
+- Added schema regression coverage in `packages/workflow-api/src/index.test.ts` for the exported aliases and aligned invalid-tree assertions with the current parent-chain validation behavior; verified branch-step prompt wording in `packages/opencode/test/workflow/implement.test.ts` for the workflow branch creation fix.
+- Files changed: `packages/workflow-api/src/index.ts`, `packages/workflow-api/src/index.test.ts`, `packages/opencode/test/workflow/implement.test.ts`, `.opencode/workflows/implement.ts`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Re-export schema aliases from `packages/workflow-api/src/index.ts` when external workflow emitters need stable contract entry points without coupling to internal schema names.
+  - `WorkflowProgressV2` tree validation currently allows parent links to non-parent siblings as long as the parent chain resolves and remains acyclic, so tests should target missing or cyclic parents when asserting invalid ancestry.
+  - Branch-selection workflow prompts should describe branch creation relative to the currently checked out branch instead of a fixed base branch so workflow runs stay safe on feature branches.
+---
+
 ## 2026-04-15 10:32:00 CST - US-004
 - Added `packages/opencode/src/memory/hindsight/bank.ts` and `packages/opencode/src/memory/hindsight/mapper.ts` for deterministic worktree hashing, `opencode:${worktreeHash}` bank ids, stable `mem:`, `sess:`, and `obs:` document ids, normalized memory metadata, and stable tag generation.
 - Exported the new helpers from `packages/opencode/src/memory/index.ts` and added targeted mapping coverage in `packages/opencode/test/memory/hindsight-mapper.test.ts` for reversible id parsing, metadata fallback, and cross-worktree or indirect-hit rejection.

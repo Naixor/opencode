@@ -306,6 +306,14 @@ export const WorkflowProgressTransition = z.discriminatedUnion("level", [
   WorkflowProgressStepTransition,
 ])
 
+export const WorkflowProgressWorkflowMetadata = WorkflowProgressWorkflow
+
+export const WorkflowProgressMachineMetadata = WorkflowProgressMachine
+
+export const WorkflowProgressParticipantMetadata = WorkflowProgressParticipant
+
+export const WorkflowProgressTransitionRecord = WorkflowProgressTransition
+
 function issue(ctx: z.RefinementCtx, path: Array<string | number>, message: string) {
   ctx.addIssue({
     code: z.ZodIssueCode.custom,
@@ -316,12 +324,10 @@ function issue(ctx: z.RefinementCtx, path: Array<string | number>, message: stri
 
 /**
  * Required: `version`, `workflow`
- * Required: `machine`, `step_definitions`, `step_runs`, `transitions`, `participants`
  * Optional: `phase`, `round`, `steps`, `agents`
- * Fallback: missing or structurally empty state-machine sections degrade to the
- * same workflow-only view as partial metadata; unsupported keys are ignored;
- * unsupported schema versions are ignored at the metadata boundary; consumers
- * should not branch on workflow name to render this payload.
+ * Fallback: this remains the migration compatibility shape. Consumers should
+ * preserve workflow-level status plus any simple phase, round, step, and agent
+ * metadata when state-machine sections are unavailable.
  */
 export const WorkflowProgressV1 = z.object({
   version: z.literal(WorkflowProgressV1VersionValue),
@@ -374,6 +380,14 @@ const WorkflowProgressV2Shape = z.object({
   participants: z.array(WorkflowProgressParticipant),
 })
 
+/**
+ * Required: `version`, `workflow`, `machine`, `step_definitions`, `step_runs`,
+ * `transitions`, `participants`
+ * Optional: `phase`, `round`, `steps`, `agents`
+ * Fallback: external emitters may omit the optional projection helpers, but the
+ * state-machine sections stay deterministic so reducers can sort by `seq` and
+ * break ties with stable record ids.
+ */
 export const WorkflowProgressV2 = WorkflowProgressV2Shape.superRefine((input, ctx) => {
   const defs = new Set<string>()
   const graph = new Map<string, z.infer<typeof WorkflowProgressStepDefinition>>()
@@ -592,8 +606,11 @@ export type WorkflowProgressPhase = z.infer<typeof WorkflowProgressPhase>
 export type WorkflowProgressRound = z.infer<typeof WorkflowProgressRound>
 export type WorkflowProgressStep = z.infer<typeof WorkflowProgressStep>
 export type WorkflowProgressAgent = z.infer<typeof WorkflowProgressAgent>
+export type WorkflowProgressWorkflowMetadata = z.infer<typeof WorkflowProgressWorkflowMetadata>
 export type WorkflowProgressParticipant = z.infer<typeof WorkflowProgressParticipant>
+export type WorkflowProgressParticipantMetadata = z.infer<typeof WorkflowProgressParticipantMetadata>
 export type WorkflowProgressMachine = z.infer<typeof WorkflowProgressMachine>
+export type WorkflowProgressMachineMetadata = z.infer<typeof WorkflowProgressMachineMetadata>
 export type WorkflowProgressStepDefinition = z.infer<typeof WorkflowProgressStepDefinition>
 export type WorkflowProgressRunRound = z.infer<typeof WorkflowProgressRunRound>
 export type WorkflowProgressRunRetry = z.infer<typeof WorkflowProgressRunRetry>
@@ -602,6 +619,7 @@ export type WorkflowProgressStepRun = z.infer<typeof WorkflowProgressStepRun>
 export type WorkflowProgressTransitionLevel = z.infer<typeof WorkflowProgressTransitionLevel>
 export type WorkflowProgressTransitionSource = z.infer<typeof WorkflowProgressTransitionSource>
 export type WorkflowProgressTransition = z.infer<typeof WorkflowProgressTransition>
+export type WorkflowProgressTransitionRecord = z.infer<typeof WorkflowProgressTransitionRecord>
 export type WorkflowProgressV1 = z.infer<typeof WorkflowProgressV1>
 export type WorkflowProgressV2 = z.infer<typeof WorkflowProgressV2>
 export type WorkflowProgress = z.infer<typeof WorkflowProgress>
