@@ -18,13 +18,23 @@ import { ConfigPaths } from "../config/paths"
 import {
   Args as PublicArgs,
   File as PublicFile,
+  parseWorkflowProgress,
+  mergeWorkflowProgress,
   Result as PublicResult,
+  WorkflowProgressKey,
+  WorkflowProgressV1VersionValue,
+  WorkflowProgressV2VersionValue,
+  WorkflowStatusUpdate as WorkflowStatusUpdateSchema,
   define,
+  normalizeWorkflowMetadata,
+  validateWorkflowMetadata,
   type Args as WorkflowArgs,
   type Context as WorkflowContext,
   type Definition as WorkflowDefinition,
   type File as WorkflowFile,
+  type WorkflowProgress,
   type Result as WorkflowResultShape,
+  type WorkflowStatusUpdate,
   type TaskInput,
   type TaskResult,
   type WorkflowInput,
@@ -41,7 +51,9 @@ export type {
   TaskInput,
   TaskResult,
   WorkflowInput,
+  WorkflowProgress,
   WorkflowResult,
+  WorkflowStatusUpdate,
 } from "@lark-opencode/workflow-api"
 
 const log = Log.create({ service: "workflow" })
@@ -66,6 +78,14 @@ const ResultSchema = z.object({
   output: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 })
+
+const StatusSchema = z
+  .object({
+    title: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    progress: z.unknown().optional(),
+  })
+  .strict()
 
 type RuntimeContext<Input = WorkflowArgs> = WorkflowContext<Input> & {
   workflow_stack(): string[]
@@ -144,7 +164,7 @@ const docs = [
   "",
   "Inside `run(ctx, input)`, these helpers are available:",
   "",
-  "- `ctx.status({ title?, metadata? })` for progress updates",
+  "- `ctx.status({ title?, metadata?, progress? })` for progress updates",
   "- `ctx.ask({ questions })` for explicit user choices",
   "- `ctx.task({ ... })` for focused subagent work",
   "- `ctx.workflow({ ... })` for nested workflow reuse",
@@ -157,7 +177,7 @@ const docs = [
   "",
 ].join("\n")
 const decl = [
-  `import { Args, File, define, result, type TaskInput, type WorkflowContext, type WorkflowDefinition } from \"${api}\"`,
+  `import { Args, File, WorkflowProgressKey, define, result, type TaskInput, type WorkflowContext, type WorkflowDefinition, type WorkflowProgress, type WorkflowStatusUpdate } from \"${api}\"`,
   "",
   "declare global {",
   "  const Bun: {",
@@ -176,8 +196,8 @@ const decl = [
   "  }",
   "}",
   "",
-  "export { Args, File, define, result }",
-  "export type { TaskInput, WorkflowContext, WorkflowDefinition }",
+  "export { Args, File, WorkflowProgressKey, define, result }",
+  "export type { TaskInput, WorkflowContext, WorkflowDefinition, WorkflowProgress, WorkflowStatusUpdate }",
   "",
 ].join("\n")
 const example = [
@@ -305,7 +325,7 @@ export namespace Workflow {
       userID: run.user.info.id,
       model: run.user.info.model,
       stack: [],
-      update: async (val: { title?: string; metadata?: Record<string, unknown> }) => {
+      update: async (val: WorkflowStatusUpdate) => {
         if (run.part.state.status !== "running") return
         run.part = (await Session.updatePart({
           ...run.part,
@@ -313,7 +333,7 @@ export namespace Workflow {
             status: "running",
             input: run.part.state.input,
             title: val.title,
-            metadata: val.metadata,
+            metadata: mergemeta(run.part.state.metadata, statusmeta(val)),
             time: run.part.state.time,
           },
         })) as MessageV2.ToolPart
@@ -482,7 +502,9 @@ async function finish(
   res: WorkflowResultShape,
 ) {
   const end = Date.now()
-  const fail = res.metadata?.error
+  const raw = run.part.state.status === "running" ? mergemeta(run.part.state.metadata, res.metadata) : res.metadata
+  const fail = raw && "error" in raw ? raw.error : undefined
+  const meta = finalmeta(run.part, raw, fail ? "error" : "completed", new Date(end).toISOString())
   const start = run.part.state.status === "running" ? run.part.state.time.start : Date.now()
   run.part = (await Session.updatePart({
     ...run.part,
@@ -491,7 +513,7 @@ async function finish(
           status: "error",
           input: run.part.state.input,
           error: String(fail),
-          metadata: res.metadata,
+          metadata: meta,
           time: {
             start,
             end,
@@ -501,7 +523,7 @@ async function finish(
           status: "completed",
           input: run.part.state.input,
           title: res.title ?? run.part.tool,
-          metadata: res.metadata ?? {},
+          metadata: meta ?? {},
           output: res.output ?? "",
           time: {
             start,
@@ -608,7 +630,11 @@ async function execute(
   })
   const val = wf.input ? await wf.input.parseAsync(input) : ArgsSchema.parse(input)
   const out = await wf.run(next, val)
-  return typeof out === "string" ? { output: out } : ResultSchema.parse(out)
+  const res = typeof out === "string" ? { output: out } : ResultSchema.parse(out)
+  return {
+    ...res,
+    metadata: workflowmeta(res.metadata),
+  }
 }
 
 function context(input: {
@@ -621,7 +647,7 @@ function context(input: {
   assistantID: string
   model: { providerID: string; modelID: string }
   stack: string[]
-  update(input: { title?: string; metadata?: Record<string, unknown> }): Promise<void>
+  update(input: WorkflowStatusUpdate): Promise<void>
 }): RuntimeContext {
   const ctx: RuntimeContext = {
     name: input.name,
@@ -633,8 +659,8 @@ function context(input: {
     assistantMessageID: input.assistantID,
     directory: Instance.directory,
     worktree: Instance.worktree,
-    status(val: { title?: string; metadata?: Record<string, unknown> }) {
-      return input.update(val)
+    status(val: WorkflowStatusUpdate) {
+      return input.update(parseStatusUpdate(val))
     },
     write(val: { file: string; content: string }) {
       const file = path.isAbsolute(val.file) ? val.file : path.join(Instance.worktree, val.file)
@@ -741,6 +767,152 @@ async function task(input: TaskInput, parent: { sessionID: string; model: { prov
     session_id: ses.id,
     text: msg.parts.findLast((item: MessageV2.Part) => item.type === "text")?.text ?? "",
   } satisfies TaskResult
+}
+
+function statusmeta(input: WorkflowStatusUpdate) {
+  const meta = workflowmeta(input.metadata)
+  if (!input.progress) return meta
+  return {
+    ...meta,
+    [WorkflowProgressKey]: parseWorkflowProgress(input.progress) ?? input.progress,
+  } satisfies Record<string, unknown>
+}
+
+function parseStatusUpdate(input: WorkflowStatusUpdate) {
+  const out = StatusSchema.parse(input)
+  const version = progressversion(out.progress)
+  const progress = out.progress === undefined ? undefined : (parseWorkflowProgress(out.progress) ?? out.progress)
+  return WorkflowStatusUpdateSchema.parse({
+    ...out,
+    metadata: workflowmeta(out.metadata),
+    ...(out.progress === undefined
+      ? {}
+      : version && version !== WorkflowProgressV1VersionValue && version !== WorkflowProgressV2VersionValue
+        ? { progress: undefined }
+        : { progress }),
+  })
+}
+
+function progressversion(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return
+  const item = input as Record<string, unknown>
+  return typeof item.version === "string" ? item.version : undefined
+}
+
+function workflowmeta(input?: Record<string, unknown>) {
+  if (!input) return input
+  if (!(WorkflowProgressKey in input)) return { ...input }
+  const version = progressversion(input[WorkflowProgressKey])
+  if (version && version !== WorkflowProgressV1VersionValue && version !== WorkflowProgressV2VersionValue) {
+    return normalizeWorkflowMetadata(input)
+  }
+  try {
+    return validateWorkflowMetadata(input)
+  } catch (err) {
+    throw new Error(progresserror(input[WorkflowProgressKey]) ?? (err instanceof Error ? err.message : String(err)))
+  }
+}
+
+function progresserror(input: unknown) {
+  try {
+    validateWorkflowMetadata({ [WorkflowProgressKey]: input })
+    return
+  } catch (err) {
+    if (err instanceof Error && err.message) return err.message
+  }
+}
+
+function mergemeta(...items: Array<Record<string, unknown> | undefined>) {
+  return items.reduce<Record<string, unknown> | undefined>((acc, item) => {
+    if (!item) return acc
+    const next = acc ? { ...acc, ...item } : { ...item }
+    const progress = mergeWorkflowProgress(
+      parseWorkflowProgress(acc?.[WorkflowProgressKey]),
+      parseWorkflowProgress(item[WorkflowProgressKey]),
+    )
+    if (!progress) return next
+    return {
+      ...next,
+      [WorkflowProgressKey]: progress,
+    }
+  }, undefined)
+}
+
+function finalmeta(
+  part: MessageV2.ToolPart,
+  input: Record<string, unknown> | undefined,
+  status: "completed" | "error",
+  time: string,
+) {
+  if (part.tool !== "workflow") return normalizeWorkflowMetadata(input)
+  const version = progressversion(input?.[WorkflowProgressKey])
+  if (version === WorkflowProgressV1VersionValue) {
+    const progress = parseWorkflowProgress(input?.[WorkflowProgressKey])
+    if (!progress || progress.version !== WorkflowProgressV1VersionValue) return input
+    if (progress.workflow.status === "done" || progress.workflow.status === "failed") return input
+    return {
+      ...input,
+      [WorkflowProgressKey]: {
+        ...progress,
+        workflow: {
+          ...progress.workflow,
+          status: status === "error" ? "failed" : "done",
+          ...(time ? { ended_at: time } : {}),
+        },
+      },
+    }
+  }
+  const meta = normalizeWorkflowMetadata(input)
+  const progress = parseWorkflowProgress(meta?.[WorkflowProgressKey])
+  if (!progress || progress.version !== WorkflowProgressV2VersionValue) return meta
+  if (progress.workflow.status === "done" || progress.workflow.status === "failed") return meta
+  const run = progress.machine.active_run_id
+    ? progress.step_runs.find((item) => item.id === progress.machine.active_run_id)
+    : progress.machine.active_step_id
+      ? [...progress.step_runs]
+          .reverse()
+          .find(
+            (item) =>
+              item.step_id === progress.machine.active_step_id &&
+              item.status !== "completed" &&
+              item.status !== "failed",
+          )
+      : undefined
+  const next = mergeWorkflowProgress(progress, {
+    version: WorkflowProgressV2VersionValue,
+    workflow: {
+      status: status === "error" ? "failed" : "done",
+      ...(progress.workflow.name ? { name: progress.workflow.name } : {}),
+      ...(time ? { ended_at: time } : {}),
+    },
+    machine: {
+      ...(progress.machine?.id ? { id: progress.machine.id } : {}),
+      ...(progress.machine?.key ? { key: progress.machine.key } : {}),
+      ...(time ? { updated_at: time } : {}),
+    },
+    step_definitions: progress.step_definitions,
+    step_runs:
+      run && run.status !== "completed" && run.status !== "failed"
+        ? [
+            {
+              ...run,
+              status: status === "error" ? "failed" : "completed",
+              ...(time ? { ended_at: time } : {}),
+            },
+          ]
+        : [],
+    transitions: [],
+    participants: progress.participants,
+  })
+  if (!next) return meta
+  if (next.version === WorkflowProgressV2VersionValue && next.machine) {
+    delete next.machine.active_step_id
+    delete next.machine.active_run_id
+  }
+  return {
+    ...meta,
+    [WorkflowProgressKey]: next,
+  }
 }
 
 async function taskModel(input: TaskInput, agent: Agent.Info, parent: { providerID: string; modelID: string }) {

@@ -40,6 +40,7 @@ test-security-project
 tasks/test-fix-ledger.json
 **/.test-timing.json
 
+.opencode/tasks/
 # Logs
 .claude/logs/
 .opencode/logs/
