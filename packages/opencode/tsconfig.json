@@ -10,7 +10,8 @@
     "customConditions": ["browser"],
     "paths": {
       "@/*": ["./src/*"],
-      "@tui/*": ["./src/cli/cmd/tui/*"]
+      "@tui/*": ["./src/cli/cmd/tui/*"],
+      "@lark-opencode/workflow-api": ["../workflow-api/src/index.ts"]
     }
   }
 }
