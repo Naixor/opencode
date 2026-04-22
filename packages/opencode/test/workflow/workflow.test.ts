@@ -429,7 +429,7 @@ describe("workflow", () => {
         if (tool.state.status !== "completed") throw new Error("expected completed tool state")
         expect(tool.state.metadata.keep).toBe("yes")
         expect(tool.state.metadata.done).toBe(true)
-        expect(tool.state.metadata[WorkflowProgressKey]).toEqual({
+        expect(tool.state.metadata[WorkflowProgressKey]).toMatchObject({
           ...progress,
           workflow: {
             ...progress.workflow,
@@ -548,6 +548,59 @@ describe("workflow", () => {
         if (text?.type !== "text") throw new Error("expected text output")
         expect(text.text).toContain("Workflow failed")
         expect(text.text).toContain("Unknown step run id: run-2")
+
+        await Session.remove(ses.id)
+      },
+    })
+  })
+
+  test("rejects malformed transition-only partial v2 workflow progress in ctx.status", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+      init: async (dir) => {
+        await Filesystem.write(
+          path.join(dir, ".opencode", "workflows", "bad-v2-transition.ts"),
+          [
+            "export default opencode.workflow({",
+            "  async run(ctx) {",
+            "    await ctx.status({",
+            "      progress: {",
+            '        version: "workflow-progress.v2",',
+            '        workflow: { status: "waiting", name: "bad-v2-transition" },',
+            '        transitions: [{ level: "step", target_id: "missing" }],',
+            "      },",
+            "    })",
+            '    return { output: "nope" }',
+            "  },",
+            "})",
+          ].join("\n"),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const ses = await Session.create({})
+        const msg = await SessionPrompt.command({
+          sessionID: ses.id,
+          command: "workflow",
+          arguments: "bad-v2-transition",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+
+        const text = msg.parts.findLast((part) => part.type === "text")
+        expect(text?.type).toBe("text")
+        if (text?.type !== "text") throw new Error("expected text output")
+        expect(text.text).toContain("Workflow failed")
 
         await Session.remove(ses.id)
       },
@@ -781,6 +834,205 @@ describe("workflow", () => {
         if (tool.state.status !== "completed") throw new Error("expected completed tool state")
         expect(tool.state.metadata.keep).toBe(true)
         expect(tool.state.metadata[WorkflowProgressKey]).toBeUndefined()
+
+        await Session.remove(ses.id)
+      },
+    })
+  })
+
+  test("accepts partial v2 progress from ctx.status and result metadata", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+      init: async (dir) => {
+        await Filesystem.write(
+          path.join(dir, ".opencode", "workflows", "partial-v2.ts"),
+          [
+            "export default opencode.workflow({",
+            "  async run(ctx) {",
+            "    await ctx.status({",
+            "      progress: {",
+            '        version: "workflow-progress.v2",',
+            '        workflow: { status: "waiting", name: "partial-v2" },',
+            '        machine: { active_step_id: "step-1" },',
+            '        step_definitions: [{ id: "step-1", label: "Plan" }],',
+            '        step_runs: [{ step_id: "step-1", status: "waiting", summary: "Waiting on review" }],',
+            '        transitions: [{ level: "step", target_id: "step-1", reason: "Awaiting reviewer" }],',
+            "      },",
+            "    })",
+            "    return {",
+            '      output: "ok",',
+            "      metadata: {",
+            "        workflow_progress: {",
+            '          version: "workflow-progress.v2",',
+            '          workflow: { status: "waiting", name: "partial-v2" },',
+            '          machine: { active_step_id: "step-1" },',
+            '          step_definitions: [{ id: "step-1", label: "Plan" }],',
+            '          step_runs: [{ step_id: "step-1", status: "waiting", summary: "Waiting on review" }],',
+            '          transitions: [{ level: "step", target_id: "step-1", reason: "Awaiting reviewer" }],',
+            "        },",
+            "      },",
+            "    }",
+            "  },",
+            "})",
+          ].join("\n"),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const ses = await Session.create({})
+        const msg = await SessionPrompt.command({
+          sessionID: ses.id,
+          command: "workflow",
+          arguments: "partial-v2",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+
+        const text = msg.parts.findLast((part) => part.type === "text")
+        expect(text?.type).toBe("text")
+        if (text?.type !== "text") throw new Error("expected text output")
+        expect(text.text).toBe("ok")
+
+        const all = await Session.messages({ sessionID: ses.id })
+        const out = all.findLast((item) => item.info.role === "assistant")
+        if (!out) throw new Error("expected assistant message")
+        const tool = out.parts.find((part) => part.type === "tool")
+        expect(tool?.type).toBe("tool")
+        if (tool?.type !== "tool") throw new Error("expected tool part")
+        expect(tool.state.status).toBe("completed")
+        if (tool.state.status !== "completed") throw new Error("expected completed tool state")
+        expect(tool.state.metadata[WorkflowProgressKey]).toMatchObject({
+          version: "workflow-progress.v2",
+          workflow: { status: "done", name: "partial-v2" },
+          machine: { updated_at: expect.any(String) },
+          step_definitions: [{ id: "step-1", kind: "task", label: "Plan" }],
+          step_runs: [
+            {
+              id: "run-1",
+              seq: 0,
+              step_id: "step-1",
+              status: "completed",
+              summary: "Waiting on review",
+              ended_at: expect.any(String),
+            },
+          ],
+          transitions: expect.arrayContaining([
+            expect.objectContaining({ level: "step", target_id: "step-1", to_state: "waiting" }),
+            expect.objectContaining({ level: "workflow", target_id: "workflow", to_state: "done" }),
+          ]),
+        })
+
+        await Session.remove(ses.id)
+      },
+    })
+  })
+
+  test("merges consecutive partial v2 ctx.status updates without dropping prior fields", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+      init: async (dir) => {
+        await Filesystem.write(
+          path.join(dir, ".opencode", "workflows", "partial-v2-merge.ts"),
+          [
+            "export default opencode.workflow({",
+            "  async run(ctx) {",
+            "    await ctx.status({",
+            "      progress: {",
+            '        version: "workflow-progress.v2",',
+            '        workflow: { status: "running", name: "partial-v2-merge" },',
+            '        machine: { active_step_id: "step-1" },',
+            '        step_definitions: [{ id: "step-1", label: "Plan" }],',
+            '        step_runs: [{ id: "run-1", step_id: "step-1", status: "active", summary: "First pass" }],',
+            '        transitions: [{ level: "step", target_id: "step-1", run_id: "run-1", reason: "Started" }],',
+            "      },",
+            "    })",
+            "    await ctx.status({",
+            "      progress: {",
+            '        version: "workflow-progress.v2",',
+            '        workflow: { status: "waiting", name: "partial-v2-merge" },',
+            '        machine: { active_run_id: "run-1" },',
+            '        step_definitions: [{ id: "step-1" }],',
+            '        step_runs: [{ id: "run-1", step_id: "step-1", status: "waiting" }],',
+            '        transitions: [{ level: "step", target_id: "step-1", run_id: "run-1", reason: "Awaiting review" }],',
+            '        participants: [{ id: "agent-1", step_id: "step-1", run_id: "run-1" }],',
+            "      },",
+            "    })",
+            '    return { output: "ok" }',
+            "  },",
+            "})",
+          ].join("\n"),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const ses = await Session.create({})
+        const msg = await SessionPrompt.command({
+          sessionID: ses.id,
+          command: "workflow",
+          arguments: "partial-v2-merge",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+
+        const text = msg.parts.findLast((part) => part.type === "text")
+        expect(text?.type).toBe("text")
+        if (text?.type !== "text") throw new Error("expected text output")
+        expect(text.text).toBe("ok")
+
+        const all = await Session.messages({ sessionID: ses.id })
+        const out = all.findLast((item) => item.info.role === "assistant")
+        if (!out) throw new Error("expected assistant message")
+        const tool = out.parts.find((part) => part.type === "tool")
+        expect(tool?.type).toBe("tool")
+        if (tool?.type !== "tool") throw new Error("expected tool part")
+        expect(tool.state.status).toBe("completed")
+        if (tool.state.status !== "completed") throw new Error("expected completed tool state")
+        expect(tool.state.metadata[WorkflowProgressKey]).toMatchObject({
+          version: "workflow-progress.v2",
+          workflow: { status: "done", name: "partial-v2-merge" },
+          machine: { updated_at: expect.any(String) },
+          step_definitions: [{ id: "step-1", kind: "task", label: "Plan" }],
+          step_runs: [
+            {
+              id: "run-1",
+              seq: 0,
+              step_id: "step-1",
+              status: "completed",
+              summary: "First pass",
+              ended_at: expect.any(String),
+            },
+          ],
+          participants: [{ id: "agent-1", name: "agent-1", run_id: "run-1", step_id: "step-1" }],
+          transitions: expect.arrayContaining([
+            expect.objectContaining({ level: "step", target_id: "step-1", run_id: "run-1", reason: "Started" }),
+            expect.objectContaining({ level: "step", target_id: "step-1", run_id: "run-1", to_state: "waiting" }),
+            expect.objectContaining({
+              level: "workflow",
+              target_id: WorkflowProgressWorkflowTargetId,
+              to_state: "done",
+            }),
+          ]),
+        })
 
         await Session.remove(ses.id)
       },

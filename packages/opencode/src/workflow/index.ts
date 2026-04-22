@@ -24,9 +24,9 @@ import {
   WorkflowProgressKey,
   WorkflowProgressV1VersionValue,
   WorkflowProgressV2VersionValue,
-  WorkflowStatusUpdate as WorkflowStatusUpdateSchema,
   define,
   normalizeWorkflowMetadata,
+  normalizeWorkflowProgressInput,
   validateWorkflowMetadata,
   type Args as WorkflowArgs,
   type Context as WorkflowContext,
@@ -35,6 +35,7 @@ import {
   type WorkflowProgress,
   type Result as WorkflowResultShape,
   type WorkflowStatusUpdate,
+  type WorkflowStatusUpdateInput,
   type TaskInput,
   type TaskResult,
   type WorkflowInput,
@@ -53,6 +54,7 @@ export type {
   WorkflowInput,
   WorkflowProgress,
   WorkflowResult,
+  WorkflowStatusUpdateInput,
   WorkflowStatusUpdate,
 } from "@lark-opencode/workflow-api"
 
@@ -177,7 +179,7 @@ const docs = [
   "",
 ].join("\n")
 const decl = [
-  `import { Args, File, WorkflowProgressKey, define, result, type TaskInput, type WorkflowContext, type WorkflowDefinition, type WorkflowProgress, type WorkflowStatusUpdate } from \"${api}\"`,
+  `import { Args, File, WorkflowProgressKey, define, result, type TaskInput, type WorkflowContext, type WorkflowDefinition, type WorkflowProgress, type WorkflowStatusUpdate, type WorkflowStatusUpdateInput } from \"${api}\"`,
   "",
   "declare global {",
   "  const Bun: {",
@@ -197,7 +199,7 @@ const decl = [
   "}",
   "",
   "export { Args, File, WorkflowProgressKey, define, result }",
-  "export type { TaskInput, WorkflowContext, WorkflowDefinition, WorkflowProgress, WorkflowStatusUpdate }",
+  "export type { TaskInput, WorkflowContext, WorkflowDefinition, WorkflowProgress, WorkflowStatusUpdate, WorkflowStatusUpdateInput }",
   "",
 ].join("\n")
 const example = [
@@ -325,7 +327,7 @@ export namespace Workflow {
       userID: run.user.info.id,
       model: run.user.info.model,
       stack: [],
-      update: async (val: WorkflowStatusUpdate) => {
+      update: async (val: WorkflowStatusUpdateInput) => {
         if (run.part.state.status !== "running") return
         run.part = (await Session.updatePart({
           ...run.part,
@@ -659,7 +661,7 @@ function context(input: {
     assistantMessageID: input.assistantID,
     directory: Instance.directory,
     worktree: Instance.worktree,
-    status(val: WorkflowStatusUpdate) {
+    status(val: WorkflowStatusUpdateInput) {
       return input.update(parseStatusUpdate(val))
     },
     write(val: { file: string; content: string }) {
@@ -769,28 +771,41 @@ async function task(input: TaskInput, parent: { sessionID: string; model: { prov
   } satisfies TaskResult
 }
 
-function statusmeta(input: WorkflowStatusUpdate) {
+function statusmeta(input: z.infer<typeof StatusSchema> | WorkflowStatusUpdate) {
   const meta = workflowmeta(input.metadata)
   if (!input.progress) return meta
+  const progress = normalizeWorkflowProgressInput(input.progress)
   return {
     ...meta,
-    [WorkflowProgressKey]: parseWorkflowProgress(input.progress) ?? input.progress,
+    ...(progress ? { [WorkflowProgressKey]: progress } : {}),
   } satisfies Record<string, unknown>
 }
 
-function parseStatusUpdate(input: WorkflowStatusUpdate) {
+function parseStatusUpdate(input: WorkflowStatusUpdateInput): WorkflowStatusUpdate {
   const out = StatusSchema.parse(input)
   const version = progressversion(out.progress)
-  const progress = out.progress === undefined ? undefined : (parseWorkflowProgress(out.progress) ?? out.progress)
-  return WorkflowStatusUpdateSchema.parse({
-    ...out,
-    metadata: workflowmeta(out.metadata),
-    ...(out.progress === undefined
-      ? {}
-      : version && version !== WorkflowProgressV1VersionValue && version !== WorkflowProgressV2VersionValue
-        ? { progress: undefined }
-        : { progress }),
-  })
+  const meta = statusmeta(out)
+  if (out.progress === undefined) {
+    return {
+      ...(out.title ? { title: out.title } : {}),
+      ...(meta ? { metadata: meta } : {}),
+    }
+  }
+  if (version && version !== WorkflowProgressV1VersionValue && version !== WorkflowProgressV2VersionValue) {
+    return {
+      ...(out.title ? { title: out.title } : {}),
+      ...(meta ? { metadata: meta } : {}),
+    }
+  }
+  const progress = normalizeWorkflowProgressInput(out.progress)
+  if (!progress) {
+    throw new Error(progresserror(out.progress) ?? "Invalid workflow progress metadata")
+  }
+  return {
+    ...(out.title ? { title: out.title } : {}),
+    ...(meta ? { metadata: meta } : {}),
+    progress,
+  }
 }
 
 function progressversion(input: unknown) {
@@ -809,6 +824,8 @@ function workflowmeta(input?: Record<string, unknown>) {
   try {
     return validateWorkflowMetadata(input)
   } catch (err) {
+    const meta = normalizeWorkflowMetadata(input)
+    if (meta?.[WorkflowProgressKey] !== undefined) return meta
     throw new Error(progresserror(input[WorkflowProgressKey]) ?? (err instanceof Error ? err.message : String(err)))
   }
 }
@@ -826,10 +843,7 @@ function mergemeta(...items: Array<Record<string, unknown> | undefined>) {
   return items.reduce<Record<string, unknown> | undefined>((acc, item) => {
     if (!item) return acc
     const next = acc ? { ...acc, ...item } : { ...item }
-    const progress = mergeWorkflowProgress(
-      parseWorkflowProgress(acc?.[WorkflowProgressKey]),
-      parseWorkflowProgress(item[WorkflowProgressKey]),
-    )
+    const progress = mergeWorkflowProgress(acc?.[WorkflowProgressKey], item[WorkflowProgressKey])
     if (!progress) return next
     return {
       ...next,

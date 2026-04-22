@@ -13,20 +13,30 @@ import {
   WorkflowProgressV2,
   WorkflowRoundStatus,
   WorkflowStepKind,
+  coerceWorkflowProgress,
   WorkflowProgressMachineMetadata,
   WorkflowProgressParticipantMetadata,
   WorkflowProgressWorkflowMetadata,
+  WorkflowStatusUpdateInput,
   WorkflowStatus,
   WorkflowStepStatus,
   mergeWorkflowProgress,
   normalizeWorkflowMetadata,
+  normalizeWorkflowProgressInput,
   parseWorkflowProgress,
   readWorkflowProgress,
   validateWorkflowMetadata,
   workflowDisplayStatus,
   type WorkflowProgress as WorkflowProgressShape,
 } from "./index"
-import { workflowicon, workflowproject, workflowview, type WorkflowProjection } from "./presentation"
+import {
+  normalizeWorkflowProjectionInput,
+  workflowfallback,
+  workflowicon,
+  workflowproject,
+  workflowview,
+  type WorkflowProjection,
+} from "./presentation"
 
 function sourcekey(input?: {
   type?: string
@@ -856,6 +866,13 @@ describe("workflow progress schema", () => {
       workflow: {
         status: "running",
       },
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      transitions: [],
+      steps: [],
+      agents: [],
+      participants: [],
     })
     expect(readWorkflowProgress(meta)?.workflow.status).toBe("running")
   })
@@ -942,7 +959,7 @@ describe("workflow progress schema", () => {
     })
   })
 
-  test("readWorkflowProgress rejects minimal v2 metadata", () => {
+  test("readWorkflowProgress preserves minimal v2 metadata", () => {
     expect(
       readWorkflowProgress({
         [WorkflowProgressKey]: {
@@ -950,7 +967,17 @@ describe("workflow progress schema", () => {
           workflow: { status: "running", name: "demo" },
         },
       }),
-    ).toBeUndefined()
+    ).toEqual({
+      version: "workflow-progress.v2",
+      workflow: { status: "running", name: "demo" },
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      transitions: [],
+      steps: [],
+      agents: [],
+      participants: [],
+    })
   })
 
   test("merges v2 progress while preserving run history and transition order", () => {
@@ -1567,8 +1594,163 @@ describe("workflow progress schema", () => {
     })
   })
 
-  test("rejects partial v2 payloads that omit producer-owned ids and ordering", () => {
-    const meta = {
+  test("coerces v1, v2, and partial payloads into one reducer input shape", () => {
+    const val = [
+      coerceWorkflowProgress({
+        version: "workflow-progress.v1",
+        workflow: { status: "running", name: "legacy" },
+      }),
+      coerceWorkflowProgress({
+        version: "workflow-progress.v2",
+        workflow: { status: "running", name: "modern" },
+        machine: { active_step_id: "write", active_run_id: "run-1" },
+        step_definitions: [{ id: "write", kind: "task" }],
+        step_runs: [{ id: "run-1", seq: 0, step_id: "write", status: "active" }],
+        transitions: [
+          { id: "trans-1", seq: 0, level: "step", target_id: "write", run_id: "run-1", to_state: "active" },
+        ],
+        participants: [],
+      }),
+      coerceWorkflowProgress({
+        version: "workflow-progress.v2",
+        workflow: { status: "retrying" },
+        machine: { active_step_id: "review" },
+        step_definitions: [
+          { id: "review", kind: "group", children: ["lint", "test"] },
+          { id: "lint", kind: "task", parent_id: "review" },
+          { id: "test", kind: "task", parent_id: "review" },
+        ],
+        step_runs: [
+          { step_id: "review", status: "retrying", retry: { current: 1 } },
+          { step_id: "review", status: "retrying", retry: { current: 2 } },
+          { step_id: "lint", status: "completed", parent_run_id: "run-2" },
+          { step_id: "test", status: "waiting", parent_run_id: "run-2" },
+        ],
+        transitions: [{ level: "step", target_id: "review", run_id: "run-2" }],
+        participants: [{ step_id: "review", run_id: "run-2" }],
+      }),
+    ]
+
+    expect(val.every((item) => item !== undefined)).toBe(true)
+    expect(val.map((item) => item?.version)).toEqual([
+      "workflow-progress.v1",
+      "workflow-progress.v2",
+      "workflow-progress.v2",
+    ])
+    expect(val[0]).toEqual({
+      version: "workflow-progress.v1",
+      workflow: { status: "running", name: "legacy" },
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      transitions: [],
+      steps: [],
+      agents: [],
+      participants: [],
+    })
+    expect(val[1]).toEqual({
+      version: "workflow-progress.v2",
+      workflow: { status: "running", name: "modern" },
+      machine: { active_step_id: "write", active_run_id: "run-1" },
+      step_definitions: [{ id: "write", kind: "task" }],
+      step_runs: [{ id: "run-1", seq: 0, step_id: "write", status: "active" }],
+      transitions: [{ id: "trans-1", seq: 0, level: "step", target_id: "write", run_id: "run-1", to_state: "active" }],
+      steps: [],
+      agents: [],
+      participants: [],
+    })
+    expect(val[2]).toEqual({
+      version: "workflow-progress.v2",
+      workflow: { status: "retrying" },
+      machine: { active_step_id: "review" },
+      step_definitions: [
+        { id: "review", kind: "group", children: ["lint", "test"] },
+        { id: "lint", kind: "task", parent_id: "review" },
+        { id: "test", kind: "task", parent_id: "review" },
+      ],
+      step_runs: [
+        { id: "run-1", seq: 0, step_id: "review", status: "retrying", retry: { current: 1 } },
+        { id: "run-2", seq: 1, step_id: "review", status: "retrying", retry: { current: 2 } },
+        { id: "run-3", seq: 2, step_id: "lint", status: "completed", parent_run_id: "run-2" },
+        { id: "run-4", seq: 3, step_id: "test", status: "waiting", parent_run_id: "run-2" },
+      ],
+      transitions: [
+        {
+          id: "step:review:run-2:0",
+          seq: 0,
+          level: "step",
+          target_id: "review",
+          run_id: "run-2",
+          to_state: "retrying",
+        },
+      ],
+      steps: [],
+      agents: [],
+      participants: [{ id: "participant-1", name: "participant-1", run_id: "run-2", step_id: "review" }],
+    })
+  })
+
+  test("shares fallback tokens across workflow projection regions", () => {
+    const input = {
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting" },
+      machine: { active_step_id: "review" },
+      step_definitions: [
+        { id: "review", kind: "group", children: ["lint", "test"] },
+        { id: "lint", kind: "task", parent_id: "review" },
+        { id: "test", kind: "task", parent_id: "review" },
+      ],
+      step_runs: [
+        { step_id: "review", status: "retrying", retry: { current: 2 } },
+        { step_id: "lint", status: "completed", parent_run_id: "run-1" },
+        { step_id: "test", status: "waiting", parent_run_id: "run-1" },
+      ],
+      transitions: [{ level: "step", target_id: "review", run_id: "run-1" }],
+      participants: [{ step_id: "review", run_id: "run-1" }],
+    }
+
+    const norm = normalizeWorkflowProjectionInput(input)
+    expect(norm).toBeDefined()
+    if (!norm) throw new Error("expected normalized projection input")
+    expect(norm.workflow.title).toBe(workflowfallback.workflow)
+    expect(norm.step_runs[0]?.title).toBe("review")
+    expect(norm.step_runs[0]?.reason_text).toBe(workflowfallback.reason)
+    expect(norm.step_runs[0]?.round_text).toBe(workflowfallback.round)
+    expect(norm.step_runs[0]?.retry_text).toBe("Retry 2")
+    expect(norm.step_runs[0]?.actor_title).toBe("participant-1")
+    expect(norm.participants[0]?.title).toBe("participant-1")
+    expect(norm.transitions[0]).toEqual({
+      id: "step:review:run-1:0",
+      seq: 0,
+      level: "step",
+      target_id: "review",
+      run_id: "run-1",
+      to_state: "waiting",
+      title: "review",
+      timestamp_text: workflowfallback.timestamp,
+      reason_text: workflowfallback.reason,
+      source_text: "participant-1",
+      round_text: workflowfallback.round,
+    })
+
+    const view = workflowproject({ progress: norm })
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.header.title).toBe(workflowfallback.workflow)
+    expect(view.timeline[0]).toMatchObject({ label: "review", reason: workflowfallback.reason, retry: "Retry 2" })
+    expect(view.agents[0]).toMatchObject({ name: "participant-1", status: "retrying" })
+    expect(view.history[0]).toMatchObject({
+      label: "review",
+      timestamp: workflowfallback.timestamp,
+      reason: workflowfallback.reason,
+      source: "participant-1",
+      round: workflowfallback.round,
+    })
+    expect(view.alerts[0]).toMatchObject({ title: workflowfallback.workflow })
+  })
+
+  test("preserves partial v2 payloads through metadata normalization and read paths", () => {
+    const raw = {
       [WorkflowProgressKey]: {
         version: "workflow-progress.v2",
         workflow: { status: "waiting", label: "Implement" },
@@ -1579,9 +1761,318 @@ describe("workflow progress schema", () => {
       },
     }
 
-    expect(parseWorkflowProgress(meta[WorkflowProgressKey])).toBeUndefined()
-    expect(readWorkflowProgress(meta)).toBeUndefined()
-    expect(normalizeWorkflowMetadata(meta)?.[WorkflowProgressKey]).toBeUndefined()
+    const meta = normalizeWorkflowMetadata(raw)
+    expect(parseWorkflowProgress(raw[WorkflowProgressKey])).toBeUndefined()
+    expect(meta?.[WorkflowProgressKey]).toEqual({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting", label: "Implement" },
+      machine: { active_step_id: "write" },
+      step_definitions: [{ id: "write", kind: "task", label: "Write code" }],
+      step_runs: [{ id: "run-1", seq: 0, step_id: "write", status: "waiting" }],
+      transitions: [
+        {
+          id: "step:write::0",
+          seq: 0,
+          level: "step",
+          target_id: "write",
+          to_state: "waiting",
+          reason: "Awaiting input",
+        },
+      ],
+      steps: [],
+      agents: [],
+      participants: [],
+    })
+    expect(readWorkflowProgress(meta)).toEqual({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting", label: "Implement" },
+      machine: { active_step_id: "write" },
+      step_definitions: [{ id: "write", kind: "task", label: "Write code" }],
+      step_runs: [{ id: "run-1", seq: 0, step_id: "write", status: "waiting" }],
+      transitions: [
+        {
+          id: "step:write::0",
+          seq: 0,
+          level: "step",
+          target_id: "write",
+          to_state: "waiting",
+          reason: "Awaiting input",
+        },
+      ],
+      steps: [],
+      agents: [],
+      participants: [],
+    })
+  })
+
+  test("rejects malformed transition-only partial v2 payloads at the shared normalizer boundary", () => {
+    expect(
+      normalizeWorkflowProgressInput({
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", name: "bad-transition" },
+        transitions: [{ level: "step", target_id: "missing" }],
+      }),
+    ).toBeUndefined()
+  })
+
+  test("rejects partial v2 payloads that fail strict transition normalization", () => {
+    expect(
+      normalizeWorkflowProgressInput({
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", name: "bad-order" },
+        step_definitions: [{ id: "write", label: "Write code" }],
+        step_runs: [
+          { id: "run-1", seq: 0, step_id: "write", status: "waiting" },
+          { id: "run-2", seq: 1, step_id: "write", status: "waiting" },
+        ],
+        transitions: [
+          { id: "trans-1", seq: 1, level: "step", target_id: "write", run_id: "run-1", to_state: "waiting" },
+          { id: "trans-1", seq: 1, level: "step", target_id: "write", run_id: "run-2", to_state: "waiting" },
+        ],
+      }),
+    ).toBeUndefined()
+  })
+
+  test("normalizes v1 payloads to the canonical read shape", () => {
+    expect(
+      normalizeWorkflowProgressInput({
+        version: "workflow-progress.v1",
+        workflow: { status: "running", label: "Plan" },
+        round: { status: "active", current: 1 },
+        steps: [{ id: "plan", status: "active", label: "Plan step" }],
+        agents: [{ name: "ralph", status: "running" }],
+      }),
+    ).toEqual({
+      version: "workflow-progress.v1",
+      workflow: { status: "running", label: "Plan" },
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      transitions: [],
+      round: { status: "active", current: 1 },
+      steps: [{ id: "plan", status: "active", label: "Plan step" }],
+      agents: [{ id: "ralph", name: "ralph", status: "running" }],
+      participants: [],
+    })
+  })
+
+  test("preserves helper-only v2 payloads through metadata normalization", () => {
+    const raw = {
+      [WorkflowProgressKey]: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", name: "helper-only" },
+        round: { status: "active", current: 2, max: 4 },
+      },
+    }
+
+    expect(normalizeWorkflowMetadata(raw)?.[WorkflowProgressKey]).toEqual({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting", name: "helper-only" },
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      transitions: [],
+      round: { status: "active", current: 2, max: 4 },
+      steps: [],
+      agents: [],
+      participants: [],
+    })
+    expect(readWorkflowProgress(raw)).toEqual({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting", name: "helper-only" },
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      transitions: [],
+      round: { status: "active", current: 2, max: 4 },
+      steps: [],
+      agents: [],
+      participants: [],
+    })
+    expect(mergeWorkflowProgress(raw[WorkflowProgressKey])).toMatchObject({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting", name: "helper-only" },
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      round: { status: "active", current: 2, max: 4 },
+      participants: [],
+    })
+  })
+
+  test("accepts partial v2 workflow status updates at the shared API boundary", () => {
+    const val = WorkflowStatusUpdateInput.parse({
+      title: "Planning",
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", name: "partial" },
+        machine: { active_step_id: "step-1" },
+        step_definitions: [{ id: "step-1", label: "Plan" }],
+        step_runs: [{ step_id: "step-1", status: "waiting" }],
+        transitions: [{ level: "step", target_id: "step-1", reason: "Awaiting review" }],
+      },
+    })
+
+    expect(val.title).toBe("Planning")
+    expect(val.progress).toMatchObject({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting", name: "partial" },
+      machine: { active_step_id: "step-1" },
+      step_definitions: [{ id: "step-1", label: "Plan" }],
+      step_runs: [{ step_id: "step-1", status: "waiting" }],
+      transitions: [{ level: "step", target_id: "step-1", reason: "Awaiting review" }],
+    })
+  })
+
+  test("merges consecutive partial v2 payloads without dropping prior fields", () => {
+    const val = mergeWorkflowProgress(
+      {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", name: "merge" },
+        machine: { active_step_id: "step-1" },
+        step_definitions: [{ id: "step-1", label: "Plan" }],
+        step_runs: [{ id: "run-1", step_id: "step-1", status: "active", summary: "First pass" }],
+        transitions: [{ level: "step", target_id: "step-1", run_id: "run-1", reason: "Started" }],
+      },
+      {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", name: "merge" },
+        machine: { active_run_id: "run-1" },
+        step_definitions: [{ id: "step-1" }],
+        step_runs: [{ id: "run-1", step_id: "step-1", status: "active" }],
+        transitions: [{ level: "step", target_id: "step-1", run_id: "run-1", reason: "Still going" }],
+        participants: [{ id: "agent-1", step_id: "step-1", run_id: "run-1" }],
+      },
+    )
+
+    expect(val).toBeDefined()
+    expect(val?.version).toBe("workflow-progress.v2")
+    if (!val || val.version !== "workflow-progress.v2") throw new Error("expected merged v2 progress")
+    expect(val.machine).toEqual({ active_step_id: "step-1", active_run_id: "run-1" })
+    expect(val.step_definitions).toEqual([{ id: "step-1", kind: "task", label: "Plan" }])
+    expect(val.step_runs).toEqual([{ id: "run-1", seq: 0, step_id: "step-1", status: "active", summary: "First pass" }])
+    expect(val.participants).toEqual([{ id: "agent-1", name: "agent-1", run_id: "run-1", step_id: "step-1" }])
+    expect(val.transitions).toEqual([
+      {
+        id: "step:step-1:run-1:0",
+        seq: 0,
+        level: "step",
+        target_id: "step-1",
+        run_id: "run-1",
+        to_state: "active",
+        reason: "Started",
+      },
+      {
+        id: "workflow:workflow:::running:::|||||||",
+        seq: 2,
+        level: "workflow",
+        target_id: "workflow",
+        to_state: "running",
+      },
+    ])
+  })
+
+  test("merges delta-only partial v2 refs against prior state", () => {
+    const val = mergeWorkflowProgress(
+      {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", name: "merge-refs" },
+        machine: { active_step_id: "step-1" },
+        step_definitions: [{ id: "step-1", label: "Plan" }],
+        step_runs: [{ id: "run-1", step_id: "step-1", status: "active", summary: "First pass" }],
+        participants: [{ id: "agent-1", step_id: "step-1", run_id: "run-1" }],
+        transitions: [
+          { id: "trans-1", seq: 0, level: "step", target_id: "step-1", run_id: "run-1", to_state: "active" },
+        ],
+      },
+      {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", name: "merge-refs" },
+        machine: { active_run_id: "run-1" },
+        transitions: [
+          {
+            id: "trans-2",
+            seq: 1,
+            level: "step",
+            target_id: "step-1",
+            run_id: "run-1",
+            to_state: "waiting",
+            source: { participant_id: "agent-1", step_id: "step-1", run_id: "run-1" },
+          },
+        ],
+      },
+    )
+
+    expect(val).toBeDefined()
+    expect(val?.version).toBe("workflow-progress.v2")
+    if (!val || val.version !== "workflow-progress.v2") throw new Error("expected merged v2 progress")
+    expect(val.machine).toEqual({ active_step_id: "step-1", active_run_id: "run-1" })
+    expect(val.participants).toEqual([{ id: "agent-1", name: "agent-1", run_id: "run-1", step_id: "step-1" }])
+    expect(val.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "trans-1", run_id: "run-1", target_id: "step-1", to_state: "active" }),
+        expect.objectContaining({
+          id: "trans-2",
+          run_id: "run-1",
+          target_id: "step-1",
+          to_state: "waiting",
+          source: { participant_id: "agent-1", step_id: "step-1", run_id: "run-1" },
+        }),
+      ]),
+    )
+  })
+
+  test("merges empty-array delta partial v2 refs against prior state", () => {
+    const val = mergeWorkflowProgress(
+      {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", name: "merge-empty" },
+        machine: { active_step_id: "step-1" },
+        step_definitions: [{ id: "step-1", label: "Plan" }],
+        step_runs: [{ id: "run-1", step_id: "step-1", status: "active" }],
+        participants: [{ id: "agent-1", step_id: "step-1", run_id: "run-1" }],
+        transitions: [
+          { id: "trans-1", seq: 0, level: "step", target_id: "step-1", run_id: "run-1", to_state: "active" },
+        ],
+      },
+      {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", name: "merge-empty" },
+        machine: { active_run_id: "run-1" },
+        step_definitions: [],
+        step_runs: [],
+        participants: [],
+        transitions: [
+          {
+            id: "trans-2",
+            seq: 1,
+            level: "step",
+            target_id: "step-1",
+            run_id: "run-1",
+            to_state: "waiting",
+            source: { participant_id: "agent-1", step_id: "step-1", run_id: "run-1" },
+          },
+        ],
+      },
+    )
+
+    expect(val).toBeDefined()
+    expect(val?.version).toBe("workflow-progress.v2")
+    if (!val || val.version !== "workflow-progress.v2") throw new Error("expected merged v2 progress")
+    expect(val.machine).toEqual({ active_step_id: "step-1", active_run_id: "run-1" })
+    expect(val.participants).toEqual([{ id: "agent-1", name: "agent-1", run_id: "run-1", step_id: "step-1" }])
+    expect(val.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "trans-1", run_id: "run-1", target_id: "step-1", to_state: "active" }),
+        expect.objectContaining({
+          id: "trans-2",
+          run_id: "run-1",
+          target_id: "step-1",
+          to_state: "waiting",
+          source: { participant_id: "agent-1", step_id: "step-1", run_id: "run-1" },
+        }),
+      ]),
+    )
   })
 
   test("drops malformed v2 payloads with unresolved graph references", () => {
@@ -1635,6 +2126,147 @@ describe("workflow progress schema", () => {
     expect(parseWorkflowProgress(meta[WorkflowProgressKey])).toBeUndefined()
     expect(readWorkflowProgress(meta)).toBeUndefined()
     expect(normalizeWorkflowMetadata(meta)?.[WorkflowProgressKey]).toBeUndefined()
+  })
+
+  test("reuses normalized round titles for workflow history and keeps step summaries in alerts", () => {
+    const norm = normalizeWorkflowProjectionInput({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting" },
+      round: { status: "active", current: 2, max: 5 },
+      machine: { active_step_id: "review" },
+      step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+      step_runs: [{ step_id: "review", status: "waiting", summary: "Waiting on reviewer" }],
+      transitions: [{ level: "workflow", to_state: "waiting" }],
+    })
+
+    expect(norm).toBeDefined()
+    if (!norm) throw new Error("expected normalized projection input")
+
+    const view = workflowproject({ progress: norm })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.header.round).toBe("Round 2/5")
+    expect(view.history[0]).toMatchObject({ level: "workflow", round: "Round 2/5" })
+    expect(view.alerts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ level: "step", summary: "Waiting on reviewer" })]),
+    )
+  })
+
+  test("prefers workflow round text when a run has no round metadata", () => {
+    const norm = normalizeWorkflowProjectionInput({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting" },
+      round: { status: "active", current: 2, max: 5 },
+      machine: { active_step_id: "review", active_run_id: "run-1" },
+      step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+      step_runs: [{ id: "run-1", seq: 0, step_id: "review", status: "waiting" }],
+      transitions: [
+        { id: "trans-1", seq: 0, level: "step", target_id: "review", run_id: "run-1", to_state: "waiting" },
+      ],
+      participants: [],
+    })
+
+    expect(norm).toBeDefined()
+    if (!norm) throw new Error("expected normalized projection input")
+    expect(norm.step_runs[0]?.round_text).toBe(workflowfallback.round)
+    expect(norm.transitions[0]?.round_text).toBe("Round 2/5")
+
+    const view = workflowproject({ progress: norm })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.header.round).toBe("Round 2/5")
+    expect(view.history[0]).toMatchObject({ level: "step", round: "Round 2/5" })
+  })
+
+  test("uses participant id before generic fallback titles", () => {
+    const norm = normalizeWorkflowProjectionInput({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting" },
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      transitions: [],
+      participants: [{ id: "agent-ralph" }],
+    })
+
+    expect(norm).toBeDefined()
+    if (!norm) throw new Error("expected normalized projection input")
+    expect(norm.participants[0]?.title).toBe("agent-ralph")
+  })
+
+  test("uses timestamp fallback when transitions omit event time", () => {
+    const norm = normalizeWorkflowProjectionInput({
+      version: "workflow-progress.v2",
+      workflow: { status: "waiting", started_at: "2026-04-22T10:00:00.000Z" },
+      machine: { updated_at: "2026-04-22T10:00:01.000Z" },
+      step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+      step_runs: [
+        { id: "run-1", seq: 0, step_id: "review", status: "waiting", started_at: "2026-04-22T10:00:02.000Z" },
+      ],
+      transitions: [
+        { id: "trans-1", seq: 0, level: "step", target_id: "review", run_id: "run-1", to_state: "waiting" },
+      ],
+      participants: [],
+    })
+
+    expect(norm).toBeDefined()
+    if (!norm) throw new Error("expected normalized projection input")
+    expect(norm.transitions[0]?.timestamp_text).toBe(workflowfallback.timestamp)
+  })
+
+  test("workflowproject accepts raw v1 payloads", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v1",
+        workflow: { status: "running", label: "Planning" },
+        steps: [{ id: "plan", status: "active", label: "Plan step", reason: "Drafting" }],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.header.title).toBe("Planning")
+    expect(view.timeline[0]).toMatchObject({ label: "Plan step", reason: "Drafting" })
+  })
+
+  test("workflowproject accepts raw partial v2 payloads", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", label: "Implement" },
+        machine: { active_step_id: "write" },
+        step_definitions: [{ id: "write", label: "Write code" }],
+        step_runs: [{ step_id: "write", status: "waiting" }],
+        transitions: [{ level: "step", target_id: "write", reason: "Awaiting input" }],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.header.title).toBe("Implement")
+    expect(view.history[0]).toMatchObject({ label: "Write code", reason: "Awaiting input" })
+  })
+
+  test("workflowview preserves caller-supplied workflow names", () => {
+    const view = workflowview({
+      metadata: {
+        [WorkflowProgressKey]: {
+          version: "workflow-progress.v2",
+          workflow: { status: "waiting" },
+          machine: { active_step_id: "write" },
+          step_definitions: [{ id: "write", label: "Write code" }],
+          step_runs: [{ step_id: "write", status: "waiting" }],
+          transitions: [{ level: "step", target_id: "write", reason: "Awaiting input" }],
+        },
+      },
+      name: "Implement story",
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow view")
+    expect(view.title).toBe("Workflow Implement story")
   })
 
   test("preserves structurally empty v2 state-machine sections", () => {

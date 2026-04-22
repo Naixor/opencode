@@ -314,6 +314,94 @@ export const WorkflowProgressParticipantMetadata = WorkflowProgressParticipant
 
 export const WorkflowProgressTransitionRecord = WorkflowProgressTransition
 
+const WorkflowProgressTransitionSourceInput = z.object({
+  type: z.string().optional(),
+  id: z.string().optional(),
+  label: z.string().optional(),
+  name: z.string().optional(),
+  role: z.string().optional(),
+  participant_id: z.string().optional(),
+  step_id: z.string().optional(),
+  run_id: z.string().optional(),
+})
+
+const WorkflowProgressStepDefinitionInput = z.object({
+  id: z.string().optional(),
+  kind: WorkflowStepKind.optional(),
+  parent_id: z.string().optional(),
+  label: z.string().optional(),
+  summary: z.string().optional(),
+  description: z.string().optional(),
+  children: z.array(z.string()).optional(),
+  next: z.array(z.string()).optional(),
+})
+
+const WorkflowProgressRunRoundInput = z.object({
+  current: z.number().int().nonnegative().optional(),
+  max: z.number().int().positive().optional(),
+  label: z.string().optional(),
+  summary: z.string().optional(),
+})
+
+const WorkflowProgressRunRetryInput = z.object({
+  current: z.number().int().nonnegative().optional(),
+  max: z.number().int().positive().optional(),
+  label: z.string().optional(),
+  summary: z.string().optional(),
+})
+
+const WorkflowProgressRunActorInput = z.object({
+  id: z.string().optional(),
+  label: z.string().optional(),
+  name: z.string().optional(),
+  role: z.string().optional(),
+  status: WorkflowAgentStatus.optional(),
+  summary: z.string().optional(),
+  updated_at: z.string().optional(),
+})
+
+const WorkflowProgressStepRunInput = z.object({
+  id: z.string().optional(),
+  seq: z.number().int().nonnegative().optional(),
+  step_id: z.string().optional(),
+  status: WorkflowStepStatus.optional(),
+  label: z.string().optional(),
+  summary: z.string().optional(),
+  reason: z.string().optional(),
+  started_at: z.string().optional(),
+  ended_at: z.string().optional(),
+  parent_run_id: z.string().optional(),
+  round: WorkflowProgressRunRoundInput.optional(),
+  retry: WorkflowProgressRunRetryInput.optional(),
+  actor: WorkflowProgressRunActorInput.optional(),
+})
+
+const WorkflowProgressTransitionInput = z.object({
+  id: z.string().optional(),
+  seq: z.number().int().nonnegative().optional(),
+  timestamp: z.string().optional(),
+  target_id: z.string().optional(),
+  run_id: z.string().optional(),
+  level: WorkflowProgressTransitionLevel.optional(),
+  from_state: z.string().optional(),
+  to_state: z.string().optional(),
+  reason: z.string().optional(),
+  source: WorkflowProgressTransitionSourceInput.optional(),
+})
+
+const WorkflowProgressParticipantInput = z.object({
+  id: z.string().optional(),
+  label: z.string().optional(),
+  name: z.string().optional(),
+  role: z.string().optional(),
+  status: WorkflowAgentStatus.optional(),
+  summary: z.string().optional(),
+  updated_at: z.string().optional(),
+  round: z.number().int().nonnegative().optional(),
+  step_id: z.string().optional(),
+  run_id: z.string().optional(),
+})
+
 function issue(ctx: z.RefinementCtx, path: Array<string | number>, message: string) {
   ctx.addIssue({
     code: z.ZodIssueCode.custom,
@@ -580,7 +668,31 @@ export const WorkflowProgressV2 = WorkflowProgressV2Shape.superRefine((input, ct
   })
 })
 
+export const WorkflowProgressV2Input = z.object({
+  version: z.literal(WorkflowProgressV2VersionValue),
+  workflow: WorkflowProgressWorkflow,
+  machine: WorkflowProgressMachine.optional(),
+  step_definitions: z.array(WorkflowProgressStepDefinitionInput).optional(),
+  step_runs: z.array(WorkflowProgressStepRunInput).optional(),
+  transitions: z.array(WorkflowProgressTransitionInput).optional(),
+  phase: WorkflowProgressPhase.optional(),
+  round: WorkflowProgressRound.optional(),
+  steps: z.array(WorkflowProgressStep).optional(),
+  agents: z.array(WorkflowProgressAgent).optional(),
+  participants: z.array(WorkflowProgressParticipantInput).optional(),
+})
+
 export const WorkflowProgress = z.discriminatedUnion("version", [WorkflowProgressV1, WorkflowProgressV2])
+
+export const WorkflowProgressInput = z.discriminatedUnion("version", [WorkflowProgressV1, WorkflowProgressV2Input])
+
+export const WorkflowStatusUpdateInput = z
+  .object({
+    title: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    progress: WorkflowProgressInput.optional(),
+  })
+  .strict()
 
 export const WorkflowStatusUpdate = z
   .object({
@@ -623,6 +735,7 @@ export type WorkflowProgressTransitionRecord = z.infer<typeof WorkflowProgressTr
 export type WorkflowProgressV1 = z.infer<typeof WorkflowProgressV1>
 export type WorkflowProgressV2 = z.infer<typeof WorkflowProgressV2>
 export type WorkflowProgress = z.infer<typeof WorkflowProgress>
+export type WorkflowProgressInput = z.infer<typeof WorkflowProgressInput>
 export type WorkflowProgressRead = {
   version: WorkflowProgressVersion
   workflow: WorkflowProgressWorkflow
@@ -636,6 +749,7 @@ export type WorkflowProgressRead = {
   agents: WorkflowProgressAgent[]
   participants: WorkflowProgressParticipant[]
 }
+export type WorkflowStatusUpdateInput = z.infer<typeof WorkflowStatusUpdateInput>
 export type WorkflowStatusUpdate = z.infer<typeof WorkflowStatusUpdate>
 
 export type WorkflowTaskInput = {
@@ -677,7 +791,7 @@ export type WorkflowContext<Input = WorkflowArgs> = {
   raw: string
   argv: string[]
   files: WorkflowFile[]
-  status(input: WorkflowStatusUpdate): Promise<void>
+  status(input: WorkflowStatusUpdateInput): Promise<void>
   write(input: { file: string; content: string }): Promise<void>
   ask(input: {
     questions: Array<{
@@ -1077,9 +1191,16 @@ function uniq<T extends { id: string }>(input: T[]) {
   })
 }
 
-function scrub(input: z.input<typeof WorkflowProgressV2Base>) {
+function scrub(
+  input: z.input<typeof WorkflowProgressV2Base>,
+  ctx?: {
+    step_definitions?: WorkflowProgressStepDefinition[]
+    step_runs?: WorkflowProgressStepRun[]
+    participants?: WorkflowProgressParticipant[]
+  },
+) {
   const step_definitions = uniq(input.step_definitions ?? [])
-  const defs = new Set(step_definitions.map((item) => item.id))
+  const defs = new Set([...(ctx?.step_definitions ?? []), ...step_definitions].map((item) => item.id))
   const next_defs = step_definitions.map((item) => ({
     id: item.id,
     kind: item.kind,
@@ -1093,7 +1214,7 @@ function scrub(input: z.input<typeof WorkflowProgressV2Base>) {
     ...(item.next?.filter((id) => defs.has(id)).length ? { next: item.next.filter((id) => defs.has(id)) } : {}),
   }))
   const step_runs = orderruns(uniq(input.step_runs ?? []).filter((item) => defs.has(item.step_id)))
-  const runs = new Map(step_runs.map((item) => [item.id, item]))
+  const runs = new Map([...(ctx?.step_runs ?? []), ...step_runs].map((item) => [item.id, item]))
   const next_runs = step_runs.map((item) => ({
     id: item.id,
     seq: item.seq,
@@ -1504,6 +1625,115 @@ function strictv2(input: z.input<typeof WorkflowProgressV2Base>) {
   return out.data
 }
 
+function partial(input: unknown, ctx?: WorkflowProgressV2) {
+  const val = item(input)
+  if (!val || text(val.version) !== WorkflowProgressV2VersionValue) return false
+  if (WorkflowProgressV2.safeParse(input).success) return false
+  const info = workflow(val.workflow)
+  if (!info) return false
+  if (!["machine", "step_definitions", "step_runs", "transitions", "participants"].some((key) => key in val)) {
+    return true
+  }
+  const defs = [...(ctx?.step_definitions ?? []), ...stepdefs(val.step_definitions)]
+  const runs = [...(ctx?.step_runs ?? []), ...stepruns(val.step_runs, info.status)]
+  const parts = [...(ctx?.participants ?? []), ...(participants(val.participants, info.status) ?? [])]
+  const defset = new Set(defs.map((item) => item.id))
+  const runmap = new Map(runs.map((item) => [item.id, item.step_id]))
+  const partmap = new Map(parts.map((item) => [item.id, item]))
+  const machine_ref = machine(val.machine)
+  if (machine_ref.root_step_id && !defset.has(machine_ref.root_step_id)) return false
+  if (machine_ref.active_step_id && !defset.has(machine_ref.active_step_id)) return false
+  if (machine_ref.active_run_id) {
+    const step_id = runmap.get(machine_ref.active_run_id)
+    if (!step_id) return false
+    if (machine_ref.active_step_id && step_id !== machine_ref.active_step_id) return false
+  }
+  if (
+    stepdefs(val.step_definitions).some((item) => {
+      if (item.parent_id && !defset.has(item.parent_id)) return true
+      if (item.children?.some((id) => id === item.id || !defset.has(id))) return true
+      return item.next?.some((id) => !defset.has(id)) ?? false
+    })
+  ) {
+    return false
+  }
+  if (
+    stepruns(val.step_runs, info.status).some((item) => {
+      if (!defset.has(item.step_id)) return true
+      if (item.parent_run_id && !runmap.has(item.parent_run_id)) return true
+      return false
+    })
+  ) {
+    return false
+  }
+  if (
+    (participants(val.participants, info.status) ?? []).some((item) => {
+      if (item.step_id && !defset.has(item.step_id)) return true
+      if (!item.run_id) return false
+      const step_id = runmap.get(item.run_id)
+      if (!step_id) return true
+      if (item.step_id && step_id !== item.step_id) return true
+      return false
+    })
+  ) {
+    return false
+  }
+  if (
+    transitions(val.transitions, info.status).some((item) => {
+      if (item.level === "workflow") return item.target_id !== WorkflowProgressWorkflowTargetId
+      if (!defset.has(item.target_id)) return true
+      if (item.run_id) {
+        const step_id = runmap.get(item.run_id)
+        if (!step_id) return true
+        if (step_id !== item.target_id) return true
+      }
+      if (!item.source) return false
+      if (item.source.participant_id) {
+        const part = partmap.get(item.source.participant_id)
+        if (!part) return true
+        if (item.source.run_id && part.run_id && part.run_id !== item.source.run_id) return true
+        if (item.source.step_id && part.step_id && part.step_id !== item.source.step_id) return true
+      }
+      if (item.source.step_id && !defset.has(item.source.step_id)) return true
+      if (!item.source.run_id) return false
+      const step_id = runmap.get(item.source.run_id)
+      if (!step_id) return true
+      if (item.source.step_id && step_id !== item.source.step_id) return true
+      return false
+    })
+  ) {
+    return false
+  }
+  return true
+}
+
+function soft(input: unknown) {
+  return normalizeWorkflowProgressInput(input)
+}
+
+function merged(acc: WorkflowProgress | undefined, input: unknown): WorkflowProgress | undefined {
+  const out = parseWorkflowProgress(input)
+  if (out) return out
+  const ctx = acc?.version === WorkflowProgressV2VersionValue ? acc : undefined
+  if (!partial(input, ctx)) return
+  const val = coerceWorkflowProgress(input, ctx)
+  if (!val || val.version !== WorkflowProgressV2VersionValue) return
+  if (!ctx) {
+    return strictv2({
+      ...val,
+      version: WorkflowProgressV2VersionValue,
+    })
+  }
+  const next = strictv2(
+    mergev2(ctx, {
+      ...val,
+      version: WorkflowProgressV2VersionValue,
+    }),
+  )
+  if (!next) return
+  return next
+}
+
 export function parseWorkflowProgress(input: unknown): WorkflowProgress | undefined {
   const progress = build(input)
   if (!progress) return
@@ -1519,7 +1749,7 @@ export function parseWorkflowProgress(input: unknown): WorkflowProgress | undefi
 
 export function mergeWorkflowProgress(...items: unknown[]): WorkflowProgress | undefined {
   return items.reduce<WorkflowProgress | undefined>((acc, raw) => {
-    const item = raw ? parseWorkflowProgress(raw) : undefined
+    const item = raw ? merged(acc, raw) : undefined
     if (!item) return acc
     if (!acc) return item.version === WorkflowProgressV2VersionValue ? mergev2(undefined, item) : item
     if (acc.version === WorkflowProgressV2VersionValue) {
@@ -1565,6 +1795,92 @@ export function normalizeWorkflowProgress(input: unknown): WorkflowProgressRead 
   }
 }
 
+export function normalizeWorkflowProgressInput(input: unknown): WorkflowProgressRead | undefined {
+  const progress = normalizeWorkflowProgress(input)
+  if (progress) return progress
+  if (!partial(input)) return
+  return coerceWorkflowProgress(input)
+}
+
+export function coerceWorkflowProgress(
+  input: unknown,
+  ctx?: {
+    step_definitions?: WorkflowProgressStepDefinition[]
+    step_runs?: WorkflowProgressStepRun[]
+    participants?: WorkflowProgressParticipant[]
+  },
+): WorkflowProgressRead | undefined {
+  const strict = normalizeWorkflowProgress(input)
+  if (strict) return strict
+  const val = item(input)
+  if (!val) return
+  const version = text(val.version)
+  if (version && !WorkflowProgressVersionValues.includes(version as WorkflowProgressVersion)) return
+  const info = workflow(val.workflow)
+  if (!info) return
+  const rich = ["machine", "step_definitions", "step_runs", "transitions", "participants"].some((key) => key in val)
+  const next_phase = phase(val.phase, info.status)
+  const next_round = round(val.round, info.status)
+  const next_steps = steps(val.steps, info.status) ?? []
+  const next_agents = agents(val.agents, info.status) ?? []
+  if (version === WorkflowProgressV1VersionValue || (!version && !rich)) {
+    return {
+      version: WorkflowProgressV1VersionValue,
+      workflow: info,
+      machine: {},
+      step_definitions: [],
+      step_runs: [],
+      transitions: [],
+      ...(next_phase ? { phase: next_phase } : {}),
+      ...(next_round ? { round: next_round } : {}),
+      steps: next_steps,
+      agents: next_agents,
+      participants: [],
+    }
+  }
+  const base = scrub(
+    {
+      version: WorkflowProgressV2VersionValue,
+      workflow: info,
+      machine: machine(val.machine),
+      step_definitions: stepdefs(val.step_definitions),
+      step_runs: stepruns(val.step_runs, info.status),
+      transitions: transitions(val.transitions, info.status),
+      ...(next_phase ? { phase: next_phase } : {}),
+      ...(next_round ? { round: next_round } : {}),
+      ...(next_steps.length ? { steps: next_steps } : {}),
+      ...(next_agents.length ? { agents: next_agents } : {}),
+      participants: participants(val.participants, info.status) ?? [],
+    },
+    ctx,
+  )
+  const out = strictv2(base)
+  const next =
+    out ??
+    (ctx
+      ? strictv2({
+          ...base,
+          step_definitions: mergeby(ctx.step_definitions ?? [], base.step_definitions, (item) => item.id, mergedef),
+          step_runs: orderruns(mergeby(ctx.step_runs ?? [], base.step_runs, (item) => item.id, mergerun)),
+          participants: mergeby(ctx.participants ?? [], base.participants, (item) => item.id, mergeparticipant),
+        })
+      : undefined)
+  if (!next) return
+  return {
+    version: next.version,
+    workflow: next.workflow,
+    machine: next.machine,
+    step_definitions: next.step_definitions,
+    step_runs: next.step_runs,
+    transitions: next.transitions,
+    ...(next.phase ? { phase: next.phase } : {}),
+    ...(next.round ? { round: next.round } : {}),
+    steps: next.steps ?? [],
+    agents: next.agents ?? [],
+    participants: next.participants,
+  }
+}
+
 export function normalizeWorkflowMetadata(input?: Record<string, unknown>) {
   if (!input) return input
   if (!(WorkflowProgressKey in input)) return { ...input }
@@ -1572,7 +1888,7 @@ export function normalizeWorkflowMetadata(input?: Record<string, unknown>) {
   if (head.success && !WorkflowProgressVersionValues.includes(head.data.version as WorkflowProgressVersion)) {
     return stripprogress(input)
   }
-  const progress = parseWorkflowProgress(input[WorkflowProgressKey])
+  const progress = normalizeWorkflowProgressInput(input[WorkflowProgressKey])
   return {
     ...stripprogress(input),
     ...(progress ? { [WorkflowProgressKey]: progress } : {}),
@@ -1581,7 +1897,7 @@ export function normalizeWorkflowMetadata(input?: Record<string, unknown>) {
 
 export function readWorkflowProgress(input?: Record<string, unknown>): WorkflowProgressRead | undefined {
   if (!input || !(WorkflowProgressKey in input)) return
-  return normalizeWorkflowProgress(input[WorkflowProgressKey])
+  return normalizeWorkflowProgressInput(input[WorkflowProgressKey])
 }
 
 export function validateWorkflowMetadata(input?: Record<string, unknown>) {

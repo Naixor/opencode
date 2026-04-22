@@ -1,8 +1,7 @@
 import {
-  readWorkflowProgress,
+  WorkflowProgressKey,
+  normalizeWorkflowProgressInput,
   workflowDisplayStatus,
-  workflowPhaseLabel,
-  workflowRoundLabel,
   type WorkflowAgentStatus,
   type WorkflowProgressRead,
   type WorkflowProgressTransitionLevel,
@@ -86,6 +85,209 @@ export type WorkflowProjection = {
   latest?: WorkflowProjectionHistoryItem
 }
 
+export const workflowfallback = {
+  workflow: "workflow",
+  step: "step",
+  agent: "agent",
+  timestamp: "time unknown",
+  round: "Round unknown",
+  reason: "No reason provided",
+} as const
+
+type WorkflowProjectionStepDef = WorkflowProgressRead["step_definitions"][number] & { title: string }
+type WorkflowProjectionStep = WorkflowProgressRead["steps"][number] & { title: string; reason_text: string }
+type WorkflowProjectionAgent = WorkflowProgressRead["agents"][number] & { id: string; title: string }
+type WorkflowProjectionParticipant = WorkflowProgressRead["participants"][number] & { title: string }
+type WorkflowProjectionActor = NonNullable<WorkflowProgressRead["step_runs"][number]["actor"]> & { title: string }
+type WorkflowProjectionRun = WorkflowProgressRead["step_runs"][number] & {
+  title: string
+  reason_text: string
+  round_text: string
+  retry_text: string
+  actor_title: string
+  actor?: WorkflowProjectionActor
+}
+type WorkflowProjectionTransition = WorkflowProgressRead["transitions"][number] & {
+  title: string
+  timestamp_text: string
+  reason_text: string
+  source_text: string
+  round_text: string
+}
+
+export type WorkflowProjectionInput = {
+  version: WorkflowProgressRead["version"]
+  workflow: WorkflowProgressRead["workflow"] & { title: string }
+  machine: WorkflowProgressRead["machine"] & { title: string }
+  step_definitions: WorkflowProjectionStepDef[]
+  step_runs: WorkflowProjectionRun[]
+  transitions: WorkflowProjectionTransition[]
+  phase?: NonNullable<WorkflowProgressRead["phase"]> & { title: string }
+  round?: NonNullable<WorkflowProgressRead["round"]> & { title: string }
+  steps: WorkflowProjectionStep[]
+  agents: WorkflowProjectionAgent[]
+  participants: WorkflowProjectionParticipant[]
+}
+
+function filled(input?: string) {
+  const out = input?.trim()
+  if (!out) return
+  return out
+}
+
+function title(input: Array<string | undefined>, fallback: string) {
+  return input.map((item) => filled(item)).find((item) => item !== undefined) ?? fallback
+}
+
+function roundtext(
+  input?:
+    | WorkflowProgressRead["round"]
+    | WorkflowProgressRead["step_runs"][number]["round"]
+    | WorkflowProgressRead["step_runs"][number]["retry"],
+  kind = "Round",
+) {
+  if (filled(input?.label)) return filled(input?.label) ?? workflowfallback.round
+  if (input?.current !== undefined && input?.max !== undefined) return `${kind} ${input.current}/${input.max}`
+  if (input?.current !== undefined) return `${kind} ${input.current}`
+  return kind === "Round" ? workflowfallback.round : `${kind} unknown`
+}
+
+function runstatus(input: WorkflowProgressRead["step_runs"][number]["status"]) {
+  if (input === "active") return "running" as const
+  if (input === "completed") return "done" as const
+  return input
+}
+
+function actorstatus(input: WorkflowProgressRead["step_runs"][number]["status"]) {
+  if (input === "active") return "running" as const
+  if (input === "completed") return "completed" as const
+  return input
+}
+
+export function normalizeWorkflowProjectionInput(
+  input: unknown,
+  opts?: { name?: string },
+): WorkflowProjectionInput | undefined {
+  const progress = normalizeWorkflowProgressInput(input)
+  if (!progress) return
+  const flow = title([progress.workflow.label, progress.workflow.name, opts?.name], workflowfallback.workflow)
+  const defs = progress.step_definitions.map((item, ix) => ({
+    ...item,
+    title: title([item.label, item.id], `${workflowfallback.step} ${ix + 1}`),
+  }))
+  const defmap = new Map(defs.map((item) => [item.id, item]))
+  const steps = progress.steps.map((item, ix) => ({
+    ...item,
+    title: title([item.label, defmap.get(item.id)?.title, item.id], `${workflowfallback.step} ${ix + 1}`),
+    reason_text: title([item.reason], workflowfallback.reason),
+  }))
+  const stepmap = new Map(steps.map((item) => [item.id, item]))
+  const agents = progress.agents.map((item, ix) => {
+    const id = title([item.id, item.name, item.label, item.role], `agent-${ix + 1}`)
+    return {
+      ...item,
+      id,
+      title: title([item.label, item.name, item.role, id], `${workflowfallback.agent} ${ix + 1}`),
+    }
+  })
+  const parts = progress.participants.map((item, ix) => ({
+    ...item,
+    title: title(
+      [item.label, item.name !== item.id ? item.name : undefined, item.role, item.id],
+      `${workflowfallback.agent} ${ix + 1}`,
+    ),
+  }))
+  const round_title = progress.round ? roundtext(progress.round) : workflowfallback.round
+  const partmap = new Map(
+    parts.map((item) => [item.run_id ? `${item.run_id}:${item.step_id ?? ""}` : `:${item.step_id ?? ""}`, item]),
+  )
+  const runs: WorkflowProjectionRun[] = progress.step_runs.map((item, ix) => {
+    const part = partmap.get(`${item.id}:${item.step_id}`) ?? partmap.get(`:${item.step_id}`)
+    const actor_title = title(
+      [item.actor?.label, item.actor?.name, item.actor?.role, item.actor?.id, part?.title],
+      `${workflowfallback.agent} ${ix + 1}`,
+    )
+    const out: WorkflowProjectionRun = {
+      id: item.id,
+      seq: item.seq,
+      step_id: item.step_id,
+      status: item.status,
+      ...(item.label ? { label: item.label } : {}),
+      ...(item.summary ? { summary: item.summary } : {}),
+      ...(item.reason ? { reason: item.reason } : {}),
+      ...(item.started_at ? { started_at: item.started_at } : {}),
+      ...(item.ended_at ? { ended_at: item.ended_at } : {}),
+      ...(item.parent_run_id ? { parent_run_id: item.parent_run_id } : {}),
+      ...(item.round ? { round: item.round } : {}),
+      ...(item.retry ? { retry: item.retry } : {}),
+      title: title(
+        [item.label, defmap.get(item.step_id)?.title, stepmap.get(item.step_id)?.title, item.step_id],
+        `${workflowfallback.step} ${ix + 1}`,
+      ),
+      reason_text: title([item.reason, stepmap.get(item.step_id)?.reason], workflowfallback.reason),
+      round_text: roundtext(item.round),
+      retry_text: roundtext(item.retry, "Retry"),
+      actor_title,
+      ...(item.actor ? { actor: { ...item.actor, title: actor_title } } : {}),
+    }
+    return out
+  })
+  const runmap = new Map(runs.map((item) => [item.id, item]))
+  const trans = progress.transitions.map((item, ix) => {
+    const run = item.run_id ? runmap.get(item.run_id) : undefined
+    return {
+      ...item,
+      title:
+        item.level === "workflow"
+          ? flow
+          : title(
+              [run?.title, defmap.get(item.target_id)?.title, stepmap.get(item.target_id)?.title, item.target_id],
+              `${workflowfallback.step} ${ix + 1}`,
+            ),
+      timestamp_text: title([item.timestamp], workflowfallback.timestamp),
+      reason_text: title([item.reason, run?.reason, stepmap.get(item.target_id)?.reason], workflowfallback.reason),
+      source_text: title(
+        [item.source?.label, item.source?.name, item.source?.role, item.source?.id, run?.actor_title],
+        workflowfallback.agent,
+      ),
+      round_text: title([run?.round ? run.round_text : undefined, round_title], workflowfallback.round),
+    }
+  })
+  return {
+    version: progress.version,
+    workflow: {
+      ...progress.workflow,
+      title: flow,
+    },
+    machine: {
+      ...progress.machine,
+      title: title([progress.machine.label, progress.machine.key, progress.machine.id, flow], flow),
+    },
+    step_definitions: defs,
+    step_runs: runs,
+    transitions: trans,
+    ...(progress.phase
+      ? {
+          phase: {
+            ...progress.phase,
+            title: title([progress.phase.label, progress.phase.key, progress.phase.status], progress.phase.status),
+          },
+        }
+      : {}),
+    ...(progress.round
+      ? {
+          round: {
+            ...progress.round,
+            title: round_title,
+          },
+        }
+      : {}),
+    steps,
+    agents,
+    participants: parts,
+  }
+}
+
 function live(input?: string) {
   if (!input) return false
   return input === "active" || input === "running" || input === "waiting" || input === "blocked" || input === "retrying"
@@ -97,46 +299,7 @@ function signal(input?: string) {
     return input
 }
 
-function steptitle(input: {
-  def?: WorkflowProgressRead["step_definitions"][number]
-  run?: WorkflowProgressRead["step_runs"][number]
-  step?: WorkflowProgressRead["steps"][number]
-}) {
-  return (
-    input.run?.label ??
-    input.def?.label ??
-    input.step?.label ??
-    input.def?.id ??
-    input.run?.step_id ??
-    input.step?.id ??
-    "step"
-  )
-}
-
-function actorname(input?: WorkflowProgressRead["step_runs"][number]["actor"]) {
-  return input?.label ?? input?.name ?? input?.role ?? input?.id
-}
-
-function participantid(input: { id?: string; name?: string; role?: string }) {
-  return input.id ?? input.name ?? input.role
-}
-
-function participantname(input: { label?: string; name?: string; role?: string; id?: string }) {
-  return input.label ?? input.name ?? input.role ?? input.id
-}
-
-function runlabel(
-  input?: WorkflowProgressRead["step_runs"][number]["round"] | WorkflowProgressRead["step_runs"][number]["retry"],
-  title = "Round",
-) {
-  if (!input) return
-  if (input.label) return input.label
-  if (input.current !== undefined && input.max !== undefined) return `${title} ${input.current}/${input.max}`
-  if (input.current !== undefined) return `${title} ${input.current}`
-  return `${title} unknown`
-}
-
-function trail(defs: Map<string, WorkflowProgressRead["step_definitions"][number]>, id?: string) {
+function trail(defs: Map<string, WorkflowProjectionStepDef>, id?: string) {
   if (!id) return []
   const seen = new Set<string>()
   const out: string[] = []
@@ -150,11 +313,7 @@ function trail(defs: Map<string, WorkflowProgressRead["step_definitions"][number
   return out
 }
 
-function pick(
-  runs: Map<string, WorkflowProgressRead["step_runs"]>,
-  id: string,
-  run?: WorkflowProgressRead["step_runs"][number],
-) {
+function pick(runs: Map<string, WorkflowProjectionRun[]>, id: string, run?: WorkflowProjectionRun) {
   const list = runs.get(id) ?? []
   if (run?.step_id === id) return run
   const cur = [...list].reverse().find((item) => live(item.status))
@@ -162,7 +321,7 @@ function pick(
   return list.at(-1)
 }
 
-function current(progress: WorkflowProgressRead, runs: Map<string, WorkflowProgressRead["step_runs"]>) {
+function current(progress: WorkflowProjectionInput, runs: Map<string, WorkflowProjectionRun[]>) {
   const run = progress.machine.active_run_id
     ? progress.step_runs.find((item) => item.id === progress.machine.active_run_id)
     : undefined
@@ -180,16 +339,16 @@ function row(input: {
   id: string
   depth: number
   active: boolean
-  def?: WorkflowProgressRead["step_definitions"][number]
-  run?: WorkflowProgressRead["step_runs"][number]
-  step?: WorkflowProgressRead["steps"][number]
+  def?: WorkflowProjectionStepDef
+  run?: WorkflowProjectionRun
+  step?: WorkflowProjectionStep
 }): WorkflowProjectionTimelineItem {
   return {
     id: input.run?.id ?? input.id,
     step_id: input.id,
     ...(input.run?.id ? { run_id: input.run.id } : {}),
     ...(input.run?.parent_run_id ? { parent_run_id: input.run.parent_run_id } : {}),
-    label: steptitle(input),
+    label: input.run?.title ?? input.def?.title ?? input.step?.title ?? workflowfallback.step,
     ...(input.def?.kind ? { kind: input.def.kind } : {}),
     status: input.run?.status ?? input.step?.status ?? "pending",
     active: input.active,
@@ -197,17 +356,17 @@ function row(input: {
     ...((input.run?.summary ?? input.step?.summary ?? input.def?.summary)
       ? { summary: input.run?.summary ?? input.step?.summary ?? input.def?.summary }
       : {}),
-    ...((input.run?.reason ?? input.step?.reason) ? { reason: input.run?.reason ?? input.step?.reason } : {}),
-    ...(runlabel(input.run?.round) ? { round: runlabel(input.run?.round) } : {}),
-    ...(runlabel(input.run?.retry, "Retry") ? { retry: runlabel(input.run?.retry, "Retry") } : {}),
-    ...(actorname(input.run?.actor) ? { actor: actorname(input.run?.actor) } : {}),
+    reason: input.run?.reason_text ?? input.step?.reason_text ?? workflowfallback.reason,
+    ...(input.run?.round ? { round: input.run.round_text } : {}),
+    ...(input.run?.retry ? { retry: input.run.retry_text } : {}),
+    ...(input.run?.actor ? { actor: input.run.actor_title } : {}),
   }
 }
 
-function timeline(progress: WorkflowProgressRead) {
+function timeline(progress: WorkflowProjectionInput) {
   const defs = new Map(progress.step_definitions.map((item) => [item.id, item]))
   const steps = new Map(progress.steps.map((item) => [item.id, item]))
-  const runs = progress.step_runs.reduce<Map<string, WorkflowProgressRead["step_runs"]>>((map, item) => {
+  const runs = progress.step_runs.reduce<Map<string, WorkflowProjectionRun[]>>((map, item) => {
     const list = map.get(item.step_id) ?? []
     list.push(item)
     map.set(item.step_id, list)
@@ -258,7 +417,7 @@ function timeline(progress: WorkflowProgressRead) {
   return progress.steps.map((step) => row({ id: step.id, depth: 0, active: step.id === cur.id, step }))
 }
 
-function agentsview(progress: WorkflowProgressRead): WorkflowProjectionAgentItem[] {
+function agentsview(progress: WorkflowProjectionInput): WorkflowProjectionAgentItem[] {
   const out: WorkflowProjectionAgentItem[] = []
   const seen = new Map<string, number>()
   const runs = new Map(progress.step_runs.map((item) => [item.id, item]))
@@ -272,10 +431,9 @@ function agentsview(progress: WorkflowProgressRead): WorkflowProjectionAgentItem
     out[ix] = { ...out[ix], ...item, active: out[ix].active || item.active }
   }
   progress.agents.forEach((item, ix) => {
-    const id = participantid(item) ?? `agent-${ix + 1}`
     add({
-      id,
-      name: participantname(item) ?? id,
+      id: item.id,
+      name: item.title,
       ...(item.role ? { role: item.role } : {}),
       status: item.status,
       ...(item.summary ? { summary: item.summary } : {}),
@@ -285,15 +443,11 @@ function agentsview(progress: WorkflowProgressRead): WorkflowProjectionAgentItem
     })
   })
   progress.participants.forEach((item, ix) => {
-    const id = participantid(item) ?? `participant-${ix + 1}`
     const run = item.run_id ? runs.get(item.run_id) : undefined
-    const status =
-      item.status ??
-      (run?.status === "active" ? "running" : run?.status === "completed" ? "completed" : run?.status) ??
-      "pending"
+    const status = item.status ?? (run ? actorstatus(run.status) : undefined) ?? "pending"
     add({
-      id,
-      name: participantname(item) ?? id,
+      id: item.id,
+      name: item.title,
       ...(item.role ? { role: item.role } : {}),
       status,
       ...(item.summary ? { summary: item.summary } : {}),
@@ -303,15 +457,12 @@ function agentsview(progress: WorkflowProgressRead): WorkflowProjectionAgentItem
     })
   })
   progress.step_runs.forEach((run, ix) => {
-    const id = participantid(run.actor ?? {}) ?? `agent-run-${ix + 1}`
     if (!run.actor) return
     add({
-      id,
-      name: participantname(run.actor) ?? id,
+      id: run.actor.id ?? `agent-run-${ix + 1}`,
+      name: run.actor.title,
       ...(run.actor.role ? { role: run.actor.role } : {}),
-      status:
-        run.actor.status ??
-        (run.status === "active" ? "running" : run.status === "completed" ? "completed" : run.status),
+      status: run.actor.status ?? actorstatus(run.status),
       ...(run.actor.summary ? { summary: run.actor.summary } : {}),
       ...(run.actor.updated_at ? { updated_at: run.actor.updated_at } : {}),
       ...(run.round?.current !== undefined ? { round: run.round.current } : {}),
@@ -321,10 +472,7 @@ function agentsview(progress: WorkflowProgressRead): WorkflowProjectionAgentItem
   return out
 }
 
-function historyview(progress: WorkflowProgressRead, title: string): WorkflowProjectionHistoryItem[] {
-  const defs = new Map(progress.step_definitions.map((item) => [item.id, item]))
-  const steps = new Map(progress.steps.map((item) => [item.id, item]))
-  const runs = new Map(progress.step_runs.map((item) => [item.id, item]))
+function historyview(progress: WorkflowProjectionInput): WorkflowProjectionHistoryItem[] {
   return progress.transitions
     .flatMap((item) => (item.from_state && item.from_state === item.to_state ? [] : [item]))
     .sort((a, b) => {
@@ -336,37 +484,21 @@ function historyview(progress: WorkflowProgressRead, title: string): WorkflowPro
     })
     .map((item) => ({
       id: item.id,
-      timestamp: item.timestamp ?? "",
+      timestamp: item.timestamp_text,
       level: item.level,
       target_id: item.target_id,
       ...(item.run_id ? { run_id: item.run_id } : {}),
-      label:
-        item.level === "workflow"
-          ? title
-          : steptitle({
-              def: defs.get(item.target_id),
-              run: item.run_id ? runs.get(item.run_id) : undefined,
-              step: steps.get(item.target_id),
-            }),
+      label: item.title,
       ...(item.from_state ? { from_state: item.from_state } : {}),
       to_state: item.to_state,
-      ...(item.reason ? { reason: item.reason } : {}),
-      ...((participantname(item.source ?? {}) ?? item.source?.type)
-        ? { source: participantname(item.source ?? {}) ?? item.source?.type }
-        : {}),
-      ...(item.run_id && runlabel(runs.get(item.run_id)?.round)
-        ? { round: runlabel(runs.get(item.run_id)?.round) }
-        : {}),
+      reason: item.reason_text,
+      source: item.source_text,
+      round: item.round_text,
     }))
 }
 
-function alerts(
-  progress: WorkflowProgressRead,
-  title: string,
-  state: WorkflowViewState,
-): WorkflowProjectionAlertItem[] {
-  const defs = new Map(progress.step_definitions.map((item) => [item.id, item]))
-  const runs = progress.step_runs.reduce<Map<string, WorkflowProgressRead["step_runs"]>>((map, item) => {
+function alerts(progress: WorkflowProjectionInput, state: WorkflowViewState): WorkflowProjectionAlertItem[] {
+  const runs = progress.step_runs.reduce<Map<string, WorkflowProjectionRun[]>>((map, item) => {
     const list = map.get(item.step_id) ?? []
     list.push(item)
     map.set(item.step_id, list)
@@ -384,7 +516,7 @@ function alerts(
       id: `workflow:${flow}`,
       level: "workflow",
       status: flow,
-      title,
+      title: progress.workflow.title,
       ...((progress.workflow.summary ?? progress.workflow.input)
         ? { summary: progress.workflow.summary ?? progress.workflow.input }
         : {}),
@@ -396,10 +528,10 @@ function alerts(
       id: `step:${cur.run?.id ?? cur.id ?? step}`,
       level: "step",
       status: step,
-      title: steptitle({ def: cur.id ? defs.get(cur.id) : undefined, run: cur.run }),
-      ...((cur.run?.reason ?? cur.run?.summary) ? { summary: cur.run?.reason ?? cur.run?.summary } : {}),
+      title: cur.run?.title ?? workflowfallback.step,
+      summary: cur.run?.reason ?? cur.run?.summary ?? workflowfallback.reason,
       ...(cur.id ? { target: cur.id } : {}),
-      ...(actorname(cur.run?.actor) ? { source: actorname(cur.run?.actor) } : {}),
+      ...(cur.run?.actor ? { source: cur.run.actor_title } : {}),
     })
   return out
 }
@@ -415,20 +547,19 @@ export function workflowicon(status?: ReturnType<typeof workflowDisplayStatus>) 
 }
 
 export function workflowproject(input: {
-  progress?: WorkflowProgressRead
+  progress: unknown
   name?: string
   tool_status?: WorkflowToolStatus
 }): WorkflowProjection | undefined {
-  const progress = input.progress
+  const progress = normalizeWorkflowProjectionInput(input.progress, { name: input.name })
   if (!progress) return
-  const title = progress.workflow.label ?? progress.workflow.name ?? (input.name?.trim() ? input.name : "workflow")
   const state = workflowDisplayStatus({ tool_status: input.tool_status, progress })
-  const history = historyview(progress, title)
+  const history = historyview(progress)
   const header = {
-    title,
+    title: progress.workflow.title,
     status: state,
-    ...(workflowPhaseLabel(progress) ? { phase: workflowPhaseLabel(progress) } : {}),
-    ...(workflowRoundLabel(progress) ? { round: workflowRoundLabel(progress) } : {}),
+    ...(progress.phase ? { phase: progress.phase.title } : {}),
+    ...(progress.round ? { round: progress.round.title } : {}),
     ...(progress.workflow.summary ? { summary: progress.workflow.summary } : {}),
     ...(progress.workflow.input ? { input: progress.workflow.input } : {}),
     ...(progress.workflow.started_at ? { started_at: progress.workflow.started_at } : {}),
@@ -439,7 +570,7 @@ export function workflowproject(input: {
     timeline: timeline(progress),
     agents: agentsview(progress),
     history,
-    alerts: alerts(progress, title, state),
+    alerts: alerts(progress, state),
     ...(history[0] ? { latest: history[0] } : {}),
   }
 }
@@ -449,8 +580,10 @@ export function workflowview(input: {
   name?: string
   tool_status?: WorkflowToolStatus
 }) {
+  const progress = normalizeWorkflowProjectionInput(input.metadata?.[WorkflowProgressKey], { name: input.name })
+  if (!progress) return
   const view = workflowproject({
-    progress: readWorkflowProgress(input.metadata),
+    progress,
     name: input.name,
     tool_status: input.tool_status,
   })

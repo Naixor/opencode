@@ -35,8 +35,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by implement workflow after 3 review round(s). Canonical normalization now rejects partial v2 payloads that cannot be strict-normalized, preserves caller-supplied workflow names through projection, and verifies ctx.status() compatibility with end-to-end runtime coverage for partial v2 and raw v1 updates. Relevant checks pass for `packages/workflow-api` and the workflow runtime tests in `packages/opencode`."
     },
     {
       "id": "US-003",
