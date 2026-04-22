@@ -1,18 +1,21 @@
 {
   "project": "OpenCode",
-  "branchName": "ralph/workflow-tui-workflow-agent-visibility",
+  "branchName": "ralph/workflow-state-machine",
   "sourcePrdFile": "tasks/prds/prd-workflow-tui-workflow-agent.md",
-  "description": "Add a versioned workflow progress schema and unified TUI projection so workflow runs expose phase, step, agent, round, and waiting state clearly while remaining read-only and safe on partial metadata.",
+  "description": "Introduce a projection-first workflow state machine contract and TUI so users can identify the active path, recent changes, and active agents without transcript-based reconstruction.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Define workflow rendering schema v1",
-      "description": "As a workflow author, I want one versioned progress schema so that built-in and external workflows can target the same TUI contract.",
+      "title": "Define workflow-progress.v2 contract",
+      "description": "As a workflow author, I want a versioned workflow-progress.v2 schema so that built-in and external workflows emit one deterministic state-machine payload.",
       "acceptanceCriteria": [
-        "Add a schema definition with explicit `version`, `name`, `status`, and `phase` fields",
-        "Define optional schema sections for `round`, `steps`, `agents`, and `history`",
-        "Document required fields, optional fields, and fallback behavior for missing sections",
-        "Built-in and external workflows use the same schema module or type definition",
+        "Add workflow-progress.v2 versioned types for workflow metadata, machine metadata, step definitions, step runs, transition records, and participant metadata",
+        "Step definitions support task, group, wait, decision, and terminal kinds",
+        "Step runs support pending, active, waiting, blocked, retrying, completed, and failed statuses",
+        "Step runs and transitions carry stable ids plus deterministic ordering fields used as reducer tie-breakers",
+        "Transition records support timestamp, from-state, to-state, reason, and source references when available",
+        "workflow-progress.v1 remains accepted at the ingestion boundary during migration",
+        "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
@@ -21,13 +24,14 @@
     },
     {
       "id": "US-002",
-      "title": "Add unified workflow progress projection",
-      "description": "As a developer, I want one read model for workflow progress so that the TUI renders from a single projection instead of transcript parsing.",
+      "title": "Normalize v1, v2, and partial payloads",
+      "description": "As a TUI developer, I want one normalizer boundary so that fallback and version compatibility are owned in one place before projection.",
       "acceptanceCriteria": [
-        "Add a projection that stores header, step, agent, round, and wait-state data for the active workflow run",
-        "Projection updates incrementally from workflow execution state and task state",
-        "Projection is the render source for workflow header, timeline, agent summary, and round history",
-        "TUI workflow rendering no longer reconstructs state from raw transcript text on each paint",
+        "Add a normalizer that accepts workflow-progress.v1, workflow-progress.v2, and partial payloads and returns one reducer input shape without transcript parsing",
+        "The normalizer owns fallback values for missing workflow label, step label, agent label, timestamp, round, and reason fields",
+        "Fallback output is non-empty and reused by all projection regions instead of panel-specific fallback logic",
+        "Fixtures cover v1 payloads, v2 payloads, partial metadata, group steps, repeated retries, and mixed payload variants",
+        "Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
@@ -36,14 +40,15 @@
     },
     {
       "id": "US-003",
-      "title": "Add fallback mapping for partial workflow metadata",
-      "description": "As a user, I want older or simpler workflows to render safely so that missing metadata does not break the workflow view.",
+      "title": "Build deterministic workflow projection reducer",
+      "description": "As a TUI developer, I want one projection reducer so that the workflow screen renders stable regions from state-machine data instead of inferred text.",
       "acceptanceCriteria": [
-        "Projection accepts minimal status-only progress updates without throwing",
-        "Missing round data renders `Round unknown`",
-        "Missing step, agent, or history data is omitted or replaced with stable fallback labels",
-        "Fallback mapping distinguishes `running`, `waiting`, `failed`, and `done` states",
-        "Unknown schema fields are ignored without crashing the TUI",
+        "Reducer output includes header, timeline, agents, history, and alerts regions from normalized input",
+        "Active-path selection is deterministic when parallel branches are active, branch metadata is incomplete, or group children have different statuses",
+        "Latest meaningful transition selection ignores duplicate or no-op records and breaks ties with deterministic ordering fields instead of array order",
+        "Agents projection derives current state and latest action from participant metadata plus step-run and transition source references without transcript parsing",
+        "Alerts projection emits distinct running, waiting, blocked, retrying, failed, and done states for both rich and fallback payloads",
+        "Tests pass",
         "Typecheck passes"
       ],
       "priority": 3,
@@ -52,13 +57,14 @@
     },
     {
       "id": "US-004",
-      "title": "Emit minimal schema payload from workflow runtime",
-      "description": "As a developer, I want active workflow runs to publish normalized progress metadata so that the TUI can render deterministic state.",
+      "title": "Wire the live workflow screen to projection state",
+      "description": "As a user, I want the real workflow screen to read projection state directly so that live updates do not depend on transcript reconstruction.",
       "acceptanceCriteria": [
-        "Workflow runtime emits schema v1 payloads with workflow name, status, phase, and start time when a run starts",
-        "Round-based workflows emit current round and total rounds when those values are known",
-        "Waiting-for-user, waiting-for-agents, and retrying states emit distinct status and reason fields",
-        "Built-in workflows without richer metadata still produce a minimal payload through the fallback path",
+        "Live workflow updates feed the normalizer and reducer pipeline before render, and the workflow screen reads projection state instead of parsing transcript text on paint",
+        "The workflow screen container accepts both fixture data and runtime updates through the same projection boundary",
+        "The MVP workflow screen adds no pause, resume, cancel, retry, or manual-step controls or keybindings",
+        "A zero-data workflow screen state renders without crashing and does not fall back to transcript parsing",
+        "Tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
@@ -67,16 +73,14 @@
     },
     {
       "id": "US-005",
-      "title": "Render workflow progress header",
-      "description": "As a user, I want a persistent workflow header so that I can identify what is running and which phase it is in right away.",
+      "title": "Emit a thin implement workflow v2 slice",
+      "description": "As a developer, I want one real workflow to emit the new contract early so that runtime assumptions are validated before panel work finishes.",
       "acceptanceCriteria": [
-        "Render a dedicated workflow header whenever a workflow run is active",
-        "Header shows workflow name, goal or input summary, current status, and start time",
-        "Header shows a deterministic phase label from the workflow projection",
-        "Header shows current round and max rounds when available, otherwise `Round unknown`",
-        "Header renders no pause, resume, cancel, retry, or edit controls",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        ".opencode/workflows/implement.ts emits workflow-progress.v2 updates for a linear path that includes convert, story selection, implement or fix, review gate, and done or failed",
+        "Runtime emission produces explicit step definitions, step runs, and transitions consumed by the live projection pipeline end to end",
+        "An integration fixture or test proves emitted v2 data reaches the workflow screen without workflow-specific rendering logic",
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 5,
       "passes": false,
@@ -84,16 +88,17 @@
     },
     {
       "id": "US-006",
-      "title": "Render current workflow step timeline",
-      "description": "As a user, I want a visible step timeline so that I can tell which workflow step is active, done, blocked, or pending.",
+      "title": "Build the workflow shell and verification harness",
+      "description": "As a TUI developer, I want a stable workflow shell and harness so that panel work is verifiable at fixed terminal widths and degraded states.",
       "acceptanceCriteria": [
-        "Render a step list or timeline for the current workflow run",
-        "Each step shows exactly one normalized state: `pending`, `active`, `completed`, `blocked`, `failed`, or `waiting`",
-        "Active step styling is distinct from completed and pending styling",
-        "Completed steps remain visible until the workflow run ends",
-        "Blocked, failed, or waiting steps show a one-line reason when a reason is available",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Add a workflow screen shell with stable region order: header, timeline, agents, history, alerts",
+        "The shell has deterministic layouts for 120-column and 80-column widths, and 80-column output keeps region order while stacking or truncating within panel bounds",
+        "Add a fixture-driven workflow screen harness that can load projection states for browser and snapshot verification",
+        "Harness fixtures cover running, waiting, blocked, retrying, failed, done, workflow-progress.v1 fallback, and partial-metadata states at 120 and 80 columns",
+        "The shell includes explicit empty and no-active-workflow states using shared normalizer fallback tokens",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 6,
       "passes": false,
@@ -101,15 +106,16 @@
     },
     {
       "id": "US-007",
-      "title": "Render waiting and retry states clearly",
-      "description": "As a user, I want waiting and retry states to be explicit so that I do not mistake idle time for a broken workflow.",
+      "title": "Render the workflow header panel",
+      "description": "As a user, I want a stable workflow header so that I can identify the run, current phase, and overall status immediately.",
       "acceptanceCriteria": [
-        "When the projection reports user wait, the TUI shows `waiting for user` and the decision topic",
-        "When the projection reports agent wait, the TUI shows `waiting for agents` and the related step or round",
-        "When the projection reports retrying, the TUI shows a retrying state and the retried step label",
-        "Waiting-state styling is visually distinct from failed-state styling",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Header reads only the header projection region",
+        "Header shows workflow name, goal or input summary, overall status, current phase, and start time when available",
+        "When any header field is missing, the panel renders the shared normalizer fallback token instead of blank text or panel-specific copy",
+        "Header visibly distinguishes running, waiting, blocked, failed, and done states",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 7,
       "passes": false,
@@ -117,13 +123,16 @@
     },
     {
       "id": "US-008",
-      "title": "Project per-agent activity metadata",
-      "description": "As a developer, I want agent activity captured in the workflow projection so that the UI can show what each agent has done without transcript synthesis.",
+      "title": "Render the active-path timeline panel",
+      "description": "As a user, I want a timeline focused on the chosen execution path so that I can see where the workflow is without scanning the full graph.",
       "acceptanceCriteria": [
-        "Projection stores one entry per participating agent with name or role, state, summary, and last-updated time",
-        "Projection marks active agents and agents that completed work in the current round from structured metadata",
-        "Agents with no activity expose the fallback state `not started`",
-        "Projection allows early-round summaries to contain questions, hypotheses, or next decisions without rewriting the text",
+        "Timeline reads only the timeline projection region",
+        "Timeline highlights the active step run and keeps completed ancestors on the chosen path visible",
+        "The MVP timeline omits inactive pending branches and renders only the active branch plus active group children",
+        "Group, wait, decision, and terminal step kinds render distinct labels or tokens from projection data",
+        "Snapshots cover grouped work, waiting state, blocked state, retrying state, failed state, and terminal or done state at 120 and 80 columns",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
         "Typecheck passes"
       ],
       "priority": 8,
@@ -132,16 +141,16 @@
     },
     {
       "id": "US-009",
-      "title": "Render per-agent activity summary",
-      "description": "As a user, I want a compact per-agent summary so that I can understand contributions without reading full transcripts.",
+      "title": "Render the agents panel",
+      "description": "As a user, I want to see which agents or roles are active so that I can tell who is working, waiting, blocked, retrying, or done.",
       "acceptanceCriteria": [
-        "Render one row or card per participating agent for the current workflow run",
-        "Each agent entry shows name or role, current state, latest action summary, and last updated time",
-        "Active agents are visually marked as active",
-        "Agents that completed work in the current round are visibly marked for that round",
-        "Agents with no activity render the label `not started`",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Agents panel reads only the agents projection region",
+        "Each row shows participant or role label, current state, and latest action summary derived by the reducer",
+        "Missing participant names or summaries fall back to the shared normalizer tokens instead of panel-specific copy",
+        "Visual states differ for active, waiting, blocked, retrying, and done",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 9,
       "passes": false,
@@ -149,13 +158,15 @@
     },
     {
       "id": "US-010",
-      "title": "Project compact round history data",
-      "description": "As a developer, I want round summaries stored in the workflow projection so that the UI can show how the workflow changed over time.",
+      "title": "Render the history panel",
+      "description": "As a user, I want recent transitions and round summaries so that I can understand what changed most recently without reading raw logs.",
       "acceptanceCriteria": [
-        "Projection stores completed rounds with round number, status, participating agents, and a short summary",
-        "Projection keeps the current round separately addressable from completed rounds",
-        "Round summaries update incrementally as rounds complete",
-        "Projection retains enough data to answer which agents contributed in each recorded round",
+        "History panel reads only the history projection region",
+        "Recent transitions render in deterministic order using reducer ordering fields, with the newest meaningful change visible in the first row",
+        "Round metadata renders as compact round summary rows when present, and missing round metadata does not break the panel layout",
+        "Snapshots cover repeated retries, duplicate timestamps, and mixed step-level and workflow-level transitions",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
         "Typecheck passes"
       ],
       "priority": 10,
@@ -164,16 +175,16 @@
     },
     {
       "id": "US-011",
-      "title": "Render compact round history",
-      "description": "As a user, I want a compact round history so that I can review completed rounds without losing sight of the current work.",
+      "title": "Render the alerts panel",
+      "description": "As a user, I want a dedicated alerts region so that waiting, blocked, retrying, failed, and terminal states are visibly distinct.",
       "acceptanceCriteria": [
-        "Render a history section for completed rounds in the current workflow run",
-        "Current round is expanded by default",
-        "Older completed rounds are collapsed or compacted by default",
-        "Each round entry shows round number, status, participating agents, and a short summary",
-        "History layout keeps the current round, active step, and active agents visible in standard terminal width",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Alerts panel reads only the alerts projection region",
+        "Alerts render distinct output for waiting, blocked, retrying, failed, and terminal states",
+        "Waiting-for-user and waiting-for-agent alerts show the topic or reason when present and the shared fallback token when absent",
+        "The latest active alert stays visible at 120 and 80 columns without reading raw transcript lines",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
       ],
       "priority": 11,
       "passes": false,
@@ -181,18 +192,47 @@
     },
     {
       "id": "US-012",
-      "title": "Document external schema adoption and phased rollout",
-      "description": "As a product and platform team, we want clear compatibility and rollout guidance so that workflows can adopt the schema incrementally without custom TUI branches.",
+      "title": "Emit implement grouped review and repair rounds",
+      "description": "As a developer, I want the implement workflow to emit grouped and retrying execution data so that the reducer and TUI are validated against realistic workflow behavior.",
       "acceptanceCriteria": [
-        "Document schema v1 field definitions with example payloads for minimal and enriched workflow updates",
-        "Document compatibility rules for older, newer, and partial schema payloads",
-        "Document Phase 1 as header plus active-step visibility plus waiting-state clarity",
-        "Document Phase 2 as per-agent activity summary",
-        "Document Phase 3 as compact round history and richer schema adoption",
-        "Document that each phase can ship independently without requiring every workflow to emit the richest metadata",
+        "The implement workflow emits grouped review work with parallel child step runs for reviewer and test activity",
+        "Repair rounds and final verification retries create new step run instances and transitions instead of mutating prior history",
+        "Integration fixtures cover grouped active-path selection, repeated retries, and mixed child statuses",
+        "Tests pass",
         "Typecheck passes"
       ],
       "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Emit implement terminal and retrospective paths",
+      "description": "As a developer, I want explicit terminal-path emission so that the workflow screen can render final outcomes and retrospective branches from real runtime data.",
+      "acceptanceCriteria": [
+        "The implement workflow emits explicit decision and terminal transitions for review gate, final fix, retrospective, done, and failed paths",
+        "End-to-end fixtures prove terminal and retrospective payloads render through the normalizer, reducer, and workflow screen without workflow-specific UI logic",
+        "Latest meaningful transition and terminal alert remain deterministic when timestamps or optional metadata are missing",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Document external workflow adoption and fallback",
+      "description": "As a workflow author, I want validated migration guidance so that built-in and external workflows can adopt the shared contract without custom TUI logic.",
+      "acceptanceCriteria": [
+        "Documentation states that workflow-progress.v2 is the public contract for built-in and external workflows, and any helper emitter API is optional convenience only",
+        "Documentation explains safe degradation for workflow-progress.v1, workflow-progress.v2, and partial metadata across header, timeline, agents, history, and alerts",
+        "Add one executable external-style example that emits step definitions, step runs, and transitions and renders through the shared normalizer, reducer, and TUI path without workflow-specific UI code",
+        "Documentation calls out the MVP read-only constraint and absence of operator controls",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 14,
       "passes": false,
       "notes": ""
     }
