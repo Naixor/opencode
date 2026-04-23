@@ -90,6 +90,15 @@ const commit = z
   })
   .strict()
 
+const work = z
+  .object({
+    summary: z.string(),
+    files: z.array(z.string()).default([]),
+    verify: z.string().default(""),
+    compactions: z.number().int().min(0).default(0),
+  })
+  .strict()
+
 const role = {
   conv: "general",
   impl: "sisyphus",
@@ -105,6 +114,14 @@ type Plan = z.infer<typeof plan>
 type Story = z.infer<typeof story>
 type Split = z.infer<typeof split>
 type Review = z.infer<typeof review>
+type Work = z.infer<typeof work>
+type Reviewer = "Architect" | "QA" | "FE"
+type Node = "convert" | "select" | "implement" | "fix" | "review" | "done" | "failed"
+type Sessions = {
+  impl?: string
+  test?: string
+  review?: Partial<Record<Reviewer, string>>
+}
 
 export default opencode.workflow({
   description: "Run a PRD-to-implementation loop with split review, coding, QA, and retrospective logs",
@@ -122,27 +139,121 @@ export default opencode.workflow({
 
     const dir = logdir(src)
     const file = "tasks/prd.json"
-    const prev = await reuse(ctx, src, file, dir)
-    const log = await loadlog(ctx, src, file, dir, !!prev)
+    const prog = track(ctx.name, src.file)
+    try {
+      const prev = await reuse(ctx, src, file, dir)
+      const log = await loadlog(ctx, src, file, dir, !!prev)
 
-    await ctx.status({
-      title: "Initialize roles",
-      metadata: { source: src.file, prd_file: file, log_dir: dir, roles: role },
-    })
-    await save(ctx, join(dir, "source-prd.md"), src.body)
-    await save(ctx, join(dir, "roles.json"), JSON.stringify(role, null, 2))
-
-    let data: Plan = prev ?? (await draft(ctx, src, dir, log))
-    if (prev) {
       await ctx.status({
-        title: "Reuse backlog",
-        metadata: { source: src.file, prd_file: file, stories: prev.userStories.length },
+        title: "Initialize roles",
+        metadata: { source: src.file, prd_file: file, log_dir: dir, roles: role },
       })
-      await save(ctx, join(dir, "reuse-prd.json"), JSON.stringify(prev, null, 2))
-    }
+      await save(ctx, join(dir, "source-prd.md"), src.body)
+      await save(ctx, join(dir, "roles.json"), JSON.stringify(role, null, 2))
 
-    if (!pick(data)) {
+      let data: Plan = prev ?? (await draft(ctx, src, dir, log, prog))
+      if (prev) {
+        await ctx.status({
+          title: "Reuse backlog",
+          metadata: { source: src.file, prd_file: file, stories: prev.userStories.length },
+          progress: prog.move("convert", { summary: `Reuse existing backlog from ${file}` }),
+        })
+        await save(ctx, join(dir, "reuse-prd.json"), JSON.stringify(prev, null, 2))
+      }
+
+      if (!pick(data)) {
+        await ctx.status({
+          title: "Workflow done",
+          metadata: { source: src.file, prd_file: file, log_dir: dir, stories: data.userStories.length },
+          progress: prog.move("done", { summary: "No stories left to implement" }),
+        })
+        await save(ctx, join(dir, "run.json"), JSON.stringify(log, null, 2))
+        return {
+          title: "Implement workflow",
+          output: [
+            prev ? `Reused existing backlog for: ${src.file}` : undefined,
+            `Source PRD: ${src.file}`,
+            `Backlog: ${file}`,
+            `Stories completed: ${data.userStories.filter((item) => item.passes).length}/${data.userStories.length}`,
+            "Nothing left to implement.",
+            `Log dir: ${dir}`,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+          metadata: {
+            source: src.file,
+            prd_file: file,
+            log_dir: dir,
+            reused_backlog: !!prev,
+            stories: data.userStories.length,
+          },
+        }
+      }
+
+      const sw = await gitbranch(ctx, src, file, data, dir)
+      log.branch = sw
+
+      while (true) {
+        const item = pick(data)
+        if (!item) break
+        await ctx.status({
+          title: `Select ${item.id}`,
+          metadata: { story: item.id, title: item.title, branch: data.branchName },
+          progress: prog.move("select", { summary: `${item.id}: ${item.title}` }),
+        })
+        const out = await runstory(ctx, src, file, data, item, dir, prog, resumestory(log, item))
+        log.stories = mergestories(log.stories, out.log)
+        log.paused = out.paused ?? null
+        await save(ctx, join(dir, `story-${item.id}.json`), JSON.stringify(out.log, null, 2))
+        if (out.paused) {
+          await ctx.status({
+            title: `Pause ${out.paused.story}`,
+            metadata: { story: out.paused.story, round: out.paused.round, branch: data.branchName },
+            progress: prog.move("failed", {
+              summary: `${out.paused.story}: review repair limit reached after ${out.paused.round} round(s)`,
+            }),
+          })
+          await save(ctx, join(dir, "run.json"), JSON.stringify(log, null, 2))
+          return {
+            title: "Implement workflow",
+            output: [
+              `Source PRD: ${src.file}`,
+              `Backlog: ${file}`,
+              `Stories completed: ${data.userStories.filter((item) => item.passes).length}/${data.userStories.length}`,
+              `Paused on: ${out.paused.story}`,
+              `Reason: review repair limit reached after ${out.paused.round} round(s)`,
+              out.paused.issues.length > 0 ? `Open issues: ${clip(out.paused.issues.join(" | "))}` : undefined,
+              `Log dir: ${dir}`,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+            metadata: {
+              source: src.file,
+              prd_file: file,
+              log_dir: dir,
+              stories: data.userStories.length,
+              paused_story: out.paused.story,
+            },
+          }
+        }
+        data = mark(data, item.id, out.note) as Plan
+        await writeplan(ctx, file, data)
+        await save(ctx, join(dir, "run.json"), JSON.stringify(log, null, 2))
+      }
+
+      const verify = await finish(ctx, data, dir)
+      log.final_verify = verify.log
+      log.retrospective = verify.retro
+      await save(ctx, join(dir, "retrospective.md"), verify.retro)
+      await ctx.status({
+        title: "Workflow done",
+        metadata: { source: src.file, prd_file: file, log_dir: dir, stories: data.userStories.length },
+        progress: prog.move("done", {
+          summary: `Completed ${data.userStories.length}/${data.userStories.length} stories`,
+        }),
+      })
       await save(ctx, join(dir, "run.json"), JSON.stringify(log, null, 2))
+
       return {
         title: "Implement workflow",
         output: [
@@ -150,8 +261,8 @@ export default opencode.workflow({
           `Source PRD: ${src.file}`,
           `Backlog: ${file}`,
           `Stories completed: ${data.userStories.filter((item) => item.passes).length}/${data.userStories.length}`,
-          "Nothing left to implement.",
           `Log dir: ${dir}`,
+          verify.retro ? ["Retrospective:", verify.retro].join("\n\n") : undefined,
         ]
           .filter(Boolean)
           .join("\n\n"),
@@ -163,82 +274,33 @@ export default opencode.workflow({
           stories: data.userStories.length,
         },
       }
-    }
-
-    const sw = await gitbranch(ctx, src, file, data, dir)
-    log.branch = sw
-
-    while (true) {
-      const item = pick(data)
-      if (!item) break
-      const out = await runstory(ctx, src, file, data, item, dir)
-      log.stories.push(out.log)
-      await save(ctx, join(dir, `story-${item.id}.json`), JSON.stringify(out.log, null, 2))
-      if (out.paused) {
-        log.paused = out.paused
-        await save(ctx, join(dir, "run.json"), JSON.stringify(log, null, 2))
-        return {
-          title: "Implement workflow",
-          output: [
-            `Source PRD: ${src.file}`,
-            `Backlog: ${file}`,
-            `Stories completed: ${data.userStories.filter((item) => item.passes).length}/${data.userStories.length}`,
-            `Paused on: ${out.paused.story}`,
-            `Reason: review repair limit reached after ${out.paused.round} round(s)`,
-            out.paused.issues.length > 0 ? `Open issues: ${clip(out.paused.issues.join(" | "))}` : undefined,
-            `Log dir: ${dir}`,
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
-          metadata: {
-            source: src.file,
-            prd_file: file,
-            log_dir: dir,
-            stories: data.userStories.length,
-            paused_story: out.paused.story,
-          },
-        }
-      }
-      data = mark(data, item.id, out.note) as Plan
-      await writeplan(ctx, file, data)
-    }
-
-    const verify = await finish(ctx, data, dir)
-    log.final_verify = verify.log
-    log.retrospective = verify.retro
-    await save(ctx, join(dir, "retrospective.md"), verify.retro)
-    await save(ctx, join(dir, "run.json"), JSON.stringify(log, null, 2))
-
-    return {
-      title: "Implement workflow",
-      output: [
-        prev ? `Reused existing backlog for: ${src.file}` : undefined,
-        `Source PRD: ${src.file}`,
-        `Backlog: ${file}`,
-        `Stories completed: ${data.userStories.filter((item) => item.passes).length}/${data.userStories.length}`,
-        `Log dir: ${dir}`,
-        verify.retro ? ["Retrospective:", verify.retro].join("\n\n") : undefined,
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      metadata: {
-        source: src.file,
-        prd_file: file,
-        log_dir: dir,
-        reused_backlog: !!prev,
-        stories: data.userStories.length,
-      },
+    } catch (err) {
+      await ctx.status({
+        title: "Workflow failed",
+        metadata: { source: src.file, prd_file: file, log_dir: dir },
+        progress: prog.move("failed", {
+          summary: err instanceof Error && err.message ? err.message : String(err),
+        }),
+      })
+      throw err
     }
   },
 })
 
-async function draft(ctx: Ctx, src: { file: string; body: string }, dir: string, log: Record<string, unknown>) {
+async function draft(
+  ctx: Ctx,
+  src: { file: string; body: string },
+  dir: string,
+  log: Record<string, unknown>,
+  prog: ReturnType<typeof track>,
+) {
   const feed: string[] = []
 
   for (let i = 1; i <= 5; i++) {
     await ctx.status({
       title: `Convert PRD ${i}`,
       metadata: { round: i, source: src.file },
+      progress: prog.move("convert", { summary: `Convert backlog from ${src.file}` }),
     })
 
     const conv = await json(
@@ -247,7 +309,7 @@ async function draft(ctx: Ctx, src: { file: string; body: string }, dir: string,
         description: `Convert PRD ${i}`,
         prompt: convprompt(src, feed),
         subagent: role.conv,
-        category: "deep",
+        category: "quick",
         load_skills: ["ralph"],
       },
       plan,
@@ -268,6 +330,7 @@ async function draft(ctx: Ctx, src: { file: string; body: string }, dir: string,
     await ctx.status({
       title: `Review split ${i}`,
       metadata: { round: i, stories: data.userStories.length },
+      progress: prog.move("convert", { summary: `Review converted backlog with ${data.userStories.length} stories` }),
     })
 
     const rows = await Promise.all([
@@ -288,7 +351,7 @@ async function draft(ctx: Ctx, src: { file: string; body: string }, dir: string,
           description: `QA split check ${i}`,
           prompt: splitprompt("QA", src, data),
           subagent: role.qa,
-          category: "deep",
+          category: "medium",
         },
         splitcompat,
         `QA split check ${i}`,
@@ -299,7 +362,7 @@ async function draft(ctx: Ctx, src: { file: string; body: string }, dir: string,
           description: `FE split check ${i}`,
           prompt: splitprompt("FE", src, data),
           subagent: role.fe,
-          category: "deep",
+          category: "medium",
         },
         splitcompat,
         `FE split check ${i}`,
@@ -334,93 +397,153 @@ async function runstory(
   data: Plan,
   item: Story,
   dir: string,
+  prog: ReturnType<typeof track>,
+  resume?: {
+    log: {
+      story: string
+      title: string
+      rounds: Array<Record<string, unknown>>
+      decisions: Array<Record<string, unknown>>
+      unresolved: string[]
+      commit: null | Record<string, unknown>
+      sessions?: {
+        impl?: string
+        test?: string
+        review?: Partial<Record<"Architect" | "QA" | "FE", string>>
+      }
+    }
+    round: number
+    handoff: string
+    fix: string
+    guide: string
+    sessions?: {
+      impl?: string
+      test?: string
+      review?: Partial<Record<"Architect" | "QA" | "FE", string>>
+    }
+  },
 ) {
-  const out = {
-    story: item.id,
-    title: item.title,
-    rounds: [] as Array<Record<string, unknown>>,
-    decisions: [] as Array<Record<string, unknown>>,
-    unresolved: [] as string[],
-    commit: null as null | Record<string, unknown>,
+  const out = resume?.log ?? initstory(item)
+  let handoff = resume?.handoff ?? ""
+  let fix = resume?.fix ?? ""
+  let guide = resume?.guide ?? ""
+  let impl = resume?.sessions?.impl ?? out.sessions?.impl
+  let testid = resume?.sessions?.test ?? out.sessions?.test
+  const reviewids = {
+    Architect: resume?.sessions?.review?.Architect ?? out.sessions?.review?.Architect,
+    QA: resume?.sessions?.review?.QA ?? out.sessions?.review?.QA,
+    FE: resume?.sessions?.review?.FE ?? out.sessions?.review?.FE,
   }
-  let handoff = ""
-  let fix = ""
 
-  for (let i = 1; ; i++) {
+  for (let i = resume?.round ?? 1; ; i++) {
+    const start = Date.now()
+    const step = i === 1 ? "implement" : "fix"
     await ctx.status({
       title: `${item.id} work ${i}`,
       metadata: { story: item.id, round: i },
+      progress: prog.move(step, {
+        summary: i === 1 ? `${item.id}: ${item.title}` : `Repair ${item.id}: ${item.title}`,
+        round: i,
+      }),
     })
 
-    const job = await ctx.task({
-      description: i === 1 ? `${item.id} implement` : `${item.id} fix ${i - 1}`,
-      prompt: workprompt(src, file, data, item, fix, i, handoff),
-      subagent: role.impl,
-      category: "deep",
-    })
-    handoff = job.text.trim()
-    await save(ctx, join(dir, `${item.id}-work-${i}.md`), job.text)
+    const desc = i === 1 ? `${item.id} implement` : `${item.id} fix ${i - 1}`
+    const job: { value: { session_id: string; text: string }; ms: number } = await timed(() =>
+      ctx.task({
+        description: desc,
+        prompt: workprompt(src, file, data, item, fix, i, handoff, guide),
+        subagent: role.impl,
+        category: "deep",
+        ...(impl ? { session_id: impl } : {}),
+      }),
+    )
+    impl = i > 1 && (await rotates(job.value.session_id)) ? undefined : job.value.session_id
+    handoff = job.value.text.trim()
+    out.sessions = {
+      impl,
+      test: testid,
+      review: compactreview(reviewids),
+    }
+    await save(ctx, join(dir, `${item.id}-work-${i}.md`), job.value.text)
 
+    const files = uniq(await changed(job.value.session_id))
+    const names = reviewers(files)
     await ctx.status({
       title: `${item.id} review ${i}`,
-      metadata: { story: item.id, round: i },
+      metadata: { story: item.id, round: i, reviewers: names, files },
+      progress: prog.move("review", {
+        summary: `${item.id}: ${names.join(", ")} review gate`,
+        round: i,
+      }),
     })
 
-    const rows = await Promise.all([
-      json(
+    const rows = await Promise.all(
+      names.map((name) =>
+        timed<{
+          data: { role: string; ok: boolean; summary: string; issues: string[] }
+          text: string
+          session_id: string
+        }>(() =>
+          jsontask(
+            ctx,
+            {
+              description: `${item.id} ${name} review ${i}`,
+              prompt: reviewprompt(name, src.file, file, item, i, handoff, files),
+              subagent: reviewagent(name),
+              category: reviewcat(name),
+              ...(reviewids[name] ? { session_id: reviewids[name] } : {}),
+            },
+            reviewcompat,
+            `${item.id} ${name} review ${i}`,
+          ),
+        ),
+      ),
+    )
+    const test = await timed<{ text: string; fail: string; session_id: string }>(() =>
+      verifytask(
         ctx,
         {
-          description: `${item.id} architect review ${i}`,
-          prompt: reviewprompt("Architect", src.file, file, item, i, handoff),
-          subagent: role.architect,
+          description: `${item.id} tests ${i}`,
+          prompt: testprompt(src.file, file, item, i, files),
+          subagent: role.test,
           category: "deep",
+          ...(testid ? { session_id: testid } : {}),
         },
-        reviewcompat,
-        `${item.id} architect review ${i}`,
+        `${item.id} tests ${i}`,
       ),
-      json(
-        ctx,
-        {
-          description: `${item.id} QA review ${i}`,
-          prompt: reviewprompt("QA", src.file, file, item, i, handoff),
-          subagent: role.qa,
-          category: "deep",
-        },
-        reviewcompat,
-        `${item.id} QA review ${i}`,
-      ),
-      json(
-        ctx,
-        {
-          description: `${item.id} FE review ${i}`,
-          prompt: reviewprompt("FE", src.file, file, item, i, handoff),
-          subagent: role.fe,
-          category: "deep",
-        },
-        reviewcompat,
-        `${item.id} FE review ${i}`,
-      ),
-      ctx.task({
-        description: `${item.id} tests ${i}`,
-        prompt: testprompt(src.file, file, item, i),
-        subagent: role.test,
-        category: "deep",
-      }),
-    ])
-
-    const reviews = [rows[0].data, rows[1].data, rows[2].data]
-    const tests = rows[3].text.trim()
+    )
+    const reviews = rows.map((item, idx) => {
+      reviewids[names[idx]!] = item.value.session_id
+      return item.value.data
+    })
+    testid = test.value.session_id
+    const tests = test.value.fail
     const review_issues = reviewissues(reviews)
     const notes = issues(review_issues, tests)
     const row = {
       round: i,
-      work: clip(job.text),
+      work: clip(handoff),
+      files,
+      reviewers: names,
       reviews,
       review_issues,
+      test_output: test.value.text,
       test_failures: tests,
       issues: notes,
+      timing: {
+        total_ms: Date.now() - start,
+        work_ms: job.ms,
+        review_ms: rows.reduce((sum, item) => sum + item.ms, 0),
+        test_ms: test.ms,
+        review: rows.map((item, idx) => ({ role: names[idx], ms: item.ms })),
+      },
     }
     out.rounds.push(row)
+    out.sessions = {
+      impl,
+      test: testid,
+      review: compactreview(reviewids),
+    }
     await save(ctx, join(dir, `${item.id}-review-${i}.json`), JSON.stringify(row, null, 2))
 
     if (review_issues.length === 0 && !tests) {
@@ -428,7 +551,7 @@ async function runstory(
       out.commit = done
       return {
         log: out,
-        note: note(job.text, i, done.commit),
+        note: note(handoff, i, done.commit),
       }
     }
 
@@ -443,12 +566,12 @@ async function runstory(
       out.commit = done
       return {
         log: out,
-        note: note(job.text, i, done.commit, review_issues),
+        note: note(handoff, i, done.commit, review_issues),
       }
     }
 
-    fix = fixprompt(item, review_issues, tests)
-    if (!tests || i % 6 !== 0) continue
+    fix = fixprompt(item, review_issues, tests, guide, files)
+    if (i % 5 !== 0) continue
 
     const ask = await ctx.ask({
       questions: [
@@ -457,6 +580,7 @@ async function runstory(
           question: [
             `Story ${item.id} still has review or verification issues after ${i} repair round(s).`,
             "Choose whether to keep repairing now or stop the workflow for manual follow-up.",
+            "You can also type a short instruction for the next repair round; custom text is treated as continue.",
           ].join("\n\n"),
           options: [
             { label: "Continue fixing (Recommended)", description: "Run another repair batch" },
@@ -467,14 +591,27 @@ async function runstory(
     })
     const answer = ask.answers[0]?.[0] ?? "Continue fixing (Recommended)"
     out.decisions.push({ round: i, answer, issues: notes })
-    if (answer.startsWith("Continue")) continue
+    if (!stopanswer(answer)) {
+      guide = guideanswer(answer) ?? guide
+      fix = fixprompt(item, review_issues, tests, guide, files)
+      continue
+    }
 
     return {
       log: out,
       paused: {
         story: item.id,
         round: i,
+        next_round: i + 1,
+        handoff,
+        fix,
+        guide,
         issues: notes,
+        sessions: {
+          impl,
+          test: testid,
+          review: compactreview(reviewids),
+        },
       },
     }
   }
@@ -490,19 +627,24 @@ async function finish(ctx: Ctx, data: Plan, dir: string) {
       metadata: { round: i, stories: data.userStories.length },
     })
 
-    const test = await ctx.task({
-      description: `Final test run ${i}`,
-      prompt: finalprompt("tasks/prd.json", data.sourcePrdFile ?? "inline-prd.md", data, i),
-      subagent: role.test,
-      category: "deep",
-    })
-    const fail = test.text.trim()
+    const test = await verify(
+      ctx,
+      {
+        description: `Final test run ${i}`,
+        prompt: finalprompt("tasks/prd.json", data.sourcePrdFile ?? "inline-prd.md", data, i),
+        subagent: role.test,
+        category: "deep",
+      },
+      `Final test run ${i}`,
+    )
+    const fail = test.fail
     const row: Record<string, unknown> = {
       round: i,
+      output: test.text,
       failures: fail,
     }
     log.push(row)
-    await save(ctx, join(dir, `final-test-${i}.txt`), fail)
+    await save(ctx, join(dir, `final-test-${i}.txt`), test.text)
 
     if (!fail) break
 
@@ -591,7 +733,7 @@ async function loadlog(ctx: Pick<Ctx, "directory">, src: { file: string }, file:
     split_rounds: Array.isArray(raw.split_rounds) ? raw.split_rounds : [],
     stories: Array.isArray(raw.stories) ? raw.stories : [],
     final_verify: Array.isArray(raw.final_verify) ? raw.final_verify : [],
-    paused: null,
+    paused: raw.paused && typeof raw.paused === "object" ? raw.paused : null,
     retrospective: typeof raw.retrospective === "string" ? raw.retrospective : "",
   }
 }
@@ -610,6 +752,204 @@ function initlog(source: string, file: string, dir: string, reused: boolean) {
     paused: null as null | Record<string, unknown>,
     retrospective: "",
   }
+}
+
+function initstory(item: Story) {
+  return {
+    story: item.id,
+    title: item.title,
+    rounds: [] as Array<Record<string, unknown>>,
+    decisions: [] as Array<Record<string, unknown>>,
+    unresolved: [] as string[],
+    commit: null as null | Record<string, unknown>,
+    sessions: {} as Sessions,
+  }
+}
+
+function resumestory(
+  log: {
+    stories: Array<Record<string, unknown>>
+    paused: null | Record<string, unknown>
+  },
+  item: Story,
+) {
+  const paused = log.paused && log.paused.story === item.id && !Array.isArray(log.paused) ? log.paused : undefined
+  const prev =
+    log.stories.toReversed().find((entry) => entry.story === item.id && (!entry.commit || paused)) ??
+    (paused ? { story: item.id, title: item.title } : undefined)
+  if (!prev) return
+
+  return {
+    log: {
+      story: typeof prev.story === "string" ? prev.story : item.id,
+      title: typeof prev.title === "string" ? prev.title : item.title,
+      rounds: Array.isArray(prev.rounds) ? prev.rounds : [],
+      decisions: Array.isArray(prev.decisions) ? prev.decisions : [],
+      unresolved: Array.isArray(prev.unresolved) ? prev.unresolved.filter((item) => typeof item === "string") : [],
+      commit:
+        prev.commit && typeof prev.commit === "object" && !Array.isArray(prev.commit)
+          ? (prev.commit as Record<string, unknown>)
+          : null,
+      sessions: sessions(prev.sessions),
+    },
+    round:
+      typeof paused?.next_round === "number"
+        ? paused.next_round
+        : Array.isArray(prev.rounds)
+          ? prev.rounds.length + 1
+          : 1,
+    handoff: typeof paused?.handoff === "string" ? paused.handoff : "",
+    fix: typeof paused?.fix === "string" ? paused.fix : "",
+    guide: typeof paused?.guide === "string" ? paused.guide : "",
+    sessions: sessions(paused?.sessions ?? prev.sessions),
+  }
+}
+
+function mergestories(list: Array<Record<string, unknown>>, item: Record<string, unknown>) {
+  const id = typeof item.story === "string" ? item.story : ""
+  if (!id) return [...list, item]
+  const idx = list.findIndex((row) => row.story === id)
+  if (idx === -1) return [...list, item]
+  return list.map((row, n) => (n === idx ? item : row))
+}
+
+function sessions(input: unknown): Sessions {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {}
+  const item = input as Record<string, unknown>
+  return {
+    impl: typeof item.impl === "string" ? item.impl : undefined,
+    test: typeof item.test === "string" ? item.test : undefined,
+    review:
+      item.review && typeof item.review === "object" && !Array.isArray(item.review) ? compactreview(item.review) : {},
+  }
+}
+
+function compactreview(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {}
+  const item = input as Record<string, unknown>
+  return {
+    Architect: typeof item.Architect === "string" ? item.Architect : undefined,
+    QA: typeof item.QA === "string" ? item.QA : undefined,
+    FE: typeof item.FE === "string" ? item.FE : undefined,
+  } satisfies Partial<Record<Reviewer, string>>
+}
+
+function uniq(input: string[]) {
+  return [...new Set(input.filter(Boolean))]
+}
+
+function reviewers(files: string[]): Reviewer[] {
+  if (files.length === 0) return ["Architect", "QA", "FE"]
+  if (files.every((file) => /(^|\/)test\//.test(file) || /\.test\.[^.]+$/.test(file) || /\.spec\.[^.]+$/.test(file))) {
+    return ["QA"]
+  }
+  if (files.some(ui)) return ["Architect", "QA", "FE"]
+  return ["Architect", "QA"]
+}
+
+function ui(file: string) {
+  const low = file.toLowerCase()
+  return [".tsx", ".jsx", ".css", ".scss", ".sass", ".less", ".html"].some((ext) => low.endsWith(ext))
+}
+
+function reviewagent(name: Reviewer) {
+  if (name === "Architect") return role.architect
+  if (name === "QA") return role.qa
+  return role.fe
+}
+
+function reviewcat(name: Reviewer) {
+  return name === "Architect" ? "deep" : "medium"
+}
+
+async function timed<T>(fn: () => Promise<T>) {
+  const start = Date.now()
+  return { value: await fn(), ms: Date.now() - start }
+}
+
+async function jsontask<T extends z.ZodTypeAny>(ctx: Pick<Ctx, "task">, input: Job, schema: T, label: string) {
+  let text = ""
+  let err = ""
+  let sid = ""
+
+  for (let i = 1; i <= 3; i++) {
+    const prompt =
+      i === 1
+        ? input.prompt
+        : [
+            input.prompt,
+            "",
+            `Previous output for ${label} could not be parsed.`,
+            `Error: ${err}`,
+            "Return strict JSON only.",
+            "Previous output:",
+            text,
+          ].join("\n")
+    const out = await ctx.task({ ...input, prompt })
+    sid = out.session_id
+    text = out.text
+    try {
+      const raw = parse(text)
+      const next = schema.safeParse(raw)
+      if (next.success) return { data: next.data, text, session_id: sid }
+      err = next.error.issues.map((item) => `${item.path.join(".") || "root"}: ${item.message}`).join("\n")
+    } catch (cause) {
+      err = cause instanceof Error ? cause.message : String(cause)
+    }
+  }
+
+  throw new Error(`${label} did not return valid JSON after 3 attempts: ${err}`)
+}
+
+async function verifytask(ctx: Pick<Ctx, "task">, input: Job, label: string) {
+  let text = ""
+  let sid = ""
+
+  for (let i = 1; i <= 3; i++) {
+    const prompt =
+      i === 1
+        ? input.prompt
+        : [
+            input.prompt,
+            "",
+            `Previous output for ${label} did not follow the required verification format.`,
+            "Return exactly one of:",
+            "VERIFY: PASS",
+            "",
+            "or:",
+            "VERIFY: FAIL",
+            "FAILURES:",
+            "<concise failure details>",
+            "",
+            "Previous output:",
+            text || "<empty>",
+          ].join("\n")
+    const out = await ctx.task({ ...input, prompt })
+    sid = out.session_id
+    text = out.text.trim()
+    const next = parseverify(text)
+    if (next) return { ...next, session_id: sid }
+  }
+
+  throw new Error(`${label} did not return valid verification output after 3 attempts`)
+}
+
+async function changed(id: string) {
+  const mod = await import("../../packages/opencode/src/session/index.ts")
+  const diffs = mod.Session?.diff ? await mod.Session.diff(id).catch(() => []) : []
+  return diffs.map((item: { file: string }) => item.file)
+}
+
+async function rotates(id?: string) {
+  if (!id) return false
+  const mod = await import("../../packages/opencode/src/session/index.ts")
+  if (!mod.Session?.messages) return false
+  const msg = await mod.Session.messages({ sessionID: id })
+  let count = 0
+  for (const item of msg) {
+    if (item.parts.some((part: { type: string }) => part.type === "compaction")) count += 1
+  }
+  return count > 1
 }
 
 async function readjson(ctx: Pick<Ctx, "directory">, file: string) {
@@ -666,6 +1006,7 @@ function workprompt(
   fix: string,
   round: number,
   handoff: string,
+  guide = "",
 ) {
   return [
     "You are Sisyphus implementing one story from the generated backlog.",
@@ -676,7 +1017,8 @@ function workprompt(
     "Only implement the current story.",
     "Read the source PRD and `tasks/prd.json` only if you need more detail.",
     "Do not edit `tasks/prd.json`; the workflow updates pass state itself.",
-    "Make focused code changes, run the smallest relevant verification, and summarize what changed.",
+    "Make focused code changes, run the smallest relevant verification, and return strict JSON only.",
+    'Use exactly this shape: {"summary":"...","files":["path/to/file"],"verify":"...","compactions":0}',
     fix
       ? [
           "This is a repair round.",
@@ -689,13 +1031,22 @@ function workprompt(
     "Current story:",
     JSON.stringify(item, null, 2),
     handoff ? ["", "Previous round handoff:", handoff].join("\n") : "",
+    guide ? ["", `Operator instruction: ${guide}`].join("\n") : "",
     fix ? ["", "Required fixes:", fix].join("\n") : "",
   ]
     .filter(Boolean)
     .join("\n")
 }
 
-function reviewprompt(name: string, src: string, file: string, item: Story, round: number, handoff: string) {
+function reviewprompt(
+  name: string,
+  src: string,
+  file: string,
+  item: Story,
+  round: number,
+  handoff: string,
+  files: string[],
+) {
   return [
     `You are the ${name} reviewer for the current story implementation.`,
     focus(name, false),
@@ -709,23 +1060,27 @@ function reviewprompt(name: string, src: string, file: string, item: Story, roun
     'Use exactly this shape: {"role":"' + name + '","approve":true,"summary":"...","issues":["..."]}',
     "",
     `Review round: ${round}`,
+    `Touched files: ${files.join(", ") || "unknown"}`,
     handoff ? ["Implementer summary:", handoff, ""].join("\n") : "",
     "Story:",
     JSON.stringify(item, null, 2),
   ].join("\n")
 }
 
-function testprompt(src: string, file: string, item: Story, round: number) {
+function testprompt(src: string, file: string, item: Story, round: number, files: string[]) {
   return [
     "Run the relevant verification for the current story changes.",
     "Follow repository testing instructions.",
     `Source PRD path: \`${src}\``,
     `Backlog path: \`${file}\``,
     "Read the source PRD and `tasks/prd.json` only if you need more detail.",
-    "Return only failing testcases, typecheck errors, build errors, or other verification failures.",
-    "Return an empty response when everything needed for this story is clean.",
+    "Return verification in this exact format.",
+    "If everything needed for this story is clean, return exactly `VERIFY: PASS`.",
+    "If anything fails, return exactly `VERIFY: FAIL`, then a line with `FAILURES:`, then only the concise failure details.",
+    "Do not return any other prelude, suffix, or formatting.",
     "",
     `Review round: ${round}`,
+    `Touched files: ${files.join(", ") || "unknown"}`,
     "Story:",
     JSON.stringify(item, null, 2),
   ].join("\n")
@@ -739,8 +1094,10 @@ function finalprompt(file: string, src: string, data: Plan, round: number) {
     `Backlog path: \`${file}\``,
     `Current progress: ${progress(data)}`,
     "Read the source PRD and `tasks/prd.json` only if you need more detail.",
-    "Return only failing testcases, typecheck errors, build errors, or other verification failures.",
-    "Return an empty response when the workspace is clean.",
+    "Return verification in this exact format.",
+    "If the workspace is clean, return exactly `VERIFY: PASS`.",
+    "If anything fails, return exactly `VERIFY: FAIL`, then a line with `FAILURES:`, then only the concise failure details.",
+    "Do not return any other prelude, suffix, or formatting.",
     "",
     `Final verify round: ${round}`,
   ].join("\n")
@@ -775,18 +1132,32 @@ function retroprompt(file: string, src: string, data: Plan, log: Array<Record<st
   ].join("\n")
 }
 
-function fixprompt(item: Story, notes: string[], tests: string) {
+function fixprompt(item: Story, notes: string[], tests: string, guide = "", files: string[] = []) {
   return [
     `Repair story ${item.id} (${item.title}).`,
     [
       "Address every test-runner failure before finishing.",
       "Reviewer issues can be fixed in code or answered with a necessary justification that the same reviewer can accept next round.",
     ].join(" "),
+    guide ? `Operator instruction: ${guide}` : "",
+    files.length > 0 ? `Touched files: ${files.join(", ")}` : "",
     notes.length > 0 ? `Review findings: ${notes.join(" | ")}` : "Review findings: none.",
     tests ? ["", "Failing testcases or verification errors:", tests].join("\n") : "",
   ]
     .filter(Boolean)
     .join("\n")
+}
+
+function stopanswer(answer: string) {
+  const text = answer.trim().toLowerCase()
+  return text === "stop workflow" || text === "stop"
+}
+
+function guideanswer(answer: string) {
+  const text = answer.trim()
+  if (!text || text.startsWith("Continue fixing")) return
+  if (stopanswer(text)) return
+  return text
 }
 
 function fixplan(data: Plan, file: string, reset = true) {
@@ -846,7 +1217,7 @@ function mark(data: Plan, id: string, notes: string) {
   }
 }
 
-function reviewissues(reviews: Review[]) {
+function reviewissues(reviews: Array<{ role: string; issues: string[] }>) {
   return reviews.flatMap((item) => item.issues.map((note) => `${item.role}: ${note}`))
 }
 
@@ -946,6 +1317,47 @@ async function json<T extends z.ZodTypeAny>(ctx: Pick<Ctx, "task">, input: Job, 
   throw new Error(`${label} did not return valid JSON after 3 attempts: ${err}`)
 }
 
+async function verify(ctx: Pick<Ctx, "task">, input: Job, label: string) {
+  let text = ""
+
+  for (let i = 1; i <= 3; i++) {
+    const prompt =
+      i === 1
+        ? input.prompt
+        : [
+            input.prompt,
+            "",
+            `Previous output for ${label} did not follow the required verification format.`,
+            "Return exactly one of:",
+            "VERIFY: PASS",
+            "",
+            "or:",
+            "VERIFY: FAIL",
+            "FAILURES:",
+            "<concise failure details>",
+            "",
+            "Previous output:",
+            text || "<empty>",
+          ].join("\n")
+    text = (await ctx.task({ ...input, prompt })).text.trim()
+    const out = parseverify(text)
+    if (out) return out
+  }
+
+  throw new Error(`${label} did not return valid verification output after 3 attempts`)
+}
+
+function parseverify(text: string) {
+  const raw = text.trim()
+  if (raw === "VERIFY: PASS") return { text: raw, fail: "" }
+  const match = raw.match(/^VERIFY: FAIL\s+FAILURES:\s*([\s\S]+)$/)
+  if (!match?.[1].trim()) return
+  return {
+    text: raw,
+    fail: match[1].trim(),
+  }
+}
+
 async function save(ctx: Pick<Ctx, "write">, file: string, body: string) {
   await ctx.write({ file, content: body })
 }
@@ -1007,12 +1419,145 @@ function progress(data: Plan, cur?: string) {
     .join(" ")
 }
 
+function track(name: string, src: string) {
+  const start = stamp()
+  const flow = [
+    { id: "convert", kind: "task", label: "Convert PRD", next: ["select"] },
+    { id: "select", kind: "decision", label: "Select story", next: ["implement"] },
+    { id: "implement", kind: "task", label: "Implement story", next: ["review"] },
+    { id: "fix", kind: "task", label: "Apply fixes", next: ["review"] },
+    { id: "review", kind: "decision", label: "Review gate", next: ["fix", "select", "done", "failed"] },
+    { id: "done", kind: "terminal", label: "Done" },
+    { id: "failed", kind: "terminal", label: "Failed" },
+  ] as const
+  const runs = [] as Array<Record<string, unknown>>
+  const trans = [] as Array<Record<string, unknown>>
+  const seen = {
+    convert: 0,
+    select: 0,
+    implement: 0,
+    fix: 0,
+    review: 0,
+    done: 0,
+    failed: 0,
+  }
+  let node: Node | undefined
+  let run: string | undefined
+  let state: "running" | "done" | "failed" = "running"
+  let note = `Convert backlog from ${src}`
+
+  function move(next: Node, input: { summary: string; round?: number }) {
+    const time = stamp()
+    note = input.summary
+    if (node !== next && run) {
+      const row = runs.find((item) => item.id === run)
+      if (row && row.status === "active") {
+        row.status = next === "failed" ? "failed" : "completed"
+        row.ended_at = time
+        trans.push({
+          id: `${row.id}:${row.status}`,
+          seq: trans.length,
+          timestamp: time,
+          level: "step",
+          target_id: row.step_id,
+          run_id: row.id,
+          to_state: row.status,
+        })
+      }
+    }
+    if (node !== next || !run) {
+      seen[next] += 1
+      run = `${next}-${seen[next]}`
+      runs.push({
+        id: run,
+        seq: runs.length,
+        step_id: next,
+        status: next === "done" ? "completed" : next === "failed" ? "failed" : "active",
+        summary: input.summary,
+        started_at: time,
+        ...(input.round ? { round: { current: input.round, label: `Round ${input.round}` } } : {}),
+      })
+      trans.push({
+        id: `${run}:start`,
+        seq: trans.length,
+        timestamp: time,
+        level: "step",
+        target_id: next,
+        run_id: run,
+        to_state: next === "done" ? "completed" : next === "failed" ? "failed" : "active",
+      })
+    }
+    if (node !== next) {
+      node = next
+      const to = next === "done" ? "done" : next === "failed" ? "failed" : "running"
+      if (state !== to) {
+        trans.push({
+          id: `workflow:${to}:${trans.length}`,
+          seq: trans.length,
+          timestamp: time,
+          level: "workflow",
+          target_id: "workflow",
+          from_state: state,
+          to_state: to,
+        })
+        state = to
+      }
+    }
+    if (node === next && run) {
+      const row = runs.find((item) => item.id === run)
+      if (row) {
+        row.summary = input.summary
+        if (input.round) row.round = { current: input.round, label: `Round ${input.round}` }
+        if (!input.round && "round" in row) delete row.round
+      }
+    }
+    return {
+      version: "workflow-progress.v2",
+      workflow: {
+        status: state,
+        name,
+        label: "Implement workflow",
+        summary: note,
+        started_at: start,
+        ...(state === "done" || state === "failed" ? { ended_at: time } : {}),
+      },
+      phase: {
+        status: state === "done" ? "completed" : state === "failed" ? "failed" : "active",
+        key: node,
+        label: flow.find((item) => item.id === node)?.label ?? "Workflow",
+        summary: note,
+      },
+      machine: {
+        id: name,
+        key: name,
+        label: "Implement workflow",
+        root_step_id: "convert",
+        ...(node ? { active_step_id: node } : {}),
+        ...(run ? { active_run_id: run } : {}),
+        started_at: start,
+        updated_at: time,
+      },
+      step_definitions: flow,
+      step_runs: runs,
+      transitions: trans,
+      participants: [],
+    } as const
+  }
+
+  return { move }
+}
+
+function stamp() {
+  return new Date().toISOString()
+}
+
 function branchprompt(src: { file: string }, file: string, data: Plan) {
   return [
     `Switch the repository to branch \`${data.branchName}\`.`,
     `Source PRD path: \`${src.file}\``,
     `Backlog path: \`${file}\``,
-    "Create the branch if it does not exist locally. If it exists, switch to it.",
+    "If the branch does not exist locally, create it from the branch that is currently checked out.",
+    "If it already exists, switch to it without recreating it from a fixed base branch.",
     "Do not make code changes in this step.",
     "Return strict JSON only.",
     `Use exactly this shape: {"ok":true,"branch":"${data.branchName}","summary":"..."}`,

@@ -83,8 +83,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed with workflow-progress.v2 emission in `.opencode/workflows/implement.ts`, thin state-machine tracking for convert/select/implement-fix/review/done-failed, and end-to-end coverage in `packages/opencode/test/workflow/implement.test.ts` proving the shared workflow screen consumes emitted v2 metadata. Updated `.opencode/agent/test-runner.md` so implement workflow verification can parse strict VERIFY pass/fail output reliably. Accepted unresolved reviewer notes: none."
     },
     {
       "id": "US-006",

@@ -2,7 +2,8 @@ import fs from "fs/promises"
 import path from "path"
 import { describe, expect, test } from "bun:test"
 import { pathToFileURL } from "url"
-import { runtime, type TaskInput, type WorkflowContext } from "@lark-opencode/workflow-api"
+import { WorkflowProgressKey, runtime, type TaskInput, type WorkflowContext } from "@lark-opencode/workflow-api"
+import { workflowscreen } from "../../src/cli/cmd/tui/routes/session/workflow-screen"
 import { tmpdir } from "../fixture/fixture"
 
 describe("implement workflow", () => {
@@ -108,14 +109,14 @@ describe("implement workflow", () => {
         if (input.description === "US-001 tests 1") {
           return {
             session_id: "sess_test_runner",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
         if (input.description === "Final test run 1") {
           return {
             session_id: "sess_final_test",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -127,6 +128,8 @@ describe("implement workflow", () => {
         }
 
         if (input.description.startsWith("Switch branch ")) {
+          expect(input.prompt).toContain("create it from the branch that is currently checked out")
+          expect(input.prompt).toContain("without recreating it from a fixed base branch")
           return {
             session_id: "sess_branch",
             text: JSON.stringify({
@@ -175,6 +178,358 @@ describe("implement workflow", () => {
     expect(await Bun.file(path.join(dir, "final-test-1.txt")).exists()).toBe(true)
     expect(await Bun.file(path.join(dir, "retrospective.md")).text()).toContain("Completed the only story")
     expect(await Bun.file(path.join(dir, "run.json")).exists()).toBe(true)
+  }, 20000)
+
+  test("emits workflow-progress.v2 state that renders through the shared workflow screen", async () => {
+    Reflect.set(globalThis, "opencode", runtime)
+    const mod = await import(
+      pathToFileURL(path.resolve(import.meta.dir, "../../../../.opencode/workflows/implement.ts")).href
+    )
+    const flow = mod.default
+
+    await using tmp = await tmpdir({ git: true, config: {} })
+    const updates: unknown[] = []
+
+    const ctx: WorkflowContext = {
+      name: "implement",
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+      sessionID: "sess_test",
+      userMessageID: "msg_user",
+      assistantMessageID: "msg_assistant",
+      directory: tmp.path,
+      worktree: tmp.path,
+      async status(input) {
+        if (input.progress) updates.push(input.progress)
+      },
+      async write(input) {
+        const file = path.isAbsolute(input.file) ? input.file : path.join(tmp.path, input.file)
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(file, input.content, "utf8")
+      },
+      async ask() {
+        throw new Error("ask should not be called in this test")
+      },
+      async task(input: TaskInput) {
+        if (input.description.includes("split check")) {
+          const role = input.description.split(" ")[0]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              ok: true,
+              summary: `${role} accepts the split`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "Convert PRD 1") {
+          return {
+            session_id: "sess_convert",
+            text: JSON.stringify({
+              project: "OpenCode",
+              branchName: "ralph/demo-prd",
+              description: "Demo feature",
+              userStories: [
+                {
+                  id: "US-001",
+                  title: "Implement demo feature",
+                  description: "As a user, I want a demo feature so that I can test the workflow.",
+                  acceptanceCriteria: ["Feature is implemented", "Typecheck passes"],
+                  priority: 1,
+                  passes: false,
+                  notes: "",
+                },
+              ],
+            }),
+          }
+        }
+
+        if (input.description.startsWith("Switch branch ")) {
+          return {
+            session_id: "sess_branch",
+            text: JSON.stringify({
+              ok: true,
+              branch: input.description.replace("Switch branch ", ""),
+              summary: "switched branch",
+            }),
+          }
+        }
+
+        if (input.description === "US-001 implement") {
+          return {
+            session_id: "sess_impl",
+            text: '{"summary":"Implemented the story","files":["packages/opencode/src/demo.ts"],"verify":"bun test test/workflow/implement.test.ts","compactions":0}',
+          }
+        }
+
+        if (input.description.includes("review 1")) {
+          const role = input.description.split(" ")[1]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              approve: true,
+              summary: `${role} approves implementation`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "US-001 tests 1" || input.description === "Final test run 1") {
+          return {
+            session_id: "sess_test_runner",
+            text: "VERIFY: PASS",
+          }
+        }
+
+        if (input.description.endsWith(" commit")) {
+          return {
+            session_id: "sess_commit",
+            text: JSON.stringify({ ok: true, commit: "abc123", summary: "committed story" }),
+          }
+        }
+
+        if (input.description === "Implementation retrospective") {
+          return {
+            session_id: "sess_retro",
+            text: "- Completed the only story",
+          }
+        }
+
+        throw new Error(`unexpected task: ${input.description}`)
+      },
+      async workflow() {
+        throw new Error("nested workflow should not be called in this test")
+      },
+    }
+
+    const out = await flow.run(ctx, {
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+    })
+    if (typeof out === "string") throw new Error("expected object output")
+
+    const seen = updates.flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return []
+      const machine = "machine" in item && item.machine && typeof item.machine === "object" ? item.machine : undefined
+      const step =
+        machine && "active_step_id" in machine && typeof machine.active_step_id === "string"
+          ? machine.active_step_id
+          : undefined
+      return step ? [step] : []
+    })
+    expect(seen).toEqual(expect.arrayContaining(["convert", "select", "implement", "review", "done"]))
+
+    const last = updates.at(-1)
+    expect(last).toBeDefined()
+    if (!last || typeof last !== "object" || Array.isArray(last)) throw new Error("expected final workflow progress")
+    expect(last).toMatchObject({
+      version: "workflow-progress.v2",
+      workflow: { status: "done", name: "implement", label: "Implement workflow" },
+      machine: { active_step_id: "done" },
+    })
+    if (!("step_definitions" in last) || !("step_runs" in last) || !("transitions" in last)) {
+      throw new Error("expected explicit workflow state-machine sections")
+    }
+    expect(last.step_definitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "convert", label: "Convert PRD", next: ["select"] }),
+        expect.objectContaining({ id: "select", label: "Select story", next: ["implement"] }),
+        expect.objectContaining({ id: "implement", label: "Implement story" }),
+        expect.objectContaining({ id: "review", label: "Review gate", next: ["fix", "select", "done", "failed"] }),
+        expect.objectContaining({ id: "done", label: "Done" }),
+      ]),
+    )
+    expect(last.step_runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ step_id: "convert" }),
+        expect.objectContaining({ step_id: "select" }),
+        expect.objectContaining({ step_id: "implement" }),
+        expect.objectContaining({ step_id: "review" }),
+        expect.objectContaining({ step_id: "done", status: "completed" }),
+      ]),
+    )
+    expect(last.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ level: "workflow", target_id: "workflow", to_state: "done" }),
+        expect.objectContaining({ level: "step", target_id: "review" }),
+        expect.objectContaining({ level: "step", target_id: "done", to_state: "completed" }),
+      ]),
+    )
+    const select = updates.find((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false
+      return (
+        "machine" in item &&
+        item.machine &&
+        typeof item.machine === "object" &&
+        "active_step_id" in item.machine &&
+        item.machine.active_step_id === "select"
+      )
+    })
+    expect(select).toBeDefined()
+    if (!select || typeof select !== "object" || Array.isArray(select)) throw new Error("expected select progress")
+    expect("round" in select).toBe(false)
+    expect("round" in last).toBe(false)
+
+    const view = workflowscreen({
+      metadata: {
+        [WorkflowProgressKey]: last,
+      },
+      name: "implement",
+      tool_status: "completed",
+    })
+    expect(view.empty).toBe(false)
+    expect(view.header.title).toBe("Implement workflow")
+    expect(view.header.status).toBe("done")
+    expect(view.timeline.some((item) => item.label === "Done")).toBe(true)
+    expect(view.history.length).toBeGreaterThan(0)
+    expect(view.alerts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "done", title: "Implement workflow" })]),
+    )
+  })
+
+  test("emits a terminal failed progress update when the operator stops after repair rounds", async () => {
+    Reflect.set(globalThis, "opencode", runtime)
+    const mod = await import(
+      pathToFileURL(path.resolve(import.meta.dir, "../../../../.opencode/workflows/implement.ts")).href
+    )
+    const flow = mod.default
+
+    await using tmp = await tmpdir({ git: true, config: {} })
+    const updates: unknown[] = []
+
+    const ctx: WorkflowContext = {
+      name: "implement",
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+      sessionID: "sess_test",
+      userMessageID: "msg_user",
+      assistantMessageID: "msg_assistant",
+      directory: tmp.path,
+      worktree: tmp.path,
+      async status(input) {
+        if (input.progress) updates.push(input.progress)
+      },
+      async write(input) {
+        const file = path.isAbsolute(input.file) ? input.file : path.join(tmp.path, input.file)
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(file, input.content, "utf8")
+      },
+      async ask() {
+        return {
+          answers: [["Stop workflow"]],
+        }
+      },
+      async task(input: TaskInput) {
+        if (input.description.includes("split check")) {
+          const role = input.description.split(" ")[0]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              ok: true,
+              summary: `${role} accepts the split`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "Convert PRD 1") {
+          return {
+            session_id: "sess_convert",
+            text: JSON.stringify({
+              project: "OpenCode",
+              branchName: "ralph/demo-prd",
+              description: "Demo feature",
+              userStories: [
+                {
+                  id: "US-001",
+                  title: "Implement demo feature",
+                  description: "As a user, I want a demo feature so that I can test the workflow.",
+                  acceptanceCriteria: ["Feature is implemented", "Typecheck passes"],
+                  priority: 1,
+                  passes: false,
+                  notes: "",
+                },
+              ],
+            }),
+          }
+        }
+
+        if (input.description.startsWith("Switch branch ")) {
+          return {
+            session_id: "sess_branch",
+            text: JSON.stringify({
+              ok: true,
+              branch: input.description.replace("Switch branch ", ""),
+              summary: "switched branch",
+            }),
+          }
+        }
+
+        if (input.description === "US-001 implement" || input.description.startsWith("US-001 fix ")) {
+          return {
+            session_id: `sess_${input.description.replace(/\s+/g, "_").toLowerCase()}`,
+            text: `Worked on ${input.description}`,
+          }
+        }
+
+        if (input.description.includes("review")) {
+          const role = input.description.split(" ")[1]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              approve: role !== "Architect",
+              summary: `${role} reviewed the story`,
+              issues: role === "Architect" ? ["Keep fixing"] : [],
+            }),
+          }
+        }
+
+        if (input.description.startsWith("US-001 tests ")) {
+          return {
+            session_id: "sess_test_runner",
+            text: "VERIFY: PASS",
+          }
+        }
+
+        throw new Error(`unexpected task: ${input.description}`)
+      },
+      async workflow() {
+        throw new Error("nested workflow should not be called in this test")
+      },
+    }
+
+    const out = await flow.run(ctx, {
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+    })
+    if (typeof out === "string") throw new Error("expected object output")
+
+    expect(out.output).toContain("Paused on: US-001")
+    const last = updates.at(-1)
+    expect(last).toBeDefined()
+    if (!last || typeof last !== "object" || Array.isArray(last)) throw new Error("expected failed workflow progress")
+    expect(last).toMatchObject({
+      version: "workflow-progress.v2",
+      workflow: { status: "failed" },
+      machine: { active_step_id: "failed" },
+    })
+    expect("round" in last).toBe(false)
+    if (!("transitions" in last)) throw new Error("expected failed transitions")
+    expect(last.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ level: "step", target_id: "failed", to_state: "failed" }),
+        expect.objectContaining({ level: "workflow", target_id: "workflow", to_state: "failed" }),
+      ]),
+    )
   })
 
   test("does not run split review tasks before implementation", async () => {
@@ -280,14 +635,14 @@ describe("implement workflow", () => {
         if (input.description === "US-001 tests 1") {
           return {
             session_id: "sess_test_runner",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
         if (input.description === "Final test run 1") {
           return {
             session_id: "sess_final_test",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -462,14 +817,14 @@ describe("implement workflow", () => {
         if (input.description === "US-001 tests 1") {
           return {
             session_id: "sess_test_runner",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
         if (input.description === "Final test run 1") {
           return {
             session_id: "sess_final_test",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -613,12 +968,12 @@ describe("implement workflow", () => {
         if (input.description === "US-001 tests 1") {
           return {
             session_id: "sess_test_runner_1",
-            text: "empty state test is missing",
+            text: "VERIFY: FAIL\nFAILURES:\nempty state test is missing",
           }
         }
 
         if (input.description === "US-001 fix 1") {
-          expect(input.session_id).toBeUndefined()
+          expect(input.session_id).toBe("sess_impl_1")
           expect(input.prompt).toContain("Previous round handoff:")
           expect(input.prompt).toContain("Implemented US-001 first pass and ran focused verification.")
           expect(input.prompt).toContain("Review findings: QA: Add regression coverage for empty state")
@@ -646,14 +1001,14 @@ describe("implement workflow", () => {
         if (input.description === "US-001 tests 2") {
           return {
             session_id: "sess_test_runner_2",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
         if (input.description === "Final test run 1") {
           return {
             session_id: "sess_final_test",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -803,7 +1158,7 @@ describe("implement workflow", () => {
         if (input.description === "US-001 tests 1") {
           return {
             session_id: "sess_test_runner",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -832,14 +1187,14 @@ describe("implement workflow", () => {
         if (input.description === "US-001 tests 2") {
           return {
             session_id: "sess_test_runner_2",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
         if (input.description === "Final test run 1") {
           return {
             session_id: "sess_final_test",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -894,7 +1249,7 @@ describe("implement workflow", () => {
     expect(row.test_failures).toBe("")
   })
 
-  test("marks completed stories and advances by smallest unfinished priority", async () => {
+  test("treats custom ask input as continue and passes it into the next repair prompt", async () => {
     Reflect.set(globalThis, "opencode", runtime)
     const mod = await import(
       pathToFileURL(path.resolve(import.meta.dir, "../../../../.opencode/workflows/implement.ts")).href
@@ -903,6 +1258,7 @@ describe("implement workflow", () => {
 
     await using tmp = await tmpdir({ git: true, config: {} })
     const jobs: TaskInput[] = []
+    let askCount = 0
 
     const ctx: WorkflowContext = {
       name: "implement",
@@ -915,6 +1271,339 @@ describe("implement workflow", () => {
       directory: tmp.path,
       worktree: tmp.path,
       async status() {},
+      async write(input) {
+        const file = path.isAbsolute(input.file) ? input.file : path.join(tmp.path, input.file)
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(file, input.content, "utf8")
+      },
+      async ask() {
+        askCount += 1
+        return {
+          answers: [["fix architect issues and keep test pass, then goto next user story"]],
+        }
+      },
+      async task(input: TaskInput) {
+        jobs.push(input)
+
+        if (input.description.includes("split check")) {
+          const role = input.description.split(" ")[0]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              ok: true,
+              summary: `${role} accepts the split`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "Convert PRD 1") {
+          return {
+            session_id: "sess_convert",
+            text: JSON.stringify({
+              project: "OpenCode",
+              branchName: "ralph/demo-prd",
+              description: "Demo feature",
+              userStories: [
+                {
+                  id: "US-001",
+                  title: "Implement demo feature",
+                  description: "As a user, I want a demo feature so that I can test the workflow.",
+                  acceptanceCriteria: ["Feature is implemented", "Typecheck passes"],
+                  priority: 1,
+                  passes: false,
+                  notes: "",
+                },
+              ],
+            }),
+          }
+        }
+
+        if (input.description === "US-001 implement") {
+          return {
+            session_id: "sess_impl_1",
+            text: "Implemented US-001 first pass.",
+          }
+        }
+
+        if (input.description.startsWith("US-001 fix ")) {
+          if (input.description === "US-001 fix 5") {
+            expect(input.prompt).toContain(
+              "Operator instruction: fix architect issues and keep test pass, then goto next user story",
+            )
+            return {
+              session_id: "sess_impl_6",
+              text: "Applied the requested architect fix and kept verification clean.",
+            }
+          }
+
+          return {
+            session_id: `sess_impl_${input.description.split(" ").at(-1)}`,
+            text: `Repair round for ${input.description}`,
+          }
+        }
+
+        if (input.description.includes("review 7")) {
+          const role = input.description.split(" ")[1]
+          return {
+            session_id: `sess_${role.toLowerCase()}_7`,
+            text: JSON.stringify({
+              role,
+              approve: true,
+              summary: `${role} approves implementation`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description.includes("review")) {
+          const role = input.description.split(" ")[1]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              approve: role !== "Architect",
+              summary: `${role} reviewed implementation`,
+              issues: role === "Architect" ? ["Keep fixing"] : [],
+            }),
+          }
+        }
+
+        if (input.description === "US-001 tests 7" || input.description === "Final test run 1") {
+          return {
+            session_id: "sess_test_runner_final",
+            text: "VERIFY: PASS",
+          }
+        }
+
+        if (input.description.startsWith("US-001 tests ")) {
+          return {
+            session_id: "sess_test_runner",
+            text: "VERIFY: PASS",
+          }
+        }
+
+        if (input.description === "Implementation retrospective") {
+          return {
+            session_id: "sess_retro",
+            text: "- Continued after operator guidance and completed the story",
+          }
+        }
+
+        if (input.description.startsWith("Switch branch ")) {
+          return {
+            session_id: "sess_branch",
+            text: JSON.stringify({
+              ok: true,
+              branch: input.description.replace("Switch branch ", ""),
+              summary: "switched branch",
+            }),
+          }
+        }
+
+        if (input.description.endsWith(" commit")) {
+          return {
+            session_id: "sess_commit",
+            text: JSON.stringify({ ok: true, commit: "abc123", summary: "committed story" }),
+          }
+        }
+
+        throw new Error(`unexpected task: ${input.description}`)
+      },
+      async workflow() {
+        throw new Error("nested workflow should not be called in this test")
+      },
+    }
+
+    const out = await flow.run(ctx, {
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+    })
+    if (typeof out === "string") throw new Error("expected object output")
+
+    expect(askCount).toBe(1)
+    expect(jobs.some((item) => item.description === "US-001 fix 5")).toBe(true)
+    expect(out.output).toContain("Stories completed: 1/1")
+  })
+
+  test("retries test-runner when output format is invalid", async () => {
+    Reflect.set(globalThis, "opencode", runtime)
+    const mod = await import(
+      pathToFileURL(path.resolve(import.meta.dir, "../../../../.opencode/workflows/implement.ts")).href
+    )
+    const flow = mod.default
+
+    await using tmp = await tmpdir({ git: true, config: {} })
+    const jobs: TaskInput[] = []
+    let testCount = 0
+
+    const ctx: WorkflowContext = {
+      name: "implement",
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+      sessionID: "sess_test",
+      userMessageID: "msg_user",
+      assistantMessageID: "msg_assistant",
+      directory: tmp.path,
+      worktree: tmp.path,
+      async status() {},
+      async write(input) {
+        const file = path.isAbsolute(input.file) ? input.file : path.join(tmp.path, input.file)
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(file, input.content, "utf8")
+      },
+      async ask() {
+        throw new Error("ask should not be called in this test")
+      },
+      async task(input: TaskInput) {
+        jobs.push(input)
+
+        if (input.description.includes("split check")) {
+          const role = input.description.split(" ")[0]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              ok: true,
+              summary: `${role} accepts the split`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "Convert PRD 1") {
+          return {
+            session_id: "sess_convert",
+            text: JSON.stringify({
+              project: "OpenCode",
+              branchName: "ralph/demo-prd",
+              description: "Demo feature",
+              userStories: [
+                {
+                  id: "US-001",
+                  title: "Implement demo feature",
+                  description: "As a user, I want a demo feature so that I can test the workflow.",
+                  acceptanceCriteria: ["Feature is implemented", "Typecheck passes"],
+                  priority: 1,
+                  passes: false,
+                  notes: "",
+                },
+              ],
+            }),
+          }
+        }
+
+        if (input.description === "US-001 implement") {
+          return {
+            session_id: "sess_impl",
+            text: "Implemented US-001 and ran focused verification.",
+          }
+        }
+
+        if (input.description.includes("review 1")) {
+          const role = input.description.split(" ")[1]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              approve: true,
+              summary: `${role} approves implementation`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "US-001 tests 1") {
+          testCount += 1
+          if (testCount === 1) {
+            return {
+              session_id: "sess_test_runner_1",
+              text: "all green",
+            }
+          }
+
+          expect(input.prompt).toContain("did not follow the required verification format")
+          return {
+            session_id: "sess_test_runner_2",
+            text: "VERIFY: PASS",
+          }
+        }
+
+        if (input.description === "Final test run 1") {
+          return {
+            session_id: "sess_final_test",
+            text: "VERIFY: PASS",
+          }
+        }
+
+        if (input.description === "Implementation retrospective") {
+          return {
+            session_id: "sess_retro",
+            text: "- Retried verification after invalid test-runner output",
+          }
+        }
+
+        if (input.description.startsWith("Switch branch ")) {
+          return {
+            session_id: "sess_branch",
+            text: JSON.stringify({
+              ok: true,
+              branch: input.description.replace("Switch branch ", ""),
+              summary: "switched branch",
+            }),
+          }
+        }
+
+        if (input.description.endsWith(" commit")) {
+          return {
+            session_id: "sess_commit",
+            text: JSON.stringify({ ok: true, commit: "abc123", summary: "committed story" }),
+          }
+        }
+
+        throw new Error(`unexpected task: ${input.description}`)
+      },
+      async workflow() {
+        throw new Error("nested workflow should not be called in this test")
+      },
+    }
+
+    await flow.run(ctx, {
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+    })
+
+    expect(testCount).toBe(2)
+  })
+
+  test("marks completed stories and advances by smallest unfinished priority", async () => {
+    Reflect.set(globalThis, "opencode", runtime)
+    const mod = await import(
+      pathToFileURL(path.resolve(import.meta.dir, "../../../../.opencode/workflows/implement.ts")).href
+    )
+    const flow = mod.default
+
+    await using tmp = await tmpdir({ git: true, config: {} })
+    const jobs: TaskInput[] = []
+    const updates: unknown[] = []
+
+    const ctx: WorkflowContext = {
+      name: "implement",
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+      sessionID: "sess_test",
+      userMessageID: "msg_user",
+      assistantMessageID: "msg_assistant",
+      directory: tmp.path,
+      worktree: tmp.path,
+      async status(input) {
+        if (input.progress) updates.push(input.progress)
+      },
       async write(input) {
         const file = path.isAbsolute(input.file) ? input.file : path.join(tmp.path, input.file)
         await fs.mkdir(path.dirname(file), { recursive: true })
@@ -1021,14 +1710,14 @@ describe("implement workflow", () => {
         ) {
           return {
             session_id: "sess_test_runner",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
         if (input.description === "Final test run 1") {
           return {
             session_id: "sess_final_test",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -1073,6 +1762,25 @@ describe("implement workflow", () => {
 
     const work = jobs.filter((item) => item.description.endsWith("implement")).map((item) => item.description)
     expect(work).toEqual(["US-001 implement", "US-002 implement", "US-003 implement"])
+    const steps = updates.flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return []
+      if (!("machine" in item) || !item.machine || typeof item.machine !== "object") return []
+      if (!("active_step_id" in item.machine) || typeof item.machine.active_step_id !== "string") return []
+      return [item.machine.active_step_id]
+    })
+    const review = steps.indexOf("review")
+    const select = steps.indexOf("select", review + 1)
+    expect(review).toBeGreaterThan(-1)
+    expect(select).toBeGreaterThan(review)
+    const loop = updates[select]
+    expect(loop).toBeDefined()
+    if (!loop || typeof loop !== "object" || Array.isArray(loop)) throw new Error("expected loop progress")
+    if (!("step_definitions" in loop) || !Array.isArray(loop.step_definitions)) {
+      throw new Error("expected workflow step definitions")
+    }
+    expect(loop.step_definitions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "review", next: ["fix", "select", "done", "failed"] })]),
+    )
 
     const prd = JSON.parse(await Bun.file(path.join(tmp.path, "tasks/prd.json")).text()) as {
       userStories: Array<{ id: string; passes: boolean }>
@@ -1194,7 +1902,7 @@ describe("implement workflow", () => {
         if (input.description === "US-002 tests 1" || input.description === "Final test run 1") {
           return {
             session_id: "sess_test_runner",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -1381,7 +2089,7 @@ describe("implement workflow", () => {
         if (input.description === "US-002 tests 1" || input.description === "Final test run 1") {
           return {
             session_id: "sess_test_runner",
-            text: "",
+            text: "VERIFY: PASS",
           }
         }
 
@@ -1436,6 +2144,204 @@ describe("implement workflow", () => {
       stories: Array<{ story: string }>
     }
     expect(log.stories.map((item) => item.story)).toEqual(["US-001", "US-002"])
+  })
+
+  test("resumes a paused story from the next repair round", async () => {
+    Reflect.set(globalThis, "opencode", runtime)
+    const mod = await import(
+      pathToFileURL(path.resolve(import.meta.dir, "../../../../.opencode/workflows/implement.ts")).href
+    )
+    const flow = mod.default
+
+    await using tmp = await tmpdir({
+      git: true,
+      config: {},
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "tasks", "prds"), { recursive: true })
+        await fs.writeFile(
+          path.join(dir, "tasks", "prds", "demo.md"),
+          "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+        )
+        await fs.mkdir(path.join(dir, "tasks"), { recursive: true })
+        await fs.writeFile(
+          path.join(dir, "tasks", "prd.json"),
+          JSON.stringify(
+            {
+              project: "OpenCode",
+              branchName: "ralph/demo-prd",
+              sourcePrdFile: "tasks/prds/demo.md",
+              description: "Demo feature",
+              userStories: [
+                {
+                  id: "US-001",
+                  title: "Resume story",
+                  description: "todo",
+                  acceptanceCriteria: ["Done", "Typecheck passes"],
+                  priority: 1,
+                  passes: false,
+                  notes: "",
+                },
+              ],
+            },
+            null,
+            2,
+          ),
+        )
+        await fs.mkdir(path.join(dir, ".workflows", "logs", "implement-tasks-prds-demo"), { recursive: true })
+        await fs.writeFile(
+          path.join(dir, ".workflows", "logs", "implement-tasks-prds-demo", "run.json"),
+          JSON.stringify(
+            {
+              source: "tasks/prds/demo.md",
+              prd_file: "tasks/prd.json",
+              log_dir: ".workflows/logs/implement-tasks-prds-demo",
+              reused: true,
+              roles: {},
+              branch: null,
+              split_rounds: [],
+              stories: [
+                {
+                  story: "US-001",
+                  title: "Resume story",
+                  rounds: [
+                    {
+                      round: 1,
+                      work: "earlier work",
+                      reviews: [],
+                      review_issues: ["Architect: keep fixing"],
+                      test_output: "VERIFY: PASS",
+                      test_failures: "",
+                      issues: ["Architect: keep fixing"],
+                    },
+                  ],
+                  decisions: [],
+                  unresolved: [],
+                  commit: null,
+                },
+              ],
+              final_verify: [],
+              paused: {
+                story: "US-001",
+                round: 6,
+                next_round: 7,
+                handoff: "Last handoff",
+                fix: "Repair story US-001 (Resume story).",
+                guide: "Keep architect fix focused",
+                issues: ["Architect: keep fixing"],
+              },
+              retrospective: "",
+            },
+            null,
+            2,
+          ),
+        )
+      },
+    })
+
+    const jobs: TaskInput[] = []
+    const ctx: WorkflowContext = {
+      name: "implement",
+      raw: "tasks/prds/demo.md",
+      argv: [],
+      files: [],
+      sessionID: "sess_test",
+      userMessageID: "msg_user",
+      assistantMessageID: "msg_assistant",
+      directory: tmp.path,
+      worktree: tmp.path,
+      async status() {},
+      async write(input) {
+        const file = path.isAbsolute(input.file) ? input.file : path.join(tmp.path, input.file)
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(file, input.content, "utf8")
+      },
+      async ask() {
+        throw new Error("ask should not be called in this test")
+      },
+      async task(input: TaskInput) {
+        jobs.push(input)
+
+        if (input.description.startsWith("Switch branch ")) {
+          return {
+            session_id: "sess_branch",
+            text: JSON.stringify({
+              ok: true,
+              branch: input.description.replace("Switch branch ", ""),
+              summary: "switched branch",
+            }),
+          }
+        }
+
+        if (input.description === "US-001 fix 6") {
+          expect(input.prompt).toContain("Review round: 7")
+          expect(input.prompt).toContain("Previous round handoff:\nLast handoff")
+          expect(input.prompt).toContain("Operator instruction: Keep architect fix focused")
+          return {
+            session_id: "sess_impl_resume",
+            text: "Resumed from the paused repair round and finished the fix.",
+          }
+        }
+
+        if (input.description.includes("review 7")) {
+          const role = input.description.split(" ")[1]
+          return {
+            session_id: `sess_${role.toLowerCase()}_7`,
+            text: JSON.stringify({
+              role,
+              approve: true,
+              summary: `${role} approves implementation`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "US-001 tests 7" || input.description === "Final test run 1") {
+          return {
+            session_id: "sess_test_runner",
+            text: "VERIFY: PASS",
+          }
+        }
+
+        if (input.description === "Implementation retrospective") {
+          return {
+            session_id: "sess_retro",
+            text: "- Resumed the paused story from round 7",
+          }
+        }
+
+        if (input.description.endsWith(" commit")) {
+          return {
+            session_id: "sess_commit",
+            text: JSON.stringify({ ok: true, commit: "abc123", summary: "committed story" }),
+          }
+        }
+
+        throw new Error(`unexpected task: ${input.description}`)
+      },
+      async workflow() {
+        throw new Error("nested workflow should not be called in this test")
+      },
+    }
+
+    const out = await flow.run(ctx, {
+      raw: "tasks/prds/demo.md",
+      argv: [],
+      files: [],
+    })
+    if (typeof out === "string") throw new Error("expected object output")
+
+    expect(jobs.some((item) => item.description === "US-001 implement")).toBe(false)
+    expect(jobs.some((item) => item.description === "US-001 fix 6")).toBe(true)
+
+    const log = JSON.parse(
+      await Bun.file(path.join(tmp.path, ".workflows", "logs", "implement-tasks-prds-demo", "run.json")).text(),
+    ) as {
+      paused: null | Record<string, unknown>
+      stories: Array<{ story: string; rounds: Array<{ round: number }> }>
+    }
+    expect(log.paused).toBeNull()
+    expect(log.stories.find((item) => item.story === "US-001")?.rounds.map((item) => item.round)).toEqual([1, 7])
+    expect(out.output).toContain("Stories completed: 1/1")
   })
 
   test("returns early when the matching backlog is already complete", async () => {
