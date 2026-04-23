@@ -116,10 +116,23 @@ type Split = z.infer<typeof split>
 type Review = z.infer<typeof review>
 type Work = z.infer<typeof work>
 type Reviewer = "Architect" | "QA" | "FE"
-type Node = "convert" | "select" | "implement" | "fix" | "review" | "done" | "failed"
+type Node =
+  | "convert"
+  | "select"
+  | "implement"
+  | "fix"
+  | "review"
+  | "review_architect"
+  | "review_qa"
+  | "review_fe"
+  | "review_test"
+  | "final_verify"
+  | "final_fix"
+  | "retrospective"
+  | "done"
+  | "failed"
 type Sessions = {
   impl?: string
-  test?: string
   review?: Partial<Record<Reviewer, string>>
 }
 
@@ -241,7 +254,7 @@ export default opencode.workflow({
         await save(ctx, join(dir, "run.json"), JSON.stringify(log, null, 2))
       }
 
-      const verify = await finish(ctx, data, dir)
+      const verify = await finish(ctx, data, dir, prog)
       log.final_verify = verify.log
       log.retrospective = verify.retro
       await save(ctx, join(dir, "retrospective.md"), verify.retro)
@@ -408,7 +421,6 @@ async function runstory(
       commit: null | Record<string, unknown>
       sessions?: {
         impl?: string
-        test?: string
         review?: Partial<Record<"Architect" | "QA" | "FE", string>>
       }
     }
@@ -418,7 +430,6 @@ async function runstory(
     guide: string
     sessions?: {
       impl?: string
-      test?: string
       review?: Partial<Record<"Architect" | "QA" | "FE", string>>
     }
   },
@@ -428,7 +439,6 @@ async function runstory(
   let fix = resume?.fix ?? ""
   let guide = resume?.guide ?? ""
   let impl = resume?.sessions?.impl ?? out.sessions?.impl
-  let testid = resume?.sessions?.test ?? out.sessions?.test
   const reviewids = {
     Architect: resume?.sessions?.review?.Architect ?? out.sessions?.review?.Architect,
     QA: resume?.sessions?.review?.QA ?? out.sessions?.review?.QA,
@@ -461,7 +471,6 @@ async function runstory(
     handoff = job.value.text.trim()
     out.sessions = {
       impl,
-      test: testid,
       review: compactreview(reviewids),
     }
     await save(ctx, join(dir, `${item.id}-work-${i}.md`), job.value.text)
@@ -471,9 +480,10 @@ async function runstory(
     await ctx.status({
       title: `${item.id} review ${i}`,
       metadata: { story: item.id, round: i, reviewers: names, files },
-      progress: prog.move("review", {
+      progress: prog.review({
         summary: `${item.id}: ${names.join(", ")} review gate`,
         round: i,
+        reviewers: names,
       }),
     })
 
@@ -507,7 +517,6 @@ async function runstory(
           prompt: testprompt(src.file, file, item, i, files),
           subagent: role.test,
           category: "deep",
-          ...(testid ? { session_id: testid } : {}),
         },
         `${item.id} tests ${i}`,
       ),
@@ -516,7 +525,6 @@ async function runstory(
       reviewids[names[idx]!] = item.value.session_id
       return item.value.data
     })
-    testid = test.value.session_id
     const tests = test.value.fail
     const review_issues = reviewissues(reviews)
     const notes = issues(review_issues, tests)
@@ -541,9 +549,27 @@ async function runstory(
     out.rounds.push(row)
     out.sessions = {
       impl,
-      test: testid,
       review: compactreview(reviewids),
     }
+    await ctx.status({
+      title: `${item.id} review ${i} results`,
+      metadata: {
+        story: item.id,
+        round: i,
+        reviewers: names,
+        issues: notes.length,
+        test_failures: tests ? 1 : 0,
+      },
+      progress: prog.reviewdone({
+        summary:
+          notes.length === 0
+            ? `${item.id}: review gate passed`
+            : `${item.id}: review gate found ${notes.length} issue${notes.length === 1 ? "" : "s"}`,
+        round: i,
+        reviews,
+        tests,
+      }),
+    })
     await save(ctx, join(dir, `${item.id}-review-${i}.json`), JSON.stringify(row, null, 2))
 
     if (review_issues.length === 0 && !tests) {
@@ -609,7 +635,6 @@ async function runstory(
         issues: notes,
         sessions: {
           impl,
-          test: testid,
           review: compactreview(reviewids),
         },
       },
@@ -617,7 +642,7 @@ async function runstory(
   }
 }
 
-async function finish(ctx: Ctx, data: Plan, dir: string) {
+async function finish(ctx: Ctx, data: Plan, dir: string, prog: ReturnType<typeof track>) {
   let sid: string | undefined
   const log: Array<Record<string, unknown>> = []
 
@@ -625,6 +650,10 @@ async function finish(ctx: Ctx, data: Plan, dir: string) {
     await ctx.status({
       title: `Final verify ${i}`,
       metadata: { round: i, stories: data.userStories.length },
+      progress: prog.finalverify({
+        round: i,
+        summary: `Final verification round ${i}`,
+      }),
     })
 
     const test = await verify(
@@ -646,7 +675,26 @@ async function finish(ctx: Ctx, data: Plan, dir: string) {
     log.push(row)
     await save(ctx, join(dir, `final-test-${i}.txt`), test.text)
 
+    await ctx.status({
+      title: `Final verify ${i} result`,
+      metadata: { round: i, stories: data.userStories.length, failures: fail ? 1 : 0 },
+      progress: prog.finalverifydone({
+        round: i,
+        summary: fail ? `Final verification failed in round ${i}` : `Final verification passed in round ${i}`,
+        fail,
+      }),
+    })
+
     if (!fail) break
+
+    await ctx.status({
+      title: `Final fix ${i}`,
+      metadata: { round: i, stories: data.userStories.length },
+      progress: prog.move("final_fix", {
+        summary: `Apply final verification fixes for round ${i}`,
+        round: i,
+      }),
+    })
 
     const fix = await ctx.task({
       description: `Final fix ${i}`,
@@ -659,6 +707,14 @@ async function finish(ctx: Ctx, data: Plan, dir: string) {
     row.fix = clip(fix.text)
     await save(ctx, join(dir, `final-fix-${i}.md`), fix.text)
   }
+
+  await ctx.status({
+    title: "Implementation retrospective",
+    metadata: { stories: data.userStories.length },
+    progress: prog.move("retrospective", {
+      summary: "Write implementation retrospective",
+    }),
+  })
 
   const rest = await ctx.task({
     description: "Implementation retrospective",
@@ -818,7 +874,6 @@ function sessions(input: unknown): Sessions {
   const item = input as Record<string, unknown>
   return {
     impl: typeof item.impl === "string" ? item.impl : undefined,
-    test: typeof item.test === "string" ? item.test : undefined,
     review:
       item.review && typeof item.review === "object" && !Array.isArray(item.review) ? compactreview(item.review) : {},
   }
@@ -1423,10 +1478,23 @@ function track(name: string, src: string) {
   const start = stamp()
   const flow = [
     { id: "convert", kind: "task", label: "Convert PRD", next: ["select"] },
-    { id: "select", kind: "decision", label: "Select story", next: ["implement"] },
+    { id: "select", kind: "decision", label: "Select story", next: ["implement", "final_verify", "done"] },
     { id: "implement", kind: "task", label: "Implement story", next: ["review"] },
     { id: "fix", kind: "task", label: "Apply fixes", next: ["review"] },
-    { id: "review", kind: "decision", label: "Review gate", next: ["fix", "select", "done", "failed"] },
+    {
+      id: "review",
+      kind: "group",
+      label: "Review gate",
+      children: ["review_architect", "review_qa", "review_fe", "review_test"],
+      next: ["fix", "select", "done", "failed"],
+    },
+    { id: "review_architect", kind: "decision", parent_id: "review", label: "Architect review" },
+    { id: "review_qa", kind: "decision", parent_id: "review", label: "QA review" },
+    { id: "review_fe", kind: "decision", parent_id: "review", label: "FE review" },
+    { id: "review_test", kind: "task", parent_id: "review", label: "Test runner" },
+    { id: "final_verify", kind: "task", label: "Final verify", next: ["final_fix", "retrospective", "done"] },
+    { id: "final_fix", kind: "task", label: "Final fix", next: ["final_verify"] },
+    { id: "retrospective", kind: "task", label: "Retrospective", next: ["done"] },
     { id: "done", kind: "terminal", label: "Done" },
     { id: "failed", kind: "terminal", label: "Failed" },
   ] as const
@@ -1438,80 +1506,155 @@ function track(name: string, src: string) {
     implement: 0,
     fix: 0,
     review: 0,
+    review_architect: 0,
+    review_qa: 0,
+    review_fe: 0,
+    review_test: 0,
+    final_verify: 0,
+    final_fix: 0,
+    retrospective: 0,
     done: 0,
     failed: 0,
   }
   let node: Node | undefined
   let run: string | undefined
-  let state: "running" | "done" | "failed" = "running"
+  let kids: string[] = []
+  let state: "running" | "waiting" | "blocked" | "failed" | "retrying" | "done" = "running"
   let note = `Convert backlog from ${src}`
 
-  function move(next: Node, input: { summary: string; round?: number }) {
-    const time = stamp()
-    note = input.summary
-    if (node !== next && run) {
-      const row = runs.find((item) => item.id === run)
-      if (row && row.status === "active") {
-        row.status = next === "failed" ? "failed" : "completed"
-        row.ended_at = time
-        trans.push({
-          id: `${row.id}:${row.status}`,
-          seq: trans.length,
-          timestamp: time,
-          level: "step",
-          target_id: row.step_id,
-          run_id: row.id,
-          to_state: row.status,
-        })
-      }
-    }
-    if (node !== next || !run) {
-      seen[next] += 1
-      run = `${next}-${seen[next]}`
-      runs.push({
-        id: run,
-        seq: runs.length,
-        step_id: next,
-        status: next === "done" ? "completed" : next === "failed" ? "failed" : "active",
-        summary: input.summary,
-        started_at: time,
-        ...(input.round ? { round: { current: input.round, label: `Round ${input.round}` } } : {}),
-      })
-      trans.push({
-        id: `${run}:start`,
-        seq: trans.length,
-        timestamp: time,
-        level: "step",
-        target_id: next,
-        run_id: run,
-        to_state: next === "done" ? "completed" : next === "failed" ? "failed" : "active",
-      })
-    }
-    if (node !== next) {
-      node = next
-      const to = next === "done" ? "done" : next === "failed" ? "failed" : "running"
-      if (state !== to) {
-        trans.push({
-          id: `workflow:${to}:${trans.length}`,
-          seq: trans.length,
-          timestamp: time,
-          level: "workflow",
-          target_id: "workflow",
-          from_state: state,
-          to_state: to,
-        })
-        state = to
-      }
-    }
-    if (node === next && run) {
-      const row = runs.find((item) => item.id === run)
-      if (row) {
-        row.summary = input.summary
-        if (input.round) row.round = { current: input.round, label: `Round ${input.round}` }
-        if (!input.round && "round" in row) delete row.round
-      }
-    }
+  function row(id?: string) {
+    if (!id) return
+    return runs.find((item) => item.id === id)
+  }
+
+  function live(val: unknown) {
+    return val === "active" || val === "waiting" || val === "blocked" || val === "retrying"
+  }
+
+  function source(item?: Record<string, unknown>) {
+    if (!item?.actor || typeof item.actor !== "object" || Array.isArray(item.actor)) return
+    const actor = item.actor as Record<string, unknown>
     return {
+      type: "agent",
+      ...(typeof actor.id === "string" ? { id: actor.id } : {}),
+      ...(typeof actor.label === "string" ? { label: actor.label } : {}),
+      ...(typeof actor.name === "string" ? { name: actor.name } : {}),
+      ...(typeof actor.role === "string" ? { role: actor.role } : {}),
+      ...(typeof item.step_id === "string" ? { step_id: item.step_id } : {}),
+      ...(typeof item.id === "string" ? { run_id: item.id } : {}),
+    }
+  }
+
+  function flowstatus(status?: unknown, step?: unknown) {
+    if (step === "done") return "done" as const
+    if (step === "failed") return "failed" as const
+    if (status === "waiting") return "waiting" as const
+    if (status === "blocked") return "blocked" as const
+    if (status === "retrying") return "retrying" as const
+    if (status === "failed") return "retrying" as const
+    return "running" as const
+  }
+
+  function phasestatus(status?: unknown, step?: unknown) {
+    if (step === "done" || status === "completed") return "completed" as const
+    if (step === "failed" || status === "failed") return "failed" as const
+    if (status === "waiting") return "waiting" as const
+    if (status === "blocked") return "blocked" as const
+    if (status === "retrying") return "retrying" as const
+    return "active" as const
+  }
+
+  function syncstate(time: string, next?: Node, status?: unknown) {
+    if (next) node = next
+    const to = flowstatus(status, node)
+    if (state === to) return
+    trans.push({
+      id: `workflow:${to}:${trans.length}`,
+      seq: trans.length,
+      timestamp: time,
+      level: "workflow",
+      target_id: "workflow",
+      from_state: state,
+      to_state: to,
+    })
+    state = to
+  }
+
+  function close(id: string | undefined, status: "completed" | "failed" | "retrying", time: string, summary?: string) {
+    const item = row(id)
+    if (!item || item.ended_at || !live(item.status)) return
+    const from = item.status
+    item.status = status
+    item.ended_at = time
+    if (summary) {
+      item.summary = summary
+      item.reason = summary
+    }
+    trans.push({
+      id: `${item.id}:${status}:${trans.length}`,
+      seq: trans.length,
+      timestamp: time,
+      level: "step",
+      target_id: item.step_id,
+      run_id: item.id,
+      from_state: from,
+      to_state: status,
+      ...(summary ? { reason: summary } : {}),
+      ...(source(item) ? { source: source(item) } : {}),
+    })
+  }
+
+  function closekids(time: string, status: "completed" | "failed" = "completed", summary?: string) {
+    kids.forEach((id) => close(id, status, time, summary))
+    kids = []
+  }
+
+  function enter(
+    next: Node,
+    input: {
+      summary: string
+      round?: number
+      retry?: number
+      parent?: string
+      actor?: Record<string, unknown>
+      status?: "active" | "completed" | "failed"
+    },
+  ) {
+    const time = stamp()
+    seen[next] += 1
+    const id = `${next}-${seen[next]}`
+    const status = input.status ?? "active"
+    runs.push({
+      id,
+      seq: runs.length,
+      step_id: next,
+      status,
+      summary: input.summary,
+      reason: input.summary,
+      started_at: time,
+      ...(input.parent ? { parent_run_id: input.parent } : {}),
+      ...(input.round ? { round: { current: input.round, label: `Round ${input.round}` } } : {}),
+      ...(input.retry ? { retry: { current: input.retry, label: `Retry ${input.retry}` } } : {}),
+      ...(input.actor ? { actor: input.actor } : {}),
+      ...(status === "completed" || status === "failed" ? { ended_at: time } : {}),
+    })
+    trans.push({
+      id: `${id}:start`,
+      seq: trans.length,
+      timestamp: time,
+      level: "step",
+      target_id: next,
+      run_id: id,
+      to_state: status,
+      reason: input.summary,
+      ...(source(runs[runs.length - 1]) ? { source: source(runs[runs.length - 1]) } : {}),
+    })
+    return { id, time }
+  }
+
+  function snapshot(time: string) {
+    const item = row(run)
+    return structuredClone({
       version: "workflow-progress.v2",
       workflow: {
         status: state,
@@ -1522,7 +1665,7 @@ function track(name: string, src: string) {
         ...(state === "done" || state === "failed" ? { ended_at: time } : {}),
       },
       phase: {
-        status: state === "done" ? "completed" : state === "failed" ? "failed" : "active",
+        status: phasestatus(item?.status, node),
         key: node,
         label: flow.find((item) => item.id === node)?.label ?? "Workflow",
         summary: note,
@@ -1541,10 +1684,133 @@ function track(name: string, src: string) {
       step_runs: runs,
       transitions: trans,
       participants: [],
-    } as const
+    } as const)
   }
 
-  return { move }
+  function move(next: Node, input: { summary: string; round?: number }) {
+    note = input.summary
+    const time = stamp()
+    closekids(time)
+    close(run, next === "failed" ? "failed" : "completed", time)
+    const item = enter(next, {
+      summary: input.summary,
+      round: input.round,
+      retry: next === "fix" && input.round && input.round > 1 ? input.round - 1 : undefined,
+      status: next === "done" ? "completed" : next === "failed" ? "failed" : "active",
+    })
+    run = item.id
+    syncstate(item.time, next, row(item.id)?.status)
+    return snapshot(item.time)
+  }
+
+  function review(input: { summary: string; round: number; reviewers: Reviewer[] }) {
+    note = input.summary
+    const time = stamp()
+    closekids(time)
+    close(run, "completed", time)
+    const group = enter("review", {
+      summary: input.summary,
+      round: input.round,
+      retry: input.round > 1 ? input.round : undefined,
+    })
+    const list = [
+      ...(input.reviewers.includes("Architect")
+        ? [
+            enter("review_architect", {
+              summary: "Architect review in progress",
+              round: input.round,
+              parent: group.id,
+              actor: { name: "Architect", role: "reviewer", status: "running" },
+            }).id,
+          ]
+        : []),
+      ...(input.reviewers.includes("QA")
+        ? [
+            enter("review_qa", {
+              summary: "QA review in progress",
+              round: input.round,
+              parent: group.id,
+              actor: { name: "QA", role: "reviewer", status: "running" },
+            }).id,
+          ]
+        : []),
+      ...(input.reviewers.includes("FE")
+        ? [
+            enter("review_fe", {
+              summary: "FE review in progress",
+              round: input.round,
+              parent: group.id,
+              actor: { name: "FE", role: "reviewer", status: "running" },
+            }).id,
+          ]
+        : []),
+      enter("review_test", {
+        summary: "Test runner in progress",
+        round: input.round,
+        parent: group.id,
+        actor: { name: "test-runner", role: "test-runner", status: "running" },
+      }).id,
+    ]
+    run = group.id
+    kids = list
+    syncstate(group.time, "review", row(group.id)?.status)
+    return snapshot(group.time)
+  }
+
+  function reviewdone(input: {
+    summary: string
+    round: number
+    reviews: Array<{ role: string; issues: string[]; summary: string }>
+    tests: string
+  }) {
+    note = input.summary
+    const time = stamp()
+    const map = {
+      Architect: "review_architect",
+      QA: "review_qa",
+      FE: "review_fe",
+    } as const
+    input.reviews.forEach((item) => {
+      const step = map[item.role as keyof typeof map]
+      if (!step) return
+      const hit = kids.find((id) => row(id)?.step_id === step)
+      close(hit, item.issues.length > 0 ? "failed" : "completed", time, item.summary)
+    })
+    close(
+      kids.find((id) => row(id)?.step_id === "review_test"),
+      input.tests ? "failed" : "completed",
+      time,
+      input.tests || "Verification passed",
+    )
+    close(
+      run,
+      input.tests || input.reviews.some((item) => item.issues.length > 0) ? "retrying" : "completed",
+      time,
+      input.summary,
+    )
+    syncstate(time, undefined, row(run)?.status)
+    return snapshot(time)
+  }
+
+  function finalverify(input: { summary: string; round: number }) {
+    return move("final_verify", {
+      summary: input.summary,
+      round: input.round,
+    })
+  }
+
+  function finalverifydone(input: { summary: string; round: number; fail: string }) {
+    note = input.summary
+    const time = stamp()
+    const item = row(run)
+    if (item?.step_id === "final_verify" && typeof item.id === "string") {
+      close(item.id, input.fail ? "failed" : "completed", time, input.summary)
+    }
+    syncstate(time, undefined, row(run)?.status)
+    return snapshot(time)
+  }
+
+  return { move, review, reviewdone, finalverify, finalverifydone }
 }
 
 function stamp() {

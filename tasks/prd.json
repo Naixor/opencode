@@ -53,7 +53,7 @@
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Completed with deterministic projection updates in `packages/workflow-api/src/presentation.ts` and regression coverage in `packages/workflow-api/src/index.test.ts`. The reducer now stabilizes active-path selection for grouped work, dedupes meaningful transition history, derives agent rows from participant/run/transition evidence, and emits alert states consistently across rich and fallback payloads. Relevant `packages/workflow-api` tests and typecheck pass. Accepted unresolved reviewer notes: Architect: `packages/workflow-api/src/presentation.ts:483` and `packages/workflow-api/src/presentation.ts:496` still choose live descendants for a group by step ancestry only, not by the active group run instance, so retried or re-entered groups can still project a stale branch without a `parent_run_id` chain match to the selected group run. QA: `packages/workflow-api/src/presentation.ts:757` still seeds transition-only agents as `pending`, and `packages/workflow-api/src/presentation.ts:690` only upgrades that state when richer seeds exist, so a transition-only actor reference can still remain pending instead of reflecting the referenced run or `to_state`."
+      "notes": "Completed by implement workflow after 7 review round(s). Commit: 9a733cc24c81d6726f65a811ba35332731eb2806. Accepted unresolved review issues after clean test-runner: Architect: `packages/workflow-api/src/presentation.ts:483` and `packages/workflow-api/src/presentation.ts:496` choose a live descendant for a group by step ancestry only, not by the active group run instance. If a group step is retried/re-entered and an older child run is still live or partially stale, `current()` can project the wrong branch, which then cascades into wrong timeline focus and step. Built the deterministic workflow projection reducer in `packages/workflow-api/src/presentation.ts:44` and tightened the selection logic across all projected regions. - `packages/workflow-api/src/presentation.ts:445` adds a canonical `changes()` pass that filters no-op transitions, collapses duplicates, and sorts with deterministic tie-breakers instead of relying on input order. - `packages/workflo"
     },
     {
       "id": "US-004",
@@ -69,7 +69,7 @@
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Completed with a live workflow tool route that reads projection state through a shared workflow screen boundary instead of transcript text. Added the workflow screen/view/tool modules in `packages/opencode/src/cli/cmd/tui/routes/session`, routed `workflow` tool parts through `SessionToolRoute`, covered runtime updates plus zero-data and error fallbacks in `packages/opencode/test/cli`, and verified with targeted workflow TUI tests and `packages/opencode` typecheck. Accepted unresolved reviewer notes: QA: `packages/opencode/test/cli/workflow-tool-reactive.test.ts:44` places `15000` inside the spawned `bun -e` script instead of on the outer `Bun.spawnSync(..., { timeout })` call, so this test has no process-level timeout. If the OpenTUI render deadlocks or the child process hangs, CI can stall instead of failing fast. Move the timeout to the `Bun.spawnSync` options object and ideally include `run.stderr` in the failure assertion for easier diagnosis."
+      "notes": "Completed by implement workflow after 7 review round(s). Commit: 77a2ac81293dbcfebda4ed0c57736d97f483941b. Accepted unresolved review issues after clean test-runner: QA: [warning] `packages/opencode/test/cli/workflow-tool-reactive.test.ts:44` places `15000` inside the spawned `bun -e` script instead of on the outer `Bun.spawnSync(..., { timeout })` call, so this test has no process-level timeout. If the OpenTUI render deadlocks or the child process hangs, CI can stall instead of failing fast. Move the timeout to the `Bun.spawnSync` options object (and ideally . {\"summary\":\"Updated the US-004 reactive integration test to keep the workflow tool in `running` state while projection metadata changes through `sessiontoolprops()`, so the repaint assertion now matches the real workflow runtime path instead of depending on a status transition. Browser verification was intentionally not run because this story changes the terminal-only OpenTUI workflow screen in `p"
     },
     {
       "id": "US-005",
@@ -84,7 +84,7 @@
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Completed with workflow-progress.v2 emission in `.opencode/workflows/implement.ts`, thin state-machine tracking for convert/select/implement-fix/review/done-failed, and end-to-end coverage in `packages/opencode/test/workflow/implement.test.ts` proving the shared workflow screen consumes emitted v2 metadata. Updated `.opencode/agent/test-runner.md` so implement workflow verification can parse strict VERIFY pass/fail output reliably. Accepted unresolved reviewer notes: none."
+      "notes": "Completed by implement workflow after 11 review round(s). Commit: a1864f7d37e839045a0b3552561e7cd9feef1900."
     },
     {
       "id": "US-006",
@@ -101,8 +101,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by implement workflow after 2 review round(s). Commit: bc0ae0e8afe0b2fcf0e231a65853f7bd8573a710. {\"summary\":\"Fixed the empty-state naming regression so known workflow names remain visible, added a browser-consumable harness entry backed by the same canonical fixture loader, expanded harness coverage assertions, and repaired the reactive test timeout so the focused workflow story suite passes again.\",\"files\":[\"packages/opencode/src/cli/cmd/tui/routes/session/workflow-shell.ts\",\"packages/openco"
     },
     {
       "id": "US-007",
@@ -119,7 +119,7 @@
       ],
       "priority": 7,
       "passes": true,
-      "notes": "Completed by implement workflow after review. Commit records the workflow header panel projection so the TUI reads normalized header fields only, shows shared fallback tokens for missing header data, and visually distinguishes terminal and waiting states with focused regression coverage and typecheck/test verification. Accepted unresolved reviewer notes: none."
+      "notes": "Completed by implement workflow after 2 review round(s). Commit: 544f60a95a4c9313520e394f1d39cc8b6b7a173a. {\"summary\":\"Centralized workflow header normalization in the shared projection layer so all consumers now receive canonical `title`/`status`/`phase`/`summary`/`started_at` fields, simplified the TUI screen and shell to read that normalized contract directly, added shared-projection regression coverage, and completed browser verification against the workflow harness page.\",\"files\":[\"packages/workfl"
     },
     {
       "id": "US-008",
@@ -136,8 +136,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by implement workflow after 2 review round(s). Commit: 85ae60059a3ff9707ec91fdb487d01f605475318. {\"summary\":\"Added regression coverage for omitted inactive pending sibling branches and replaced substring-only timeline fixture checks with exact golden frame assertions for grouped, waiting, blocked, retrying, failed, and done renders at both 80 and 120 columns.\",\"files\":[\"packages/opencode/test/cli/workflow-screen-harness.ts\",\"packages/opencode/test/cli/workflow-shell.test.ts\"],\"verify\":\"Passed"
     },
     {
       "id": "US-009",
@@ -154,7 +154,7 @@
       ],
       "priority": 9,
       "passes": true,
-      "notes": "Completed with dedicated agents-panel rendering in the workflow shell so rows read only the agents projection region, show normalized labels and summaries, and expose distinct active/waiting/blocked/retrying/done states. Added reducer coverage to keep agent summaries aligned with shared fallback tokens plus shell regressions that isolate the agents region from timeline, header, history, and alert content. Accepted unresolved reviewer notes: none."
+      "notes": "Completed by implement workflow after 2 review round(s). Commit: 4585d1efc8335c46d194a906bafcf7be4dce0c4b. {\"summary\":\"Fixed the agents panel label selection so it shows a meaningful role when the participant name is only the shared fallback token, updated the focused agents-panel test to assert that contract, and completed browser verification for the rendered agent states.\",\"files\":[\"packages/opencode/src/cli/cmd/tui/routes/session/workflow-shell.ts\",\"packages/opencode/test/cli/workflow-shell.test.ts"
     },
     {
       "id": "US-010",
@@ -170,8 +170,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by implement workflow after 3 review round(s). Commit: 59a0ba4ab5ca4c7c8645d747eb1d95903cf16217. {\"summary\":\"No code changes were needed in this repair round. I resolved the environment-specific verification failure by running the existing US-010 checks with an explicit Bun path (`$HOME/.bun/bin/bun`) and re-ran browser verification for the history fixture.\",\"files\":[],\"verify\":\"Passed `$HOME/.bun/bin/bun test test/cli/workflow-shell.test.ts` in `packages/opencode`, `$HOME/.bun/bin/bun test s"
     },
     {
       "id": "US-011",
@@ -187,8 +187,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by implement workflow after 4 review round(s). Commit: a616c75c2. {\"summary\":\"No further code changes were needed; I re-ran the previously failing verification steps for US-011 and confirmed the alerts-panel implementation is passing end-to-end in tests, typecheck, and browser verification.\",\"files\":[],\"verify\":\"Passed `bun run --cwd packages/opencode test:parallel --workers 1 --pattern \\\"/Users/bytedance/GithubWorkspace/@Naixor/opencode/packages/opencode/test/c"
     },
     {
       "id": "US-012",
@@ -202,8 +202,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed with grouped review child runs plus distinct repair and final verification retry runs in `.opencode/workflows/implement.ts`, and focused regression coverage in `packages/opencode/test/workflow/implement.test.ts` for mixed child states, repeated retries, workflow-screen projection, and fresh test-runner sessions per round. Verified with `bun run --cwd packages/opencode test:parallel --workers 1 --pattern \"**/implement.test.ts\"` and `bun run --cwd packages/opencode typecheck`. Accepted unresolved reviewer notes: none."
     },
     {
       "id": "US-013",

@@ -338,9 +338,18 @@ describe("implement workflow", () => {
     expect(last.step_definitions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "convert", label: "Convert PRD", next: ["select"] }),
-        expect.objectContaining({ id: "select", label: "Select story", next: ["implement"] }),
+        expect.objectContaining({ id: "select", label: "Select story", next: ["implement", "final_verify", "done"] }),
         expect.objectContaining({ id: "implement", label: "Implement story" }),
-        expect.objectContaining({ id: "review", label: "Review gate", next: ["fix", "select", "done", "failed"] }),
+        expect.objectContaining({
+          id: "review",
+          kind: "group",
+          label: "Review gate",
+          next: ["fix", "select", "done", "failed"],
+        }),
+        expect.objectContaining({ id: "review_architect", parent_id: "review", label: "Architect review" }),
+        expect.objectContaining({ id: "review_test", parent_id: "review", label: "Test runner" }),
+        expect.objectContaining({ id: "final_verify", label: "Final verify" }),
+        expect.objectContaining({ id: "retrospective", label: "Retrospective" }),
         expect.objectContaining({ id: "done", label: "Done" }),
       ]),
     )
@@ -389,6 +398,354 @@ describe("implement workflow", () => {
     expect(view.history.length).toBeGreaterThan(0)
     expect(view.alerts).toEqual(
       expect.arrayContaining([expect.objectContaining({ status: "done", title: "Implement workflow" })]),
+    )
+  })
+
+  test("emits grouped review children plus distinct repair and final verification retry runs", async () => {
+    Reflect.set(globalThis, "opencode", runtime)
+    const mod = await import(
+      pathToFileURL(path.resolve(import.meta.dir, "../../../../.opencode/workflows/implement.ts")).href
+    )
+    const flow = mod.default
+
+    await using tmp = await tmpdir({ git: true, config: {} })
+    const updates: unknown[] = []
+
+    const ctx: WorkflowContext = {
+      name: "implement",
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+      sessionID: "sess_test",
+      userMessageID: "msg_user",
+      assistantMessageID: "msg_assistant",
+      directory: tmp.path,
+      worktree: tmp.path,
+      async status(input) {
+        if (input.progress) updates.push(input.progress)
+      },
+      async write(input) {
+        const file = path.isAbsolute(input.file) ? input.file : path.join(tmp.path, input.file)
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(file, input.content, "utf8")
+      },
+      async ask() {
+        throw new Error("ask should not be called in this test")
+      },
+      async task(input: TaskInput) {
+        if (input.description.includes("split check")) {
+          const role = input.description.split(" ")[0]
+          return {
+            session_id: `sess_${role.toLowerCase()}`,
+            text: JSON.stringify({
+              role,
+              ok: true,
+              summary: `${role} accepts the split`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "Convert PRD 1") {
+          return {
+            session_id: "sess_convert",
+            text: JSON.stringify({
+              project: "OpenCode",
+              branchName: "ralph/demo-prd",
+              description: "Demo feature",
+              userStories: [
+                {
+                  id: "US-001",
+                  title: "Implement demo feature",
+                  description: "As a user, I want a demo feature so that I can test the workflow.",
+                  acceptanceCriteria: ["Feature is implemented", "Typecheck passes"],
+                  priority: 1,
+                  passes: false,
+                  notes: "",
+                },
+              ],
+            }),
+          }
+        }
+
+        if (input.description.startsWith("Switch branch ")) {
+          return {
+            session_id: "sess_branch",
+            text: JSON.stringify({
+              ok: true,
+              branch: input.description.replace("Switch branch ", ""),
+              summary: "switched branch",
+            }),
+          }
+        }
+
+        if (input.description === "US-001 implement") {
+          return {
+            session_id: "sess_impl_1",
+            text: "Implemented the first pass.",
+          }
+        }
+
+        if (input.description === "US-001 fix 1") {
+          return {
+            session_id: "sess_impl_2",
+            text: "Applied review fixes.",
+          }
+        }
+
+        if (input.description.includes("review 1")) {
+          const role = input.description.split(" ")[1]
+          return {
+            session_id: `sess_${role.toLowerCase()}_1`,
+            text: JSON.stringify({
+              role,
+              approve: role !== "Architect",
+              summary: `${role} reviewed round 1`,
+              issues: role === "Architect" ? ["Tighten the reducer coverage"] : [],
+            }),
+          }
+        }
+
+        if (input.description.includes("review 2")) {
+          const role = input.description.split(" ")[1]
+          return {
+            session_id: `sess_${role.toLowerCase()}_2`,
+            text: JSON.stringify({
+              role,
+              approve: true,
+              summary: `${role} approves round 2`,
+              issues: [],
+            }),
+          }
+        }
+
+        if (input.description === "US-001 tests 1" || input.description === "US-001 tests 2") {
+          return {
+            session_id: `sess_tests_${input.description.endsWith("1") ? "1" : "2"}`,
+            text: "VERIFY: PASS",
+          }
+        }
+
+        if (input.description === "Final test run 1") {
+          return {
+            session_id: "sess_final_test_1",
+            text: "VERIFY: FAIL\nFAILURES:\nfull verification still fails",
+          }
+        }
+
+        if (input.description === "Final fix 1") {
+          return {
+            session_id: "sess_final_fix_1",
+            text: "Fixed the remaining workspace verification issue.",
+          }
+        }
+
+        if (input.description === "Final test run 2") {
+          return {
+            session_id: "sess_final_test_2",
+            text: "VERIFY: PASS",
+          }
+        }
+
+        if (input.description === "Implementation retrospective") {
+          return {
+            session_id: "sess_retro",
+            text: "- Completed after one repair round and one final verification retry",
+          }
+        }
+
+        if (input.description.endsWith(" commit")) {
+          return {
+            session_id: "sess_commit",
+            text: JSON.stringify({ ok: true, commit: "abc123", summary: "committed story" }),
+          }
+        }
+
+        throw new Error(`unexpected task: ${input.description}`)
+      },
+      async workflow() {
+        throw new Error("nested workflow should not be called in this test")
+      },
+    }
+
+    const out = await flow.run(ctx, {
+      raw: "# Demo PRD\n\n## Goals\n\n- Add one tiny feature",
+      argv: [],
+      files: [],
+    })
+    if (typeof out === "string") throw new Error("expected object output")
+
+    const group = updates.find((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false
+      if (!("machine" in item) || !item.machine || typeof item.machine !== "object") return false
+      const machine = item.machine as { active_step_id?: string }
+      if (machine.active_step_id !== "review") return false
+      if (!("step_runs" in item) || !Array.isArray(item.step_runs)) return false
+      return item.step_runs.some(
+        (run) =>
+          run &&
+          typeof run === "object" &&
+          !Array.isArray(run) &&
+          run.step_id === "review_architect" &&
+          run.status === "active" &&
+          typeof run.parent_run_id === "string",
+      )
+    })
+    expect(group).toBeDefined()
+    if (!group || typeof group !== "object" || Array.isArray(group)) throw new Error("expected grouped review progress")
+    if (!("step_runs" in group) || !Array.isArray(group.step_runs)) throw new Error("expected grouped step runs")
+
+    const review = group.step_runs.find(
+      (run) => run && typeof run === "object" && !Array.isArray(run) && run.step_id === "review",
+    )
+    expect(review).toBeDefined()
+    if (!review || typeof review !== "object" || Array.isArray(review) || typeof review.id !== "string") {
+      throw new Error("expected review group run")
+    }
+
+    expect(group.step_runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ step_id: "review", status: "active" }),
+        expect.objectContaining({ step_id: "review_architect", status: "active", parent_run_id: review.id }),
+        expect.objectContaining({ step_id: "review_qa", status: "active", parent_run_id: review.id }),
+        expect.objectContaining({ step_id: "review_fe", status: "active", parent_run_id: review.id }),
+        expect.objectContaining({ step_id: "review_test", status: "active", parent_run_id: review.id }),
+      ]),
+    )
+
+    const mixed = updates.find((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false
+      if (!("machine" in item) || !item.machine || typeof item.machine !== "object") return false
+      const machine = item.machine as { active_step_id?: string }
+      if (machine.active_step_id !== "review") return false
+      if (!("step_runs" in item) || !Array.isArray(item.step_runs)) return false
+      return item.step_runs.some(
+        (run) =>
+          run &&
+          typeof run === "object" &&
+          !Array.isArray(run) &&
+          run.step_id === "review_architect" &&
+          run.status === "failed",
+      )
+    })
+    expect(mixed).toBeDefined()
+    if (
+      !mixed ||
+      typeof mixed !== "object" ||
+      Array.isArray(mixed) ||
+      !("step_runs" in mixed) ||
+      !Array.isArray(mixed.step_runs) ||
+      !("transitions" in mixed) ||
+      !Array.isArray(mixed.transitions) ||
+      !("workflow" in mixed) ||
+      !mixed.workflow ||
+      typeof mixed.workflow !== "object" ||
+      !("phase" in mixed) ||
+      !mixed.phase ||
+      typeof mixed.phase !== "object"
+    ) {
+      throw new Error("expected mixed review results progress")
+    }
+    expect(mixed.workflow).toMatchObject({ status: "retrying" })
+    expect(mixed.phase).toMatchObject({ status: "retrying" })
+    expect(mixed.step_runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ step_id: "review", status: "retrying" }),
+        expect.objectContaining({ step_id: "review_architect", status: "failed" }),
+        expect.objectContaining({ step_id: "review_qa", status: "completed" }),
+        expect.objectContaining({ step_id: "review_fe", status: "completed" }),
+        expect.objectContaining({ step_id: "review_test", status: "completed" }),
+      ]),
+    )
+
+    const last = updates.at(-1)
+    expect(last).toBeDefined()
+    if (!last || typeof last !== "object" || Array.isArray(last)) throw new Error("expected final workflow progress")
+    if (!("step_runs" in last) || !Array.isArray(last.step_runs)) throw new Error("expected final step runs")
+    expect(last.step_runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "implement-1", step_id: "implement", status: "completed" }),
+        expect.objectContaining({ id: "fix-1", step_id: "fix", status: "completed" }),
+        expect.objectContaining({ id: "review-1", step_id: "review", status: "retrying" }),
+        expect.objectContaining({ id: "review-2", step_id: "review", status: "completed" }),
+        expect.objectContaining({ id: "final_verify-1", step_id: "final_verify", status: "failed" }),
+        expect.objectContaining({ id: "final_fix-1", step_id: "final_fix", status: "completed" }),
+        expect.objectContaining({ id: "final_verify-2", step_id: "final_verify", status: "completed" }),
+        expect.objectContaining({ id: "retrospective-1", step_id: "retrospective", status: "completed" }),
+        expect.objectContaining({ id: "done-1", step_id: "done", status: "completed" }),
+      ]),
+    )
+
+    if (!("transitions" in last) || !Array.isArray(last.transitions)) throw new Error("expected final transitions")
+    expect(last.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target_id: "final_verify", run_id: "final_verify-1", to_state: "active" }),
+        expect.objectContaining({ target_id: "final_verify", run_id: "final_verify-1", to_state: "failed" }),
+        expect.objectContaining({ target_id: "final_fix", run_id: "final_fix-1", to_state: "active" }),
+        expect.objectContaining({ target_id: "final_verify", run_id: "final_verify-2", to_state: "active" }),
+        expect.objectContaining({ target_id: "final_verify", run_id: "final_verify-2", to_state: "completed" }),
+      ]),
+    )
+
+    const verify = updates.find((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false
+      if (!("machine" in item) || !item.machine || typeof item.machine !== "object") return false
+      const machine = item.machine as { active_step_id?: string }
+      if (machine.active_step_id !== "final_verify") return false
+      if (!("workflow" in item) || !item.workflow || typeof item.workflow !== "object") return false
+      const workflow = item.workflow as { status?: string }
+      return workflow.status === "retrying"
+    })
+    expect(verify).toBeDefined()
+    if (
+      !verify ||
+      typeof verify !== "object" ||
+      Array.isArray(verify) ||
+      !("phase" in verify) ||
+      !verify.phase ||
+      !("workflow" in verify) ||
+      !verify.workflow
+    ) {
+      throw new Error("expected failed final verify progress")
+    }
+    expect(verify.workflow).toMatchObject({ status: "retrying" })
+    expect(verify.phase).toMatchObject({ status: "failed" })
+
+    const trans = mixed.transitions as Array<Record<string, unknown>>
+    const architect = trans.find((item) => item.run_id === "review_architect-1" && item.to_state === "failed")
+    expect(architect).toBeDefined()
+    expect(architect).toMatchObject({
+      from_state: "active",
+      source: {
+        type: "agent",
+        name: "Architect",
+        role: "reviewer",
+        step_id: "review_architect",
+        run_id: "review_architect-1",
+      },
+    })
+
+    const view = workflowscreen({
+      metadata: {
+        [WorkflowProgressKey]: mixed,
+      },
+      name: "implement",
+      tool_status: "running",
+    })
+    expect(view.empty).toBe(false)
+    expect(view.timeline.map((item) => ({ step_id: item.step_id, status: item.status }))).toEqual(
+      expect.arrayContaining([
+        { step_id: "review", status: "retrying" },
+        { step_id: "review_architect", status: "failed" },
+        { step_id: "review_qa", status: "completed" },
+        { step_id: "review_fe", status: "completed" },
+        { step_id: "review_test", status: "completed" },
+      ]),
+    )
+    expect(view.history).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Architect review", source: "Architect", to_state: "failed" }),
+      ]),
     )
   })
 
@@ -966,6 +1323,7 @@ describe("implement workflow", () => {
         }
 
         if (input.description === "US-001 tests 1") {
+          expect(input.session_id).toBeUndefined()
           return {
             session_id: "sess_test_runner_1",
             text: "VERIFY: FAIL\nFAILURES:\nempty state test is missing",
@@ -999,6 +1357,7 @@ describe("implement workflow", () => {
         }
 
         if (input.description === "US-001 tests 2") {
+          expect(input.session_id).toBeUndefined()
           return {
             session_id: "sess_test_runner_2",
             text: "VERIFY: PASS",

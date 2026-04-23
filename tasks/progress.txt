@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Workflow progress emitters should model parallel review phases as one group step plus child step runs linked by `parent_run_id`, and each repair or verification retry should create a fresh run id instead of mutating prior history.
 - Nested config defaults can live directly in the Zod schema in `packages/opencode/src/config/config.ts`; cover them with `Config.get()` integration tests in `packages/opencode/test/config/config.test.ts` so parsing and merge behavior are validated together.
 - Keep Hindsight bank identity and resolve rules in dedicated helpers under `packages/opencode/src/memory/hindsight/`; only `mem:` ids should resolve directly to authoritative memories, while `sess:` and `obs:` remain indirect ranking evidence and cross-worktree hashes must be dropped.
 - Workspace-scoped companion services fit `Instance.state(..., dispose)` well: cache one lazy boot promise per worktree, bind the embedded daemon to `127.0.0.1`, and treat startup or health timeouts as degraded fallback instead of throwing into memory flows.
@@ -246,4 +247,14 @@
   - Keep workflow projection ordering in shared comparators (`cmprun`, `cmpstep`, `cmptrans`) and reuse the same sorted view across timeline, history, agents, and alerts so state stays deterministic.
   - Deduplicate transition history before projecting downstream panels; alert and latest-change logic should read the same filtered transition list instead of re-scanning raw records independently.
   - Participant or transition-only agent evidence is easiest to stabilize by collecting per-agent seeds first and then selecting each field by source priority and timestamp, rather than mutating one row in place.
+---
+
+## 2026-04-24 00:00:00 CST - US-012
+- Updated `.opencode/workflows/implement.ts` so review gates emit a grouped review node with per-reviewer and test child step runs, repair rounds create fresh retry-aware run ids, and final verification or repair plus retrospective steps emit distinct terminal history instead of mutating prior runs.
+- Added focused workflow regressions in `packages/opencode/test/workflow/implement.test.ts` covering grouped review children, mixed child outcomes, final verification retries, workflow-screen projection, and fresh test-runner sessions per round.
+- Files changed: `.opencode/workflows/implement.ts`, `packages/opencode/test/workflow/implement.test.ts`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Model parallel workflow activity as one parent group run plus explicit child runs so shared reducer or TUI consumers can project active branches and per-actor history without workflow-specific logic.
+  - When a workflow retries review or verification, emit a new step run and transition sequence for each attempt instead of reopening or mutating the prior run; deterministic history depends on immutable attempts.
+  - Keep implement-workflow test-runner tasks on fresh sessions per review round so each verification pass reflects the current workspace state instead of inheriting stale test context.
 ---
