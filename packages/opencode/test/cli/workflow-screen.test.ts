@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { WorkflowProgressKey } from "@lark-opencode/workflow-api"
 import { workflowfallback } from "@lark-opencode/workflow-api/presentation"
+import { externalexample } from "../../../workflow-api/src/example"
 import { workflowscreen } from "../../src/cli/cmd/tui/routes/session/workflow-screen"
 
 const progress = {
@@ -95,6 +96,23 @@ describe("workflowscreen", () => {
       summary: "Ship the header",
       started_at: workflowfallback.timestamp,
     })
+  })
+
+  test("renders the external adoption example without custom workflow UI code", () => {
+    const demo = externalexample()
+    const view = workflowscreen({
+      metadata: demo.metadata,
+      name: "external-adoption",
+      tool_status: "completed",
+    })
+
+    expect(view.empty).toBe(false)
+    expect(view.mode).toBe("projection")
+    expect(view.header).toEqual(demo.projection.header)
+    expect(view.timeline).toEqual([expect.objectContaining({ label: "Done", kind: "terminal", active: true })])
+    expect(view.agents[0]).toMatchObject({ name: "external-bot", status: "completed" })
+    expect(view.history[0]).toMatchObject({ label: "External adoption", to_state: "done" })
+    expect(view.alerts[0]).toMatchObject({ status: "done", title: "External adoption" })
   })
 
   test("distinguishes inactive fallback state from named empty state", () => {

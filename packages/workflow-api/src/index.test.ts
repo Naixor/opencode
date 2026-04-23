@@ -37,6 +37,7 @@ import {
   workflowview,
   type WorkflowProjection,
 } from "./presentation"
+import { externalexample } from "./example"
 
 function sourcekey(input?: {
   type?: string
@@ -330,6 +331,31 @@ describe("workflow progress schema", () => {
       run_id: "run-1",
       to_state: "active",
     })
+  })
+
+  test("runs the external adoption example through the shared reducer", () => {
+    const demo = externalexample()
+
+    expect(demo.updates).toHaveLength(3)
+    expect(demo.progress).toMatchObject({
+      version: "workflow-progress.v2",
+      workflow: { status: "done", label: "External adoption" },
+    })
+    expect(demo.normalized.machine).toMatchObject({ title: "External machine" })
+    expect(demo.projection.header).toEqual({
+      title: "External adoption",
+      status: "done",
+      phase: "Done",
+      round: "Round 1/1",
+      summary: "External workflow using the shared contract",
+      started_at: "2026-04-24T10:00:00.000Z",
+    })
+    expect(demo.projection.timeline).toEqual([
+      expect.objectContaining({ label: "Done", kind: "terminal", active: true }),
+    ])
+    expect(demo.projection.history[0]).toMatchObject({ label: "External adoption", to_state: "done" })
+    expect(demo.projection.agents[0]).toMatchObject({ name: "external-bot", status: "completed" })
+    expect(demo.metadata[WorkflowProgressKey]).toEqual(demo.progress)
   })
 
   test("uses section-specific normalized status enums", () => {

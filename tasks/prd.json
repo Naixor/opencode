@@ -233,8 +233,8 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed with shared workflow contract guidance in `packages/workflow-api/README.md`, an executable external adoption example in `packages/workflow-api/src/example.ts`, and regression coverage in `packages/workflow-api/src/index.test.ts` plus `packages/opencode/test/cli/workflow-screen.test.ts` proving the shared normalizer, reducer, and TUI render external v2 metadata without custom UI logic. Verified with `bun test src/index.test.ts`, `bun test test/cli/workflow-screen.test.ts`, and `bun run typecheck` in `packages/workflow-api`. Accepted unresolved reviewer notes: none."
     }
   ]
 }
