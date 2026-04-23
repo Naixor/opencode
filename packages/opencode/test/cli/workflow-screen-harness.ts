@@ -163,8 +163,103 @@ const grouped = {
   participants: [{ id: "agent-running", name: "running-agent", step_id: "lint", run_id: "run-lint" }],
 } as const
 
+const history = {
+  version: "workflow-progress.v2",
+  workflow: {
+    status: "blocked",
+    name: "flow-history",
+    label: "History Flow",
+    summary: "Flow is blocked",
+  },
+  machine: {
+    id: "flow-history",
+    active_step_id: "write",
+    active_run_id: "run-2",
+  },
+  phase: { status: "execute", label: "Execute" },
+  round: { current: 2, max: 5 },
+  step_definitions: [
+    { id: "write", kind: "task", label: "Write code" },
+    { id: "ship", kind: "terminal", label: "Ship" },
+  ],
+  step_runs: [
+    {
+      id: "run-1",
+      seq: 0,
+      step_id: "write",
+      status: "retrying",
+      reason: "Retry 1 failed",
+      round: { current: 1, max: 5 },
+    },
+    {
+      id: "run-2",
+      seq: 1,
+      step_id: "write",
+      status: "retrying",
+      reason: "Retry 2 failed",
+      round: { current: 2, max: 5 },
+    },
+    { id: "run-ship", seq: 2, step_id: "ship", status: "completed", reason: "Merged" },
+  ],
+  transitions: [
+    {
+      id: "retry-1-old",
+      seq: 0,
+      timestamp: "t1",
+      level: "step",
+      target_id: "write",
+      run_id: "run-1",
+      to_state: "retrying",
+      reason: "Retry 1 failed",
+    },
+    {
+      id: "retry-1-new",
+      seq: 1,
+      timestamp: "t1",
+      level: "step",
+      target_id: "write",
+      run_id: "run-1",
+      to_state: "retrying",
+      reason: "Retry 1 failed",
+    },
+    {
+      id: "ship-done",
+      seq: 2,
+      timestamp: "t0",
+      level: "step",
+      target_id: "ship",
+      run_id: "run-ship",
+      to_state: "completed",
+      reason: "Merged",
+    },
+    {
+      id: "flow-round",
+      seq: 3,
+      level: "workflow",
+      target_id: "workflow",
+      to_state: "blocked",
+      reason: "Await review",
+    },
+    {
+      id: "retry-2",
+      seq: 4,
+      timestamp: "t2",
+      level: "step",
+      target_id: "write",
+      run_id: "run-2",
+      to_state: "retrying",
+      reason: "Retry 2 failed",
+    },
+  ],
+  agents: [
+    { id: "agent-history", name: "history-agent", role: "Worker", status: "retrying", summary: "Retry 2 failed" },
+  ],
+  participants: [{ id: "agent-history", name: "history-agent", step_id: "write", run_id: "run-2" }],
+} as const
+
 export const workflowfixtures: Record<string, Fixture> = {
   running: { name: "demo", tool_status: "running", progress: grouped },
+  history: { name: "history", tool_status: "running", progress: history },
   waiting: { name: "demo", tool_status: "running", progress: single("waiting", "wait") },
   blocked: { name: "demo", tool_status: "running", progress: single("blocked", "decision") },
   retrying: { name: "demo", tool_status: "running", progress: single("retrying") },

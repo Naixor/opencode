@@ -54,6 +54,7 @@ export type WorkflowProjectionAgentItem = {
 
 export type WorkflowProjectionHistoryItem = {
   id: string
+  kind: "change" | "round"
   timestamp: string
   level: WorkflowProgressTransitionLevel
   target_id: string
@@ -64,6 +65,13 @@ export type WorkflowProjectionHistoryItem = {
   reason?: string
   source?: string
   round?: string
+}
+
+function histkind(input: WorkflowProjectionTransition) {
+  if (input.level !== "workflow") return "change" as const
+  if (input.round_text === workflowfallback.round) return "change" as const
+  if (input.timestamp_text !== workflowfallback.timestamp) return "change" as const
+  return "round" as const
 }
 
 export type WorkflowProjectionAlertItem = {
@@ -815,6 +823,7 @@ function agentsview(progress: WorkflowProjectionInput): WorkflowProjectionAgentI
 function historyview(progress: WorkflowProjectionInput): WorkflowProjectionHistoryItem[] {
   return changes(progress).map((item) => ({
     id: item.id,
+    kind: histkind(item),
     timestamp: item.timestamp_text,
     level: item.level,
     target_id: item.target_id,

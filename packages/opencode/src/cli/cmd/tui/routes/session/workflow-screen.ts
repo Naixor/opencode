@@ -62,7 +62,8 @@ export function workflowscreen(input: {
   const state = fallback(input.tool_status)
   const title = filled(input.name) ?? workflowfallback.workflow
   const mode = filled(input.name) || input.tool_status ? "empty" : "inactive"
-  const notice = mode === "inactive" ? `No active ${workflowfallback.workflow}.` : `No ${workflowfallback.workflow} state yet.`
+  const notice =
+    mode === "inactive" ? `No active ${workflowfallback.workflow}.` : `No ${workflowfallback.workflow} state yet.`
   const timeline = [
     {
       id: `${mode}:step`,
@@ -78,14 +79,15 @@ export function workflowscreen(input: {
     {
       id: workflowfallback.agent,
       name: workflowfallback.agent,
-      summary: workflowfallback.reason,
       status: "pending",
+      summary: workflowfallback.reason,
       active: false,
     } satisfies WorkflowProjection["agents"][number],
   ]
   const history = [
     {
       id: `${mode}:history`,
+      kind: "change",
       timestamp: workflowfallback.timestamp,
       level: "workflow",
       target_id: workflowfallback.workflow,

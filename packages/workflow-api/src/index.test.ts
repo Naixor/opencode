@@ -1745,6 +1745,7 @@ describe("workflow progress schema", () => {
       action: "review waiting",
     })
     expect(view.history[0]).toMatchObject({
+      kind: "change",
       label: "review",
       timestamp: workflowfallback.timestamp,
       reason: workflowfallback.reason,
@@ -2770,7 +2771,7 @@ describe("workflow progress schema", () => {
     expect(view).toBeDefined()
     if (!view) throw new Error("expected workflow projection")
     expect(view.header.round).toBe("Round 2/5")
-    expect(view.history[0]).toMatchObject({ level: "workflow", round: "Round 2/5" })
+    expect(view.history[0]).toMatchObject({ kind: "round", level: "workflow", round: "Round 2/5" })
     expect(view.alerts).toEqual(
       expect.arrayContaining([expect.objectContaining({ level: "step", summary: "Waiting on reviewer" })]),
     )
@@ -2800,7 +2801,40 @@ describe("workflow progress schema", () => {
     expect(view).toBeDefined()
     if (!view) throw new Error("expected workflow projection")
     expect(view.header.round).toBe("Round 2/5")
-    expect(view.history[0]).toMatchObject({ level: "step", round: "Round 2/5" })
+    expect(view.history[0]).toMatchObject({ kind: "change", level: "step", round: "Round 2/5" })
+  })
+
+  test("keeps timestamped workflow transitions as change rows even inside an active round", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "blocked", label: "Implement" },
+        round: { status: "active", current: 2, max: 5 },
+        machine: { active_step_id: "review" },
+        step_definitions: [{ id: "review", kind: "decision", label: "Review" }],
+        step_runs: [{ id: "run-1", seq: 0, step_id: "review", status: "blocked", reason: "Await approval" }],
+        transitions: [
+          {
+            id: "flow-1",
+            seq: 1,
+            timestamp: "2026-04-23T10:00:00.000Z",
+            level: "workflow",
+            target_id: "workflow",
+            to_state: "blocked",
+            reason: "Await approval",
+          },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.history[0]).toMatchObject({
+      kind: "change",
+      level: "workflow",
+      timestamp: "2026-04-23T10:00:00.000Z",
+      round: "Round 2/5",
+    })
   })
 
   test("uses participant id before generic fallback titles", () => {

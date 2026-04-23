@@ -42,6 +42,19 @@ function agentsarea(input: {
     .join("\n")
 }
 
+function historyarea(input: {
+  shell: ReturnType<typeof renderfixture> | ReturnType<typeof workflowshell>
+  width: 80 | 120
+}) {
+  if (input.shell.layout === "stacked") return section(input.shell.lines.join("\n"), "[history]", "[alerts]")
+  const cell = Math.max(1, Math.floor((input.width - 3) / 2))
+  const start = input.shell.lines.findIndex((line) => line.includes("[history]"))
+  return input.shell.lines
+    .slice(start)
+    .map((line) => line.slice(0, cell))
+    .join("\n")
+}
+
 function frame(name: keyof typeof workflowfixtures, width: 80 | 120) {
   return [renderfixture(name, width).title, ...renderfixture(name, width).lines]
     .map((line) => line.trimEnd())
@@ -164,6 +177,7 @@ describe("workflowshell", () => {
           history: [
             {
               id: "hist-1",
+              kind: "change",
               timestamp: workflowfallback.timestamp,
               level: "step",
               target_id: "wait",
@@ -257,6 +271,7 @@ describe("workflowshell", () => {
           history: [
             {
               id: "hist-1",
+              kind: "change",
               timestamp: workflowfallback.timestamp,
               level: "step",
               target_id: "wait",
@@ -288,6 +303,96 @@ describe("workflowshell", () => {
     })
   })
 
+  test("renders the history panel from the history projection region only", () => {
+    ;([80, 120] as const).forEach((width) => {
+      const shell = workflowshell({
+        width,
+        view: {
+          mode: "projection",
+          empty: false,
+          state: "blocked",
+          notice: "outside history",
+          timeline_note: "timeline only",
+          header: {
+            title: "Demo Flow",
+            status: "blocked",
+            phase: "Ship",
+            summary: "header only",
+            started_at: workflowfallback.timestamp,
+            round: "Round 2/5",
+          },
+          timeline: [
+            {
+              id: "wait",
+              step_id: "wait",
+              label: "Await QA",
+              kind: "wait",
+              status: "waiting",
+              active: true,
+              depth: 1,
+              reason: "Waiting for input",
+            },
+          ],
+          agents: [
+            {
+              id: "agent-1",
+              name: "Agent From Agents",
+              status: "running",
+              action: "agents only",
+              active: true,
+            },
+          ],
+          history: [
+            {
+              id: "hist-1",
+              kind: "change",
+              timestamp: "2026-04-23T10:02:00.000Z",
+              level: "step",
+              target_id: "wait",
+              label: "Await QA",
+              to_state: "waiting",
+              reason: "Waiting for input",
+              round: workflowfallback.round,
+            },
+            {
+              id: "hist-2",
+              kind: "round",
+              timestamp: "2026-04-23T10:01:00.000Z",
+              level: "workflow",
+              target_id: "workflow",
+              label: "Demo Flow",
+              to_state: "blocked",
+              reason: "Round paused",
+              round: "Round 2/5",
+            },
+          ],
+          alerts: [
+            {
+              id: "alert-1",
+              level: "step",
+              status: "waiting",
+              title: "Alert Title",
+            },
+          ],
+        },
+      })
+
+      const area = historyarea({ shell, width })
+
+      expect(area).toContain(
+        width === 120
+          ? "Latest: 2026-04-23T10:02:00.000Z · Await QA -> waiting · …"
+          : "Latest: 2026-04-23T10:02:00.000Z · Await QA -> waiting · Waiting for input",
+      )
+      expect(area).toContain("Round: Round 2/5 · Demo Flow -> blocked · Round paused")
+      expect(area).not.toContain("outside history")
+      expect(area).not.toContain("timeline only")
+      expect(area).not.toContain("header only")
+      expect(area).not.toContain("Agent From Agents")
+      expect(area).not.toContain("Alert Title")
+    })
+  })
+
   test("shows only the active branch plus active group children in the running fixture", () => {
     ;([80, 120] as const).forEach((width) => {
       const text = renderfixture("running", width).lines.join("\n")
@@ -301,6 +406,26 @@ describe("workflowshell", () => {
   })
 
   test("matches golden frames for active-path fixtures at 80 columns", () => {
+    expect(frame("history", 80)).toBe(`# Workflow History Flow
+[header]
+Workflow: History Flow
+Summary: Flow is blocked
+Status: ! BLOCKED
+Phase: Execute
+Started: time unknown
+Round: Round 2/5
+[timeline]
+> ↻ Write code · retrying · Retry 2 failed
+[agents]
+Agent: history-agent · ↻ RETRYING · Retry 2 failed
+[history]
+Latest: t2 · Write code -> retrying · Retry 2 failed
+Round: Round 2/5 · History Flow -> blocked · Await review
+Latest: t0 · Ship -> completed · Merged
+Latest: t1 · Write code -> retrying · Retry 1 failed
+[alerts]
+Alert: blocked · History Flow · Flow is blocked
+Alert: retrying · Write code · Retry 2 failed`)
     expect(frame("running", 80)).toBe(`# Workflow Running Flow
 [header]
 Workflow: Running Flow
@@ -410,6 +535,21 @@ Alert: done · Done Flow · Flow is done`)
   })
 
   test("matches golden frames for active-path fixtures at 120 columns", () => {
+    expect(frame("history", 120)).toBe(`# Workflow History Flow
+[header]
+Workflow: History Flow
+Summary: Flow is blocked
+Status: ! BLOCKED
+Phase: Execute
+Started: time unknown
+Round: Round 2/5
+[timeline]                                                   [agents]
+> ↻ Write code · retrying · Retry 2 failed                   Agent: history-agent · ↻ RETRYING · Retry 2 failed
+[history]                                                    [alerts]
+Latest: t2 · Write code -> retrying · Retry 2 failed         Alert: blocked · History Flow · Flow is blocked
+Round: Round 2/5 · History Flow -> blocked · Await review    Alert: retrying · Write code · Retry 2 failed
+Latest: t0 · Ship -> completed · Merged
+Latest: t1 · Write code -> retrying · Retry 1 failed`)
     expect(frame("running", 120)).toBe(`# Workflow Running Flow
 [header]
 Workflow: Running Flow

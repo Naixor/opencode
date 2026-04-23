@@ -99,9 +99,11 @@ function timeline(input: { note?: string; rows: WorkflowScreenState["timeline"] 
     const depth = " ".repeat(Math.min(item.depth, 3) * 2)
     const mark = item.active ? ">" : "-"
     const label = [steptag(item.kind), item.label].filter(Boolean).join(" ")
-    const bits = [stepstate(item.status), item.retry, item.reason !== workflowfallback.reason ? item.reason : undefined].filter(
-      Boolean,
-    )
+    const bits = [
+      stepstate(item.status),
+      item.retry,
+      item.reason !== workflowfallback.reason ? item.reason : undefined,
+    ].filter(Boolean)
     return `${depth}${mark} ${stepicon(item.status)} ${label} · ${bits.join(" · ")}`
   })
   if (!input.note) return rows
@@ -116,7 +118,12 @@ function agents(view: WorkflowScreenState) {
 
 function history(view: WorkflowScreenState) {
   return view.history.slice(0, 4).map((item) => {
-    const bits = [item.timestamp, `${item.label} -> ${item.to_state}`, item.reason].filter(Boolean)
+    const state = `${item.label} -> ${item.to_state}`
+    if (item.kind === "round") {
+      const bits = [item.round, state, item.reason].filter(Boolean)
+      return `Round: ${bits.join(" · ")}`
+    }
+    const bits = [item.timestamp, state, item.reason].filter(Boolean)
     return `Latest: ${bits.join(" · ")}`
   })
 }
