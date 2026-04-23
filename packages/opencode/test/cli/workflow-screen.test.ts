@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { WorkflowProgressKey } from "@lark-opencode/workflow-api"
+import { workflowfallback } from "@lark-opencode/workflow-api/presentation"
 import { workflowscreen } from "../../src/cli/cmd/tui/routes/session/workflow-screen"
 
 const progress = {
@@ -49,13 +50,35 @@ describe("workflowscreen", () => {
     })
 
     expect(view.empty).toBe(true)
+    expect(view.mode).toBe("empty")
+    expect(view.notice).toBe("No workflow state yet.")
     expect(view.header).toEqual({
       title: "demo",
       status: "running",
+      summary: "No workflow state yet.",
+      started_at: workflowfallback.timestamp,
     })
-    expect(view.timeline).toEqual([])
-    expect(view.agents).toEqual([])
-    expect(view.history).toEqual([])
-    expect(view.alerts).toEqual([])
+    expect(view.timeline[0]).toMatchObject({ label: workflowfallback.step, reason: workflowfallback.reason })
+    expect(view.agents[0]).toMatchObject({ name: workflowfallback.agent, status: "pending" })
+    expect(view.history[0]).toMatchObject({ timestamp: workflowfallback.timestamp, reason: workflowfallback.reason })
+    expect(view.alerts[0]).toMatchObject({ status: "running", title: "demo", summary: "No workflow state yet." })
+  })
+
+  test("keeps shared fallback tokens available for empty shell states", () => {
+    const view = workflowscreen({
+      tool_status: "running",
+    })
+
+    expect(view.header.title).toBe(workflowfallback.workflow)
+    expect(view.empty).toBe(true)
+  })
+
+  test("distinguishes inactive fallback state from named empty state", () => {
+    const view = workflowscreen({})
+
+    expect(view.mode).toBe("inactive")
+    expect(view.notice).toBe(`No active ${workflowfallback.workflow}.`)
+    expect(view.header.title).toBe(workflowfallback.workflow)
+    expect(view.timeline[0]).toMatchObject({ label: workflowfallback.step })
   })
 })

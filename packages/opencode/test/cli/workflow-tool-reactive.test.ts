@@ -3,12 +3,14 @@ import path from "path"
 
 const dir = path.join(import.meta.dir, "../..")
 
-test("workflow route repaints runtime projection updates through session props", () => {
-  const run = Bun.spawnSync(
-    [
-      "bun",
-      "-e",
-      `
+test(
+  "workflow route repaints runtime projection updates through session props",
+  () => {
+    const run = Bun.spawnSync(
+      [
+        "bun",
+        "-e",
+        `
 import { mock } from "bun:test"
 import "@opentui/solid/preload"
 import { RGBA } from "@opentui/core"
@@ -41,9 +43,7 @@ mock.module("@tui/context/theme", () => {
       return props.children
     },
   }
-  },
-  15000,
-)
+})
 
 const { SessionToolRoute, sessiontoolprops } = await import("./src/cli/cmd/tui/routes/session/index")
 const progress = {
@@ -107,24 +107,27 @@ view.renderer.destroy()
 process.stdout.write(JSON.stringify({ first, second }))
 process.exit(0)
       `,
-    ],
-    {
-      cwd: dir,
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  )
+      ],
+      {
+        cwd: dir,
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 20000,
+      },
+    )
 
-  expect(run.exitCode).toBe(0)
-  const out = JSON.parse(run.stdout.toString()) as { first: string; second: string }
+    expect(run.exitCode).toBe(0)
+    const out = JSON.parse(run.stdout.toString()) as { first: string; second: string }
 
-  expect(out.first).toContain("# Workflow demo")
-  expect(out.first).toContain("No workflow state yet.")
-  expect(out.first).not.toContain("Demo Flow")
-  expect(out.second).toContain("# Workflow Demo Flow")
-  expect(out.second).toContain("Demo Flow")
-  expect(out.second).toContain("Working through the plan")
-  expect(out.second).toContain("Step: Plan")
-  expect(out.second).not.toContain("No workflow state yet.")
-  expect(out.second).not.toContain("transcript fallback should stay hidden")
-})
+    expect(out.first).toContain("# Workflow demo")
+    expect(out.first).toContain("No workflow state yet.")
+    expect(out.first).not.toContain("Demo Flow")
+    expect(out.second).toContain("# Workflow Demo Flow")
+    expect(out.second).toContain("Workflow: Demo Flow")
+    expect(out.second).toContain("Summary: Working through the plan")
+    expect(out.second).toContain("Step: Plan · active")
+    expect(out.second).not.toContain("No workflow state yet.")
+    expect(out.second).not.toContain("transcript fallback should stay hidden")
+  },
+  { timeout: 30000 },
+)

@@ -62,6 +62,7 @@ test("workflow tool ignores blank error text in error state", async () => {
     const frame = view.captureCharFrame()
 
     expect(frame).toContain("# Workflow demo")
+    expect(frame).toContain("Workflow: demo")
     expect(frame).toContain("No workflow state yet.")
     expect(frame).not.toContain("transcript fallback should stay hidden")
   } finally {

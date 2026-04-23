@@ -72,7 +72,9 @@ test("workflow tool keeps projection view reactive in source", async () => {
   const file = path.join(tui, "routes", "session", "workflow-tool.tsx")
   const text = await Bun.file(file).text()
 
-  expect(text).toContain("const view = createMemo(() => workflowtoolview(props))")
+  expect(text).toContain("const dim = useTerminalDimensions()")
+  expect(text).toContain("const width = createMemo(() => Math.max(40, dim().width - 3))")
+  expect(text).toContain("const view = createMemo(() => workflowtoolview({ ...props, width: width() }))")
   expect(text).toContain("{view().title}")
   expect(text).toContain("<For each={view().lines}>")
 })
@@ -103,9 +105,11 @@ test("session workflow tool renders projection state and zero-data fallback", as
     } as ToolPart,
   })
 
-  expect(active.lines.join("\n")).toContain("Demo Flow")
-  expect(active.lines.join("\n")).toContain("Working through the plan")
-  expect(active.lines.join("\n")).toContain("Step: Plan")
+  expect(active.lines.join("\n")).toContain("[header]")
+  expect(active.lines.join("\n")).toContain("Workflow: Demo Flow")
+  expect(active.lines.join("\n")).toContain("Summary: Working through the plan")
+  expect(active.lines.join("\n")).toContain("[timeline]")
+  expect(active.lines.join("\n")).toContain("Step: Plan · active")
   expect(active.lines.join("\n")).not.toContain("transcript fallback should stay hidden")
 
   const empty = workflowtoolview({
@@ -129,6 +133,8 @@ test("session workflow tool renders projection state and zero-data fallback", as
     } as ToolPart,
   })
 
+  expect(empty.title).toBe("# Workflow demo")
   expect(empty.lines.join("\n")).toContain("No workflow state yet.")
+  expect(empty.lines.join("\n")).toContain("Workflow: demo")
   expect(empty.lines.join("\n")).not.toContain("transcript fallback should stay hidden")
 })

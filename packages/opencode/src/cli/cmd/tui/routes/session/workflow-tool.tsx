@@ -1,5 +1,6 @@
 import type { ToolPart } from "@opencode-ai/sdk/v2"
 import { createMemo, For } from "solid-js"
+import { useTerminalDimensions } from "@opentui/solid"
 import { useTheme } from "@tui/context/theme"
 import { SplitBorder } from "@tui/component/border"
 import { workflowtoolview } from "./workflow-tool-view"
@@ -12,7 +13,9 @@ export function WorkflowTool(props: {
   part: ToolPart
 }) {
   const { theme } = useTheme()
-  const view = createMemo(() => workflowtoolview(props))
+  const dim = useTerminalDimensions()
+  const width = createMemo(() => Math.max(40, dim().width - 3))
+  const view = createMemo(() => workflowtoolview({ ...props, width: width() }))
   const err = createMemo(() => view().error?.trim())
 
   return (
