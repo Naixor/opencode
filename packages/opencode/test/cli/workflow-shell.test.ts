@@ -55,6 +55,22 @@ function historyarea(input: {
     .join("\n")
 }
 
+function alertsarea(input: {
+  shell: ReturnType<typeof renderfixture> | ReturnType<typeof workflowshell>
+  width: 80 | 120
+}) {
+  if (input.shell.layout === "stacked") {
+    const start = input.shell.lines.findIndex((line) => line.includes("[alerts]"))
+    return input.shell.lines.slice(start).join("\n")
+  }
+  const cell = Math.max(1, Math.floor((input.width - 3) / 2))
+  const start = input.shell.lines.findIndex((line) => line.includes("[history]"))
+  return input.shell.lines
+    .slice(start)
+    .map((line) => line.slice(cell + 3))
+    .join("\n")
+}
+
 function frame(name: keyof typeof workflowfixtures, width: 80 | 120) {
   return [renderfixture(name, width).title, ...renderfixture(name, width).lines]
     .map((line) => line.trimEnd())
@@ -393,6 +409,129 @@ describe("workflowshell", () => {
     })
   })
 
+  test("renders the alerts panel from the alerts projection region only", () => {
+    ;([80, 120] as const).forEach((width) => {
+      const shell = workflowshell({
+        width,
+        view: {
+          mode: "projection",
+          empty: false,
+          state: "waiting",
+          notice: "outside alerts",
+          timeline_note: "timeline only",
+          header: {
+            title: "Demo Flow",
+            status: "blocked",
+            phase: "Ship",
+            summary: "header only",
+            started_at: workflowfallback.timestamp,
+          },
+          timeline: [
+            {
+              id: "wait",
+              step_id: "wait",
+              label: "Await QA",
+              kind: "wait",
+              status: "waiting",
+              active: true,
+              depth: 1,
+              reason: "Waiting for input",
+            },
+          ],
+          agents: [
+            {
+              id: "agent-1",
+              name: "Agent From Agents",
+              status: "running",
+              action: "agents only",
+              active: true,
+            },
+          ],
+          history: [
+            {
+              id: "hist-1",
+              kind: "change",
+              timestamp: workflowfallback.timestamp,
+              level: "step",
+              target_id: "wait",
+              label: "History Label",
+              to_state: "waiting",
+            },
+          ],
+          alerts: [
+            {
+              id: "alert-agent",
+              level: "step",
+              status: "waiting",
+              waiter: "agent",
+              title: "Deployment review",
+              summary: "Need a reviewer to continue",
+              source: "Lead reviewer",
+            },
+            {
+              id: "alert-user",
+              level: "step",
+              status: "waiting",
+              waiter: "user",
+              title: "",
+            },
+            {
+              id: "alert-agent-fallback",
+              level: "step",
+              status: "waiting",
+              waiter: "agent",
+              source: "Lead reviewer",
+              title: "",
+            },
+            {
+              id: "alert-blocked",
+              level: "step",
+              status: "blocked",
+              title: "Security review",
+              summary: "Missing sign-off",
+            },
+            {
+              id: "alert-retrying",
+              level: "step",
+              status: "retrying",
+              title: "Build",
+              summary: "Retry 3",
+            },
+            {
+              id: "alert-failed",
+              level: "step",
+              status: "failed",
+              title: "Release",
+              summary: "Tests failed",
+            },
+            {
+              id: "alert-done",
+              level: "workflow",
+              status: "done",
+              title: "Ship",
+              summary: "Released",
+            },
+          ],
+        },
+      })
+
+      const area = alertsarea({ shell, width })
+
+      expect(area).toContain("… Waiting for agent: Lead reviewer · Deployment review")
+      expect(area).toContain(`… Waiting for user: ${workflowfallback.reason}`)
+      expect(area).toContain(`… Waiting for agent: Lead reviewer · ${workflowfallback.reason}`)
+      expect(area).toContain("! Blocked: Security review · Missing sign-off")
+      expect(area).toContain("↻ Retrying: Build · Retry 3")
+      expect(area).toContain("✗ Failed: Release · Tests failed")
+      expect(area).toContain("✓ Terminal: Ship · Released")
+      expect(area).not.toContain("outside alerts")
+      expect(area).not.toContain("timeline only")
+      expect(area).not.toContain("header only")
+      expect(area).not.toContain("Agent From Agents")
+      expect(area).not.toContain("History Label")
+    })
+  })
+
   test("shows only the active branch plus active group children in the running fixture", () => {
     ;([80, 120] as const).forEach((width) => {
       const text = renderfixture("running", width).lines.join("\n")
@@ -424,8 +563,8 @@ Round: Round 2/5 · History Flow -> blocked · Await review
 Latest: t0 · Ship -> completed · Merged
 Latest: t1 · Write code -> retrying · Retry 1 failed
 [alerts]
-Alert: blocked · History Flow · Flow is blocked
-Alert: retrying · Write code · Retry 2 failed`)
+! Blocked: History Flow · Flow is blocked
+↻ Retrying: Write code · Retry 2 failed`)
     expect(frame("running", 80)).toBe(`# Workflow Running Flow
 [header]
 Workflow: Running Flow
@@ -463,8 +602,8 @@ Agent: waiting-agent · … WAITING · waiting reason
 [history]
 Latest: time unknown · Review -> waiting · waiting reason
 [alerts]
-Alert: waiting · Waiting Flow · Flow is waiting
-Alert: waiting · Review · waiting reason`)
+… Waiting for user: Waiting Flow · Flow is waiting
+… Waiting for agent: waiting-agent · Review · waiting reason`)
     expect(frame("blocked", 80)).toBe(`# Workflow Blocked Flow
 [header]
 Workflow: Blocked Flow
@@ -480,8 +619,8 @@ Agent: blocked-agent · ! BLOCKED · blocked reason
 [history]
 Latest: time unknown · Review -> blocked · blocked reason
 [alerts]
-Alert: blocked · Blocked Flow · Flow is blocked
-Alert: blocked · Review · blocked reason`)
+! Blocked: Blocked Flow · Flow is blocked
+! Blocked: Review · blocked reason`)
     expect(frame("retrying", 80)).toBe(`# Workflow Retrying Flow
 [header]
 Workflow: Retrying Flow
@@ -497,8 +636,8 @@ Agent: retrying-agent · ↻ RETRYING · retrying reason
 [history]
 Latest: time unknown · Review -> retrying · retrying reason
 [alerts]
-Alert: retrying · Retrying Flow · Flow is retrying
-Alert: retrying · Review · retrying reason`)
+↻ Retrying: Retrying Flow · Flow is retrying
+↻ Retrying: Review · retrying reason`)
     expect(frame("failed", 80)).toBe(`# Workflow Failed Flow
 [header]
 Workflow: Failed Flow
@@ -514,8 +653,8 @@ Agent: failed-agent · ✗ FAILED · failed reason
 [history]
 Latest: time unknown · Review -> failed · failed reason
 [alerts]
-Alert: failed · Failed Flow · Flow is failed
-Alert: failed · Review · failed reason`)
+✗ Failed: Failed Flow · Flow is failed
+✗ Failed: Review · failed reason`)
     expect(frame("done", 80)).toBe(`# Workflow Done Flow
 [header]
 Workflow: Done Flow
@@ -531,7 +670,7 @@ Agent: done-agent · ✓ DONE · done reason
 [history]
 Latest: time unknown · Ship -> completed · done reason
 [alerts]
-Alert: done · Done Flow · Flow is done`)
+✓ Terminal: Done Flow · Flow is done`)
   })
 
   test("matches golden frames for active-path fixtures at 120 columns", () => {
@@ -546,8 +685,8 @@ Round: Round 2/5
 [timeline]                                                   [agents]
 > ↻ Write code · retrying · Retry 2 failed                   Agent: history-agent · ↻ RETRYING · Retry 2 failed
 [history]                                                    [alerts]
-Latest: t2 · Write code -> retrying · Retry 2 failed         Alert: blocked · History Flow · Flow is blocked
-Round: Round 2/5 · History Flow -> blocked · Await review    Alert: retrying · Write code · Retry 2 failed
+Latest: t2 · Write code -> retrying · Retry 2 failed         ! Blocked: History Flow · Flow is blocked
+Round: Round 2/5 · History Flow -> blocked · Await review    ↻ Retrying: Write code · Retry 2 failed
 Latest: t0 · Ship -> completed · Merged
 Latest: t1 · Write code -> retrying · Retry 1 failed`)
     expect(frame("running", 120)).toBe(`# Workflow Running Flow
@@ -579,8 +718,8 @@ Round: Round 2/4
 [timeline]                                                   [agents]
 > … [wait] Review · waiting · waiting reason                 Agent: waiting-agent · … WAITING · waiting reason
 [history]                                                    [alerts]
-Latest: time unknown · Review -> waiting · waiting reason    Alert: waiting · Waiting Flow · Flow is waiting
-                                                             Alert: waiting · Review · waiting reason`)
+Latest: time unknown · Review -> waiting · waiting reason    … Waiting for user: Waiting Flow · Flow is waiting
+                                                             … Waiting for agent: waiting-agent · Review · waiting rea…`)
     expect(frame("blocked", 120)).toBe(`# Workflow Blocked Flow
 [header]
 Workflow: Blocked Flow
@@ -592,8 +731,8 @@ Round: Round 2/4
 [timeline]                                                   [agents]
 > ! [decision] Review · blocked · blocked reason             Agent: blocked-agent · ! BLOCKED · blocked reason
 [history]                                                    [alerts]
-Latest: time unknown · Review -> blocked · blocked reason    Alert: blocked · Blocked Flow · Flow is blocked
-                                                             Alert: blocked · Review · blocked reason`)
+Latest: time unknown · Review -> blocked · blocked reason    ! Blocked: Blocked Flow · Flow is blocked
+                                                             ! Blocked: Review · blocked reason`)
     expect(frame("retrying", 120)).toBe(`# Workflow Retrying Flow
 [header]
 Workflow: Retrying Flow
@@ -605,8 +744,8 @@ Round: Round 2/4
 [timeline]                                                   [agents]
 > ↻ Review · retrying · Retry 2 · retrying reason            Agent: retrying-agent · ↻ RETRYING · retrying reason
 [history]                                                    [alerts]
-Latest: time unknown · Review -> retrying · retrying reas…   Alert: retrying · Retrying Flow · Flow is retrying
-                                                             Alert: retrying · Review · retrying reason`)
+Latest: time unknown · Review -> retrying · retrying reas…   ↻ Retrying: Retrying Flow · Flow is retrying
+                                                             ↻ Retrying: Review · retrying reason`)
     expect(frame("failed", 120)).toBe(`# Workflow Failed Flow
 [header]
 Workflow: Failed Flow
@@ -618,8 +757,8 @@ Round: Round 2/4
 [timeline]                                                   [agents]
 > ✗ Review · failed · failed reason                          Agent: failed-agent · ✗ FAILED · failed reason
 [history]                                                    [alerts]
-Latest: time unknown · Review -> failed · failed reason      Alert: failed · Failed Flow · Flow is failed
-                                                             Alert: failed · Review · failed reason`)
+Latest: time unknown · Review -> failed · failed reason      ✗ Failed: Failed Flow · Flow is failed
+                                                             ✗ Failed: Review · failed reason`)
     expect(frame("done", 120)).toBe(`# Workflow Done Flow
 [header]
 Workflow: Done Flow
@@ -631,7 +770,7 @@ Round: Round 2/4
 [timeline]                                                   [agents]
 > ✓ [terminal] Ship · done · done reason                     Agent: done-agent · ✓ DONE · done reason
 [history]                                                    [alerts]
-Latest: time unknown · Ship -> completed · done reason       Alert: done · Done Flow · Flow is done`)
+Latest: time unknown · Ship -> completed · done reason       ✓ Terminal: Done Flow · Flow is done`)
   })
 
   test("visibly distinguishes workflow states in the header", () => {

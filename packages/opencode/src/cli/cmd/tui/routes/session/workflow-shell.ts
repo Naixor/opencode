@@ -128,11 +128,38 @@ function history(view: WorkflowScreenState) {
   })
 }
 
+function alertsummary(item: WorkflowScreenState["alerts"][number]) {
+  const title = filled(item.title)
+  const summary = filled(item.summary)
+  if (title && summary && title !== summary) return `${title} · ${summary}`
+  return summary ?? title ?? workflowfallback.reason
+}
+
+function waitkind(item: WorkflowScreenState["alerts"][number]) {
+  if (item.waiter) return item.waiter
+  if (item.level === "step") return "agent" as const
+  return "user" as const
+}
+
+function alertline(item: WorkflowScreenState["alerts"][number]) {
+  if (item.status === "waiting") {
+    const source = filled(item.source)
+    if (waitkind(item) === "agent") {
+      if (source) return `${workflowicon("waiting")} Waiting for agent: ${source} · ${alertsummary(item)}`
+      return `${workflowicon("waiting")} Waiting for agent: ${alertsummary(item)}`
+    }
+    return `${workflowicon("waiting")} Waiting for user: ${alertsummary(item)}`
+  }
+  if (item.status === "blocked") return `${workflowicon("blocked")} Blocked: ${alertsummary(item)}`
+  if (item.status === "retrying") return `${workflowicon("retrying")} Retrying: ${alertsummary(item)}`
+  if (item.status === "failed") return `${workflowicon("failed")} Failed: ${alertsummary(item)}`
+  if (item.status === "done") return `${workflowicon("done")} Terminal: ${alertsummary(item)}`
+  const bits = [item.status, item.title, item.summary].filter(Boolean)
+  return `Alert: ${bits.join(" · ")}`
+}
+
 function alerts(view: WorkflowScreenState) {
-  return view.alerts.slice(0, 4).map((item) => {
-    const bits = [item.status, item.title, item.summary].filter(Boolean)
-    return `Alert: ${bits.join(" · ")}`
-  })
+  return view.alerts.slice(0, 7).map(alertline)
 }
 
 function block(title: string, rows: string[], width: number) {

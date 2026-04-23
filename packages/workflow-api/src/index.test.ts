@@ -2373,6 +2373,44 @@ describe("workflow progress schema", () => {
     })
   })
 
+  test("emits waiter kinds for workflow and step waiting alerts", () => {
+    const flow = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", label: "Implement", summary: "Awaiting input" },
+      },
+    })
+
+    const step = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", label: "Implement" },
+        machine: { active_step_id: "review", active_run_id: "run-1" },
+        step_definitions: [{ id: "review", kind: "wait", label: "Review" }],
+        step_runs: [{ id: "run-1", seq: 0, step_id: "review", status: "waiting" }],
+        transitions: [
+          { id: "trans-1", seq: 0, level: "step", target_id: "review", run_id: "run-1", to_state: "waiting" },
+        ],
+      },
+    })
+
+    expect(flow).toBeDefined()
+    expect(step).toBeDefined()
+    if (!flow || !step) throw new Error("expected workflow projection")
+    expect(flow.alerts[0]).toMatchObject({ level: "workflow", status: "waiting", waiter: "user" })
+    expect(step.alerts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ level: "workflow", status: "waiting", waiter: "user" }),
+        expect.objectContaining({
+          level: "step",
+          status: "waiting",
+          waiter: "agent",
+          summary: workflowfallback.reason,
+        }),
+      ]),
+    )
+  })
+
   test("preserves partial v2 payloads through metadata normalization and read paths", () => {
     const raw = {
       [WorkflowProgressKey]: {

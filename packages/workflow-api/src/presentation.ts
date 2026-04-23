@@ -82,6 +82,7 @@ export type WorkflowProjectionAlertItem = {
   summary?: string
   target?: string
   source?: string
+  waiter?: "user" | "agent"
 }
 
 export type WorkflowProjection = {
@@ -869,6 +870,7 @@ function alerts(progress: WorkflowProjectionInput, state: WorkflowViewState): Wo
         ? { summary: progress.workflow.summary ?? progress.workflow.input }
         : {}),
       target: progress.workflow.name ?? progress.machine.id ?? progress.machine.key,
+      ...(flow === "waiting" ? { waiter: "user" as const } : {}),
     })
   const step = signal(cur.run?.status ?? latest?.to_state)
   if (step)
@@ -885,6 +887,7 @@ function alerts(progress: WorkflowProjectionInput, state: WorkflowViewState): Wo
         workflowfallback.reason,
       ...((cur.id ?? latest?.target_id) ? { target: cur.id ?? latest?.target_id } : {}),
       ...(src ? { source: src } : {}),
+      ...(step === "waiting" ? { waiter: "agent" as const } : {}),
     })
   return out
 }
