@@ -44,6 +44,28 @@ function status(status?: WorkflowScreenState["header"]["status"]) {
   return `${workflowicon(status)} RUNNING`
 }
 
+function stepicon(status?: WorkflowScreenState["timeline"][number]["status"]) {
+  if (status === "failed") return "✗"
+  if (status === "blocked") return "!"
+  if (status === "waiting") return "…"
+  if (status === "retrying") return "↻"
+  if (status === "pending") return "○"
+  if (status === "completed") return "✓"
+  return "•"
+}
+
+function stepstate(status?: WorkflowScreenState["timeline"][number]["status"]) {
+  if (status === "completed") return "done"
+  return status ?? "pending"
+}
+
+function steptag(kind?: WorkflowScreenState["timeline"][number]["kind"]) {
+  if (kind === "group") return "[group]"
+  if (kind === "wait") return "[wait]"
+  if (kind === "decision") return "[decision]"
+  if (kind === "terminal") return "[terminal]"
+}
+
 function header(view: WorkflowScreenState) {
   const name = filled(view.header.title) ?? workflowfallback.workflow
   return [
@@ -56,14 +78,18 @@ function header(view: WorkflowScreenState) {
   ]
 }
 
-function timeline(view: WorkflowScreenState) {
-  const rows = view.timeline.slice(0, 4).map((item) => {
-    const depth = item.depth > 0 ? `${" ".repeat(Math.min(item.depth, 3) * 2)}- ` : ""
-    const bits = [item.status, item.retry, item.reason !== workflowfallback.reason ? item.reason : undefined].filter(Boolean)
-    return `Step: ${depth}${item.label} · ${bits.join(" · ")}`
+function timeline(input: { note?: string; rows: WorkflowScreenState["timeline"] }) {
+  const rows = input.rows.map((item) => {
+    const depth = " ".repeat(Math.min(item.depth, 3) * 2)
+    const mark = item.active ? ">" : "-"
+    const label = [steptag(item.kind), item.label].filter(Boolean).join(" ")
+    const bits = [stepstate(item.status), item.retry, item.reason !== workflowfallback.reason ? item.reason : undefined].filter(
+      Boolean,
+    )
+    return `${depth}${mark} ${stepicon(item.status)} ${label} · ${bits.join(" · ")}`
   })
-  if (!view.notice) return rows
-  return [view.notice, ...rows]
+  if (!input.note) return rows
+  return [input.note, ...rows]
 }
 
 function agents(view: WorkflowScreenState) {
@@ -97,7 +123,11 @@ export function workflowshell(input: { view: WorkflowScreenState; width?: number
   const title = `# Workflow ${filled(view.header.title) ?? workflowfallback.workflow}`
   const layout = width >= 120 ? "wide" : "stacked"
   const head = block("header", header(view), width)
-  const time = block("timeline", timeline(view), layout === "wide" ? Math.max(1, Math.floor((width - 3) / 2)) : width)
+  const time = block(
+    "timeline",
+    timeline({ note: view.timeline_note, rows: view.timeline }),
+    layout === "wide" ? Math.max(1, Math.floor((width - 3) / 2)) : width,
+  )
   const part = block("agents", agents(view), layout === "wide" ? Math.max(1, Math.floor((width - 3) / 2)) : width)
   const hist = block("history", history(view), layout === "wide" ? Math.max(1, Math.floor((width - 3) / 2)) : width)
   const warn = block("alerts", alerts(view), layout === "wide" ? Math.max(1, Math.floor((width - 3) / 2)) : width)

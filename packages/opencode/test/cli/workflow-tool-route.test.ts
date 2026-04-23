@@ -86,7 +86,7 @@ test("session tool route dispatches workflow parts to WorkflowTool", async () =>
     expect(frame).toContain("[header]")
     expect(frame).toContain("Workflow: Demo Flow")
     expect(frame).toContain("[timeline]")
-    expect(frame).toContain("Step: Plan · active")
+    expect(frame).toContain("> • Plan · active")
     expect(frame).toContain("route-workflow")
     expect(frame).not.toContain("transcript fallback should stay hidden")
     expect(frame).not.toContain("# workflow [name=demo]")

@@ -11,6 +11,7 @@ export type WorkflowScreenState = {
   mode: "projection" | "empty" | "inactive"
   empty: boolean
   notice?: string
+  timeline_note?: string
   state: WorkflowViewState
   header: WorkflowProjection["header"]
   timeline: WorkflowProjection["timeline"]
@@ -111,6 +112,7 @@ export function workflowscreen(input: {
     mode,
     empty: true,
     notice,
+    timeline_note: notice,
     state,
     header: {
       title,

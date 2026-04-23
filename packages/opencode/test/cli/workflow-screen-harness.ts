@@ -10,13 +10,13 @@ type Fixture = {
 }
 
 function text(input: string) {
-  return input
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
+  return input.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 }
 
-const rich = (state: "running" | "waiting" | "blocked" | "retrying" | "failed" | "done") => {
+const single = (
+  state: "running" | "waiting" | "blocked" | "retrying" | "failed" | "done",
+  kind: "task" | "wait" | "decision" | "terminal" = "task",
+) => {
   const step = state === "running" ? "active" : state === "done" ? "completed" : state
   return {
     version: "workflow-progress.v2",
@@ -33,7 +33,7 @@ const rich = (state: "running" | "waiting" | "blocked" | "retrying" | "failed" |
     },
     phase: { status: "execute", label: "Execute" },
     round: { current: 2, max: 4 },
-    step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+    step_definitions: [{ id: "review", kind, label: kind === "terminal" ? "Ship" : "Review" }],
     step_runs: [
       {
         id: `run-${state}`,
@@ -43,6 +43,7 @@ const rich = (state: "running" | "waiting" | "blocked" | "retrying" | "failed" |
         summary: `Review is ${state}`,
         reason: `${state} reason`,
         round: { current: 2, max: 4 },
+        ...(state === "retrying" ? { retry: { current: 2 } } : {}),
       },
     ],
     transitions: [
@@ -69,13 +70,106 @@ const rich = (state: "running" | "waiting" | "blocked" | "retrying" | "failed" |
   } as const
 }
 
+const grouped = {
+  version: "workflow-progress.v2",
+  workflow: {
+    status: "running",
+    name: "flow-running",
+    label: "Running Flow",
+    summary: "Flow is running",
+  },
+  machine: {
+    id: "flow-running",
+    active_step_id: "review",
+    active_run_id: "run-review",
+  },
+  phase: { status: "execute", label: "Execute" },
+  round: { current: 2, max: 4 },
+  step_definitions: [
+    { id: "plan", kind: "task", label: "Plan" },
+    { id: "review", kind: "group", parent_id: "plan", label: "Review", children: ["lint", "test", "docs"] },
+    { id: "lint", kind: "task", parent_id: "review", label: "Lint" },
+    { id: "test", kind: "wait", parent_id: "review", label: "Await QA" },
+    { id: "docs", kind: "task", parent_id: "review", label: "Docs" },
+  ],
+  step_runs: [
+    { id: "run-plan", seq: 0, step_id: "plan", status: "completed", reason: "Plan approved" },
+    {
+      id: "run-review",
+      seq: 1,
+      step_id: "review",
+      status: "active",
+      parent_run_id: "run-plan",
+      reason: "Parallel checks",
+    },
+    {
+      id: "run-lint",
+      seq: 2,
+      step_id: "lint",
+      status: "active",
+      parent_run_id: "run-review",
+      reason: "Linting changes",
+    },
+    {
+      id: "run-test",
+      seq: 3,
+      step_id: "test",
+      status: "waiting",
+      parent_run_id: "run-review",
+      reason: "Waiting for QA slot",
+    },
+  ],
+  transitions: [
+    {
+      id: "trans-plan",
+      seq: 0,
+      level: "step",
+      target_id: "plan",
+      run_id: "run-plan",
+      to_state: "completed",
+      reason: "Plan approved",
+    },
+    {
+      id: "trans-review",
+      seq: 1,
+      level: "step",
+      target_id: "review",
+      run_id: "run-review",
+      to_state: "active",
+      reason: "Parallel checks",
+    },
+    {
+      id: "trans-lint",
+      seq: 2,
+      level: "step",
+      target_id: "lint",
+      run_id: "run-lint",
+      to_state: "active",
+      reason: "Linting changes",
+    },
+    {
+      id: "trans-test",
+      seq: 3,
+      level: "step",
+      target_id: "test",
+      run_id: "run-test",
+      to_state: "waiting",
+      reason: "Waiting for QA slot",
+    },
+  ],
+  agents: [
+    { id: "agent-running", name: "running-agent", role: "Worker", status: "running", summary: "Agent for running" },
+  ],
+  participants: [{ id: "agent-running", name: "running-agent", step_id: "lint", run_id: "run-lint" }],
+} as const
+
 export const workflowfixtures: Record<string, Fixture> = {
-  running: { name: "demo", tool_status: "running", progress: rich("running") },
-  waiting: { name: "demo", tool_status: "running", progress: rich("waiting") },
-  blocked: { name: "demo", tool_status: "running", progress: rich("blocked") },
-  retrying: { name: "demo", tool_status: "running", progress: rich("retrying") },
-  failed: { name: "demo", tool_status: "error", progress: rich("failed") },
-  done: { name: "demo", tool_status: "completed", progress: rich("done") },
+  running: { name: "demo", tool_status: "running", progress: grouped },
+  waiting: { name: "demo", tool_status: "running", progress: single("waiting", "wait") },
+  blocked: { name: "demo", tool_status: "running", progress: single("blocked", "decision") },
+  retrying: { name: "demo", tool_status: "running", progress: single("retrying") },
+  failed: { name: "demo", tool_status: "error", progress: single("failed") },
+  done: { name: "demo", tool_status: "completed", progress: single("done", "terminal") },
   v1: {
     name: "legacy",
     tool_status: "running",

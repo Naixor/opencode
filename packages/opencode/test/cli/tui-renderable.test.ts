@@ -109,7 +109,7 @@ test("session workflow tool renders projection state and zero-data fallback", as
   expect(active.lines.join("\n")).toContain("Workflow: Demo Flow")
   expect(active.lines.join("\n")).toContain("Summary: Working through the plan")
   expect(active.lines.join("\n")).toContain("[timeline]")
-  expect(active.lines.join("\n")).toContain("Step: Plan · active")
+  expect(active.lines.join("\n")).toContain("> • Plan · active")
   expect(active.lines.join("\n")).not.toContain("transcript fallback should stay hidden")
 
   const empty = workflowtoolview({

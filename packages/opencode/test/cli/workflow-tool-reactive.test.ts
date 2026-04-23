@@ -125,7 +125,7 @@ process.exit(0)
     expect(out.second).toContain("# Workflow Demo Flow")
     expect(out.second).toContain("Workflow: Demo Flow")
     expect(out.second).toContain("Summary: Working through the plan")
-    expect(out.second).toContain("Step: Plan · active")
+    expect(out.second).toContain("> • Plan · active")
     expect(out.second).not.toContain("No workflow state yet.")
     expect(out.second).not.toContain("transcript fallback should stay hidden")
   },
