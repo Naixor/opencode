@@ -237,3 +237,13 @@
   - When proving degraded backfill behavior, stub `MemoryHindsightService.ready()` to `undefined` so the real client logs `reason=service_unavailable` while the runner persists the failed cursor state.
   - Keep any real embedded-daemon backfill verification behind an env gate so CI and focused local runs stay deterministic by default.
 ---
+
+## 2026-04-23 10:15:41 CST - US-003
+- Built the deterministic workflow projection reducer in `packages/workflow-api/src/presentation.ts` so grouped active-path selection, deduped history ordering, consolidated agent state, and alert sourcing all come from one normalized reducer path instead of array-order accidents.
+- Added focused regression coverage in `packages/workflow-api/src/index.test.ts` for grouped branch selection, duplicate or no-op transition collapse, agent consolidation from participant or transition metadata, alert state coverage across rich and fallback payloads, and stale-run edge cases.
+- Files changed: `packages/workflow-api/src/presentation.ts`, `packages/workflow-api/src/index.test.ts`, `tasks/prd.json`, `tasks/progress.txt`
+- **Learnings for future iterations:**
+  - Keep workflow projection ordering in shared comparators (`cmprun`, `cmpstep`, `cmptrans`) and reuse the same sorted view across timeline, history, agents, and alerts so state stays deterministic.
+  - Deduplicate transition history before projecting downstream panels; alert and latest-change logic should read the same filtered transition list instead of re-scanning raw records independently.
+  - Participant or transition-only agent evidence is easiest to stabilize by collecting per-agent seeds first and then selecting each field by source priority and timestamp, rather than mutating one row in place.
+---

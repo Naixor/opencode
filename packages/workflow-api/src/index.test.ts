@@ -1749,6 +1749,624 @@ describe("workflow progress schema", () => {
     expect(view.alerts[0]).toMatchObject({ title: workflowfallback.workflow })
   })
 
+  test("selects a deterministic active path for grouped parallel work with incomplete branch metadata", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", label: "Implement" },
+        machine: { active_step_id: "review" },
+        step_definitions: [
+          { id: "review", kind: "group", label: "Review", children: ["lint", "test"] },
+          { id: "lint", kind: "task", parent_id: "review", label: "Lint" },
+          { id: "test", kind: "task", parent_id: "review", label: "Test" },
+        ],
+        step_runs: [
+          { id: "run-review", seq: 0, step_id: "review", status: "active" },
+          { id: "run-test", seq: 2, step_id: "test", status: "waiting" },
+          { id: "run-lint", seq: 1, step_id: "lint", status: "active" },
+        ],
+        transitions: [
+          { id: "trans-review", seq: 0, level: "step", target_id: "review", run_id: "run-review", to_state: "active" },
+          { id: "trans-lint", seq: 1, level: "step", target_id: "lint", run_id: "run-lint", to_state: "active" },
+          { id: "trans-test", seq: 2, level: "step", target_id: "test", run_id: "run-test", to_state: "waiting" },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.timeline.map((item) => ({ step_id: item.step_id, status: item.status, active: item.active }))).toEqual([
+      { step_id: "review", status: "active", active: false },
+      { step_id: "lint", status: "active", active: true },
+      { step_id: "test", status: "waiting", active: false },
+    ])
+  })
+
+  test("keeps the machine active group when descendant runs are only completed", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", label: "Implement" },
+        machine: { active_step_id: "review" },
+        step_definitions: [
+          { id: "review", kind: "group", label: "Review", children: ["lint", "test"] },
+          { id: "lint", kind: "task", parent_id: "review", label: "Lint" },
+          { id: "test", kind: "task", parent_id: "review", label: "Test" },
+        ],
+        step_runs: [
+          { id: "run-review", seq: 0, step_id: "review", status: "active" },
+          { id: "run-test", seq: 2, step_id: "test", status: "completed" },
+          { id: "run-lint", seq: 1, step_id: "lint", status: "completed" },
+        ],
+        transitions: [
+          { id: "trans-review", seq: 0, level: "step", target_id: "review", run_id: "run-review", to_state: "active" },
+          { id: "trans-lint", seq: 1, level: "step", target_id: "lint", run_id: "run-lint", to_state: "completed" },
+          { id: "trans-test", seq: 2, level: "step", target_id: "test", run_id: "run-test", to_state: "completed" },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.timeline.map((item) => ({ step_id: item.step_id, status: item.status, active: item.active }))).toEqual([
+      { step_id: "review", status: "active", active: true },
+      { step_id: "lint", status: "completed", active: false },
+      { step_id: "test", status: "completed", active: false },
+    ])
+  })
+
+  test("keeps latest meaningful transitions deterministic and ignores duplicates or no-op records", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "blocked", label: "Implement" },
+        machine: { active_step_id: "write", active_run_id: "run-1" },
+        step_definitions: [{ id: "write", kind: "task", label: "Write code" }],
+        step_runs: [{ id: "run-1", seq: 0, step_id: "write", status: "blocked" }],
+        transitions: [
+          {
+            id: "dup-older",
+            seq: 2,
+            timestamp: "2026-04-23T10:00:00.000Z",
+            level: "step",
+            target_id: "write",
+            run_id: "run-1",
+            to_state: "waiting",
+            reason: "Waiting on review",
+          },
+          {
+            id: "dup-newer",
+            seq: 3,
+            timestamp: "2026-04-23T10:00:01.000Z",
+            level: "step",
+            target_id: "write",
+            run_id: "run-1",
+            to_state: "waiting",
+            reason: "Still waiting",
+          },
+          {
+            id: "noop",
+            seq: 4,
+            timestamp: "2026-04-23T10:00:02.000Z",
+            level: "step",
+            target_id: "write",
+            run_id: "run-1",
+            from_state: "blocked",
+            to_state: "blocked",
+          },
+          {
+            id: "flow",
+            seq: 5,
+            timestamp: "2026-04-23T10:00:03.000Z",
+            level: "workflow",
+            target_id: "workflow",
+            to_state: "blocked",
+            reason: "Review blocked",
+          },
+          {
+            id: "step-latest",
+            seq: 6,
+            timestamp: "2026-04-23T10:00:03.000Z",
+            level: "step",
+            target_id: "write",
+            run_id: "run-1",
+            to_state: "blocked",
+            reason: "Blocked on review",
+          },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.history.map((item) => item.id)).toEqual(["step-latest", "flow", "dup-newer"])
+    expect(view.latest).toMatchObject({ id: "step-latest", label: "Write code", to_state: "blocked" })
+  })
+
+  test("collapses duplicate no-run transitions while preserving distinct retry history", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "retrying", label: "Implement" },
+        machine: { active_step_id: "write" },
+        step_definitions: [{ id: "write", kind: "task", label: "Write code" }],
+        step_runs: [{ id: "run-1", seq: 0, step_id: "write", status: "retrying" }],
+        transitions: [
+          {
+            id: "retry-1-old",
+            seq: 1,
+            timestamp: "2026-04-23T10:00:00.000Z",
+            level: "step",
+            target_id: "write",
+            to_state: "retrying",
+            reason: "Round 1 failed",
+          },
+          {
+            id: "retry-1-new",
+            seq: 2,
+            timestamp: "2026-04-23T10:00:00.000Z",
+            level: "step",
+            target_id: "write",
+            to_state: "retrying",
+            reason: "Round 1 failed",
+          },
+          {
+            id: "retry-2",
+            seq: 3,
+            timestamp: "2026-04-23T10:05:00.000Z",
+            level: "step",
+            target_id: "write",
+            to_state: "retrying",
+            reason: "Round 2 failed",
+          },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.history.map((item) => item.id)).toEqual(["retry-2", "retry-1-new"])
+    expect(view.latest).toMatchObject({ id: "retry-2", reason: "Round 2 failed" })
+  })
+
+  test("keeps repeated run-backed states when another state intervenes", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "retrying", label: "Implement" },
+        machine: { active_step_id: "write", active_run_id: "run-1" },
+        step_definitions: [{ id: "write", kind: "task", label: "Write code" }],
+        step_runs: [{ id: "run-1", seq: 0, step_id: "write", status: "retrying" }],
+        transitions: [
+          {
+            id: "retry-1",
+            seq: 1,
+            timestamp: "2026-04-23T10:00:00.000Z",
+            level: "step",
+            target_id: "write",
+            run_id: "run-1",
+            to_state: "retrying",
+            reason: "Round 1 failed",
+          },
+          {
+            id: "blocked",
+            seq: 2,
+            timestamp: "2026-04-23T10:01:00.000Z",
+            level: "step",
+            target_id: "write",
+            run_id: "run-1",
+            from_state: "retrying",
+            to_state: "blocked",
+            reason: "Missing approval",
+          },
+          {
+            id: "retry-2",
+            seq: 3,
+            timestamp: "2026-04-23T10:02:00.000Z",
+            level: "step",
+            target_id: "write",
+            run_id: "run-1",
+            from_state: "blocked",
+            to_state: "retrying",
+            reason: "Retry after approval",
+          },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.history.map((item) => item.id)).toEqual(["retry-2", "blocked", "retry-1"])
+  })
+
+  test("derives agent state and latest action from participant, step run, and transition source metadata", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", label: "Implement" },
+        machine: { active_step_id: "review", active_run_id: "run-1" },
+        step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+        step_runs: [
+          { id: "run-1", seq: 0, step_id: "review", status: "active", started_at: "2026-04-23T10:00:00.000Z" },
+        ],
+        transitions: [
+          {
+            id: "trans-1",
+            seq: 0,
+            timestamp: "2026-04-23T10:00:01.000Z",
+            level: "step",
+            target_id: "review",
+            run_id: "run-1",
+            to_state: "active",
+            reason: "Started review",
+            source: { participant_id: "agent-1", step_id: "review", run_id: "run-1" },
+          },
+        ],
+        participants: [{ id: "agent-1", label: "Reviewer", role: "qa", step_id: "review", run_id: "run-1" }],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.agents[0]).toMatchObject({
+      id: "agent-1",
+      name: "Reviewer",
+      role: "qa",
+      status: "running",
+      action: "Started review",
+      active: true,
+    })
+  })
+
+  test("prefers participant metadata and newer transition evidence when consolidating agents", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", label: "Implement" },
+        machine: { active_step_id: "review", active_run_id: "run-1" },
+        step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+        step_runs: [
+          {
+            id: "run-1",
+            seq: 0,
+            step_id: "review",
+            status: "active",
+            reason: "Started review",
+            started_at: "2026-04-23T10:00:00.000Z",
+          },
+        ],
+        transitions: [
+          {
+            id: "trans-1",
+            seq: 1,
+            timestamp: "2026-04-23T10:00:05.000Z",
+            level: "step",
+            target_id: "review",
+            run_id: "run-1",
+            to_state: "waiting",
+            reason: "Waiting on reviewer",
+            source: { participant_id: "agent-1", step_id: "review", run_id: "run-1" },
+          },
+        ],
+        participants: [
+          {
+            id: "agent-1",
+            label: "Reviewer",
+            role: "qa",
+            status: "waiting",
+            updated_at: "2026-04-23T10:00:05.000Z",
+            step_id: "review",
+            run_id: "run-1",
+          },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.agents[0]).toMatchObject({
+      id: "agent-1",
+      name: "Reviewer",
+      role: "qa",
+      status: "waiting",
+      action: "Waiting on reviewer",
+      updated_at: "2026-04-23T10:00:05.000Z",
+      active: true,
+    })
+  })
+
+  test("does not infer a participant label from ambiguous step-level fallbacks", () => {
+    const norm = normalizeWorkflowProjectionInput({
+      version: "workflow-progress.v2",
+      workflow: { status: "running", label: "Implement" },
+      machine: { active_step_id: "review", active_run_id: "run-1" },
+      step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+      step_runs: [{ id: "run-1", seq: 0, step_id: "review", status: "active" }],
+      transitions: [
+        {
+          id: "trans-1",
+          seq: 0,
+          timestamp: "2026-04-23T10:00:01.000Z",
+          level: "step",
+          target_id: "review",
+          run_id: "run-1",
+          to_state: "active",
+          source: { step_id: "review", run_id: "run-1" },
+        },
+      ],
+      participants: [
+        { id: "agent-1", label: "Reviewer A", step_id: "review", run_id: "run-1" },
+        { id: "agent-2", label: "Reviewer B", step_id: "review", run_id: "run-1" },
+      ],
+    })
+
+    expect(norm).toBeDefined()
+    if (!norm) throw new Error("expected normalized projection input")
+    expect(norm.step_runs[0]?.actor_title).toBe("agent 1")
+    expect(norm.transitions[0]?.source_text).toBe(workflowfallback.agent)
+
+    const view = workflowproject({ progress: norm })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.agents.map((item) => item.name).sort()).toEqual(["Reviewer A", "Reviewer B"])
+    expect(view.alerts).toEqual(
+      expect.arrayContaining([expect.not.objectContaining({ level: "step", source: expect.anything() })]),
+    )
+  })
+
+  test("prefers explicit transition source over synthesized run actor titles in alerts", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", label: "Implement" },
+        machine: { active_step_id: "review", active_run_id: "run-1" },
+        step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+        step_runs: [{ id: "run-1", seq: 0, step_id: "review", status: "waiting" }],
+        transitions: [
+          {
+            id: "trans-1",
+            seq: 0,
+            timestamp: "2026-04-23T10:00:01.000Z",
+            level: "step",
+            target_id: "review",
+            run_id: "run-1",
+            to_state: "waiting",
+            source: { label: "Lead reviewer", step_id: "review", run_id: "run-1" },
+          },
+        ],
+        participants: [{ id: "agent-1", label: "Reviewer", step_id: "review", run_id: "run-1" }],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.alerts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ level: "step", source: "Lead reviewer" })]),
+    )
+  })
+
+  test("keeps step alerts scoped to the current step run when another step changed later", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", label: "Implement" },
+        machine: { active_step_id: "review", active_run_id: "run-review" },
+        step_definitions: [
+          { id: "review", kind: "task", label: "Review" },
+          { id: "build", kind: "task", label: "Build" },
+        ],
+        step_runs: [
+          { id: "run-review", seq: 0, step_id: "review", status: "waiting", reason: "Waiting on reviewer" },
+          { id: "run-build", seq: 1, step_id: "build", status: "blocked", reason: "Build queue paused" },
+        ],
+        transitions: [
+          {
+            id: "trans-review",
+            seq: 1,
+            timestamp: "2026-04-23T10:00:01.000Z",
+            level: "step",
+            target_id: "review",
+            run_id: "run-review",
+            to_state: "waiting",
+            reason: "Waiting on reviewer",
+            source: { label: "Lead reviewer", step_id: "review", run_id: "run-review" },
+          },
+          {
+            id: "trans-build",
+            seq: 2,
+            timestamp: "2026-04-23T10:00:02.000Z",
+            level: "step",
+            target_id: "build",
+            run_id: "run-build",
+            to_state: "blocked",
+            reason: "Build queue paused",
+            source: { label: "Builder", step_id: "build", run_id: "run-build" },
+          },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.alerts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "step",
+          target: "review",
+          source: "Lead reviewer",
+          summary: "Waiting on reviewer",
+        }),
+      ]),
+    )
+    expect(view.alerts).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ level: "step", source: "Builder" })]),
+    )
+  })
+
+  test("ignores stale machine active_run_id when a newer live descendant run exists", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", label: "Implement" },
+        machine: { active_step_id: "review", active_run_id: "run-review" },
+        step_definitions: [
+          { id: "review", kind: "group", label: "Review", children: ["lint", "test"] },
+          { id: "lint", kind: "task", parent_id: "review", label: "Lint" },
+          { id: "test", kind: "task", parent_id: "review", label: "Test" },
+        ],
+        step_runs: [
+          { id: "run-review", seq: 0, step_id: "review", status: "completed" },
+          { id: "run-test", seq: 1, step_id: "test", status: "completed", parent_run_id: "run-review" },
+          { id: "run-lint", seq: 2, step_id: "lint", status: "waiting", parent_run_id: "run-review" },
+        ],
+        transitions: [
+          {
+            id: "trans-review",
+            seq: 0,
+            level: "step",
+            target_id: "review",
+            run_id: "run-review",
+            to_state: "completed",
+          },
+          { id: "trans-test", seq: 1, level: "step", target_id: "test", run_id: "run-test", to_state: "completed" },
+          { id: "trans-lint", seq: 2, level: "step", target_id: "lint", run_id: "run-lint", to_state: "waiting" },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.timeline.map((item) => ({ step_id: item.step_id, status: item.status, active: item.active }))).toEqual([
+      { step_id: "review", status: "completed", active: false },
+      { step_id: "lint", status: "waiting", active: true },
+      { step_id: "test", status: "completed", active: false },
+    ])
+    expect(view.alerts).toEqual(expect.arrayContaining([expect.objectContaining({ level: "step", target: "lint" })]))
+  })
+
+  test("prefers a live child branch when active_run_id still points to a live group run", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", label: "Implement" },
+        machine: { active_step_id: "review", active_run_id: "run-review" },
+        step_definitions: [
+          { id: "review", kind: "group", label: "Review", children: ["lint", "test"] },
+          { id: "lint", kind: "task", parent_id: "review", label: "Lint" },
+          { id: "test", kind: "task", parent_id: "review", label: "Test" },
+        ],
+        step_runs: [
+          { id: "run-review", seq: 0, step_id: "review", status: "active" },
+          { id: "run-test", seq: 1, step_id: "test", status: "completed", parent_run_id: "run-review" },
+          { id: "run-lint", seq: 2, step_id: "lint", status: "waiting", parent_run_id: "run-review" },
+        ],
+        transitions: [
+          { id: "trans-review", seq: 0, level: "step", target_id: "review", run_id: "run-review", to_state: "active" },
+          { id: "trans-test", seq: 1, level: "step", target_id: "test", run_id: "run-test", to_state: "completed" },
+          { id: "trans-lint", seq: 2, level: "step", target_id: "lint", run_id: "run-lint", to_state: "waiting" },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.timeline.map((item) => ({ step_id: item.step_id, status: item.status, active: item.active }))).toEqual([
+      { step_id: "review", status: "active", active: false },
+      { step_id: "lint", status: "waiting", active: true },
+      { step_id: "test", status: "completed", active: false },
+    ])
+    expect(view.alerts).toEqual(expect.arrayContaining([expect.objectContaining({ level: "step", target: "lint" })]))
+  })
+
+  test("does not reuse older step transition details for a newer run without a transition", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "retrying", label: "Implement" },
+        machine: { active_step_id: "review", active_run_id: "run-2" },
+        step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+        step_runs: [
+          { id: "run-1", seq: 0, step_id: "review", status: "blocked" },
+          { id: "run-2", seq: 1, step_id: "review", status: "retrying" },
+        ],
+        transitions: [
+          {
+            id: "trans-1",
+            seq: 0,
+            timestamp: "2026-04-23T10:00:01.000Z",
+            level: "step",
+            target_id: "review",
+            run_id: "run-1",
+            to_state: "blocked",
+            reason: "Old blocked reason",
+            source: { label: "Old reviewer", step_id: "review", run_id: "run-1" },
+          },
+        ],
+      },
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.alerts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "step",
+          status: "retrying",
+          target: "review",
+          summary: workflowfallback.reason,
+        }),
+      ]),
+    )
+    expect(view.alerts).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({ level: "step", source: "Old reviewer" }),
+        expect.objectContaining({ level: "step", summary: "Old blocked reason" }),
+      ]),
+    )
+  })
+
+  test("emits distinct alert states for rich and fallback workflow payloads", () => {
+    const states = ["running", "waiting", "blocked", "retrying", "failed", "done"] as const
+
+    states.forEach((state) => {
+      const step = state === "running" ? "active" : state === "done" ? "completed" : state
+      const rich = workflowproject({
+        progress: {
+          version: "workflow-progress.v2",
+          workflow: { status: state, label: "Implement" },
+          machine: { active_step_id: "review", active_run_id: "run-1" },
+          step_definitions: [{ id: "review", kind: "task", label: "Review" }],
+          step_runs: [{ id: "run-1", seq: 0, step_id: "review", status: step }],
+          transitions: [
+            {
+              id: `trans-${state}`,
+              seq: 0,
+              level: "step",
+              target_id: "review",
+              run_id: "run-1",
+              to_state: step,
+            },
+          ],
+        },
+      })
+
+      const fallback = workflowproject({
+        progress: {
+          version: "workflow-progress.v1",
+          workflow: { status: state, label: "Legacy" },
+          steps: [{ id: "review", status: step, label: "Review" }],
+        },
+      })
+
+      expect(rich).toBeDefined()
+      expect(fallback).toBeDefined()
+      if (!rich || !fallback) throw new Error("expected workflow projection")
+      expect(rich.alerts.some((item) => item.status === state)).toBe(true)
+      expect(fallback.alerts.some((item) => item.status === state)).toBe(true)
+    })
+  })
+
   test("preserves partial v2 payloads through metadata normalization and read paths", () => {
     const raw = {
       [WorkflowProgressKey]: {
