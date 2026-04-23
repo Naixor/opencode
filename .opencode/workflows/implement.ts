@@ -706,6 +706,13 @@ async function finish(ctx: Ctx, data: Plan, dir: string, prog: ReturnType<typeof
     sid = fix.session_id
     row.fix = clip(fix.text)
     await save(ctx, join(dir, `final-fix-${i}.md`), fix.text)
+    await ctx.status({
+      title: `Final fix ${i} result`,
+      metadata: { round: i, stories: data.userStories.length },
+      progress: prog.stepdone({
+        summary: clip(fix.text) || `Applied final verification fixes for round ${i}`,
+      }),
+    })
   }
 
   await ctx.status({
@@ -722,6 +729,13 @@ async function finish(ctx: Ctx, data: Plan, dir: string, prog: ReturnType<typeof
     subagent: role.impl,
     category: "deep",
     session_id: sid,
+  })
+  await ctx.status({
+    title: "Implementation retrospective result",
+    metadata: { stories: data.userStories.length },
+    progress: prog.stepdone({
+      summary: clip(rest.text) || "Implementation retrospective completed",
+    }),
   })
 
   return {
@@ -1810,7 +1824,15 @@ function track(name: string, src: string) {
     return snapshot(time)
   }
 
-  return { move, review, reviewdone, finalverify, finalverifydone }
+  function stepdone(input: { summary: string }) {
+    note = input.summary
+    const time = stamp()
+    if (typeof run === "string") close(run, "completed", time, input.summary)
+    syncstate(time, undefined, row(run)?.status)
+    return snapshot(time)
+  }
+
+  return { move, review, reviewdone, finalverify, finalverifydone, stepdone }
 }
 
 function stamp() {

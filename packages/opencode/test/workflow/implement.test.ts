@@ -711,6 +711,68 @@ describe("implement workflow", () => {
     expect(verify.workflow).toMatchObject({ status: "retrying" })
     expect(verify.phase).toMatchObject({ status: "failed" })
 
+    const finalfix = updates.find((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false
+      if (!("machine" in item) || !item.machine || typeof item.machine !== "object") return false
+      if (!("phase" in item) || !item.phase || typeof item.phase !== "object") return false
+      const machine = item.machine as { active_step_id?: string }
+      const phase = item.phase as { status?: string }
+      return machine.active_step_id === "final_fix" && phase.status === "completed"
+    })
+    expect(finalfix).toBeDefined()
+    if (
+      !finalfix ||
+      typeof finalfix !== "object" ||
+      Array.isArray(finalfix) ||
+      !("step_runs" in finalfix) ||
+      !Array.isArray(finalfix.step_runs) ||
+      !("transitions" in finalfix) ||
+      !Array.isArray(finalfix.transitions)
+    ) {
+      throw new Error("expected completed final fix progress")
+    }
+    expect(finalfix.step_runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "final_fix-1", step_id: "final_fix", status: "completed" }),
+      ]),
+    )
+    expect(finalfix.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target_id: "final_fix", run_id: "final_fix-1", to_state: "completed" }),
+      ]),
+    )
+
+    const retro = updates.find((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false
+      if (!("machine" in item) || !item.machine || typeof item.machine !== "object") return false
+      if (!("phase" in item) || !item.phase || typeof item.phase !== "object") return false
+      const machine = item.machine as { active_step_id?: string }
+      const phase = item.phase as { status?: string }
+      return machine.active_step_id === "retrospective" && phase.status === "completed"
+    })
+    expect(retro).toBeDefined()
+    if (
+      !retro ||
+      typeof retro !== "object" ||
+      Array.isArray(retro) ||
+      !("step_runs" in retro) ||
+      !Array.isArray(retro.step_runs) ||
+      !("transitions" in retro) ||
+      !Array.isArray(retro.transitions)
+    ) {
+      throw new Error("expected completed retrospective progress")
+    }
+    expect(retro.step_runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "retrospective-1", step_id: "retrospective", status: "completed" }),
+      ]),
+    )
+    expect(retro.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target_id: "retrospective", run_id: "retrospective-1", to_state: "completed" }),
+      ]),
+    )
+
     const trans = mixed.transitions as Array<Record<string, unknown>>
     const architect = trans.find((item) => item.run_id === "review_architect-1" && item.to_state === "failed")
     expect(architect).toBeDefined()
@@ -747,6 +809,60 @@ describe("implement workflow", () => {
         expect.objectContaining({ label: "Architect review", source: "Architect", to_state: "failed" }),
       ]),
     )
+
+    const trim = (input: unknown) => {
+      if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("expected workflow progress")
+      const out = structuredClone(input) as {
+        workflow?: Record<string, unknown>
+        step_runs?: Array<Record<string, unknown>>
+        transitions?: Array<Record<string, unknown>>
+      }
+      if (out.workflow) {
+        delete out.workflow.started_at
+        delete out.workflow.ended_at
+        delete out.workflow.summary
+      }
+      out.step_runs = (out.step_runs ?? []).map((item) => {
+        const run = { ...item }
+        delete run.started_at
+        delete run.ended_at
+        delete run.summary
+        delete run.reason
+        delete run.actor
+        return run
+      })
+      out.transitions = (out.transitions ?? []).map((item) => {
+        const trans = { ...item }
+        delete trans.timestamp
+        delete trans.reason
+        delete trans.source
+        return trans
+      })
+      return out
+    }
+
+    const retroview = workflowscreen({
+      metadata: {
+        [WorkflowProgressKey]: trim(retro),
+      },
+      name: "implement",
+      tool_status: "running",
+    })
+    expect(retroview.empty).toBe(false)
+    expect(retroview.timeline).toEqual(
+      expect.arrayContaining([expect.objectContaining({ step_id: "retrospective", status: "completed" })]),
+    )
+    expect(retroview.history[0]).toMatchObject({ label: "Retrospective", to_state: "completed" })
+
+    const doneview = workflowscreen({
+      metadata: {
+        [WorkflowProgressKey]: trim(last),
+      },
+      name: "implement",
+      tool_status: "completed",
+    })
+    expect(doneview.latest).toMatchObject({ level: "workflow", label: "Implement workflow", to_state: "done" })
+    expect(doneview.alerts[0]).toMatchObject({ level: "workflow", status: "done", title: "Implement workflow" })
   })
 
   test("emits a terminal failed progress update when the operator stops after repair rounds", async () => {
