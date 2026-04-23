@@ -28,6 +28,20 @@ function timelinearea(input: {
     .join("\n")
 }
 
+function agentsarea(input: {
+  shell: ReturnType<typeof renderfixture> | ReturnType<typeof workflowshell>
+  width: 80 | 120
+}) {
+  if (input.shell.layout === "stacked") return section(input.shell.lines.join("\n"), "[agents]", "[history]")
+  const cell = Math.max(1, Math.floor((input.width - 3) / 2))
+  const start = input.shell.lines.findIndex((line) => line.includes("[timeline]"))
+  const end = input.shell.lines.findIndex((line) => line.includes("[history]"))
+  return input.shell.lines
+    .slice(start, end)
+    .map((line) => line.slice(cell + 3))
+    .join("\n")
+}
+
 function frame(name: keyof typeof workflowfixtures, width: 80 | 120) {
   return [renderfixture(name, width).title, ...renderfixture(name, width).lines]
     .map((line) => line.trimEnd())
@@ -180,6 +194,100 @@ describe("workflowshell", () => {
     })
   })
 
+  test("renders the agents panel from the agents projection region only", () => {
+    ;([80, 120] as const).forEach((width) => {
+      const shell = workflowshell({
+        width,
+        view: {
+          mode: "projection",
+          empty: false,
+          state: "running",
+          notice: "outside agents",
+          timeline_note: "timeline only",
+          header: {
+            title: "Demo Flow",
+            status: "done",
+            phase: "Ship",
+            summary: "header only",
+            started_at: workflowfallback.timestamp,
+          },
+          timeline: [
+            {
+              id: "wait",
+              step_id: "wait",
+              label: "Await QA",
+              kind: "wait",
+              status: "waiting",
+              active: true,
+              depth: 1,
+              reason: "Waiting for input",
+            },
+          ],
+          agents: [
+            {
+              id: "agent-1",
+              name: workflowfallback.agent,
+              role: "Reviewer",
+              status: "waiting",
+              summary: workflowfallback.reason,
+              active: true,
+            },
+            {
+              id: "agent-2",
+              name: "blocked-agent",
+              status: "blocked",
+              action: "Need approval",
+              active: false,
+            },
+            {
+              id: "agent-3",
+              name: "retrying-agent",
+              status: "retrying",
+              action: "Retrying step",
+              active: true,
+            },
+            {
+              id: "agent-4",
+              name: "done-agent",
+              status: "completed",
+              summary: "Merged",
+              active: false,
+            },
+          ],
+          history: [
+            {
+              id: "hist-1",
+              timestamp: workflowfallback.timestamp,
+              level: "step",
+              target_id: "wait",
+              label: "History Label",
+              to_state: "waiting",
+            },
+          ],
+          alerts: [
+            {
+              id: "alert-1",
+              level: "step",
+              status: "waiting",
+              title: "Alert Title",
+            },
+          ],
+        },
+      })
+
+      const area = agentsarea({ shell, width })
+
+      expect(area).toContain(`Agent: Reviewer · … WAITING · ${workflowfallback.reason}`)
+      expect(area).toContain("Agent: blocked-agent · ! BLOCKED · Need approval")
+      expect(area).toContain("Agent: retrying-agent · ↻ RETRYING · Retrying step")
+      expect(area).toContain("Agent: done-agent · ✓ DONE · Merged")
+      expect(area).not.toContain("timeline only")
+      expect(area).not.toContain("header only")
+      expect(area).not.toContain("History Label")
+      expect(area).not.toContain("Alert Title")
+    })
+  })
+
   test("shows only the active branch plus active group children in the running fixture", () => {
     ;([80, 120] as const).forEach((width) => {
       const text = renderfixture("running", width).lines.join("\n")
@@ -207,7 +315,7 @@ Round: Round 2/4
     > • Lint · active · Linting changes
     - … [wait] Await QA · waiting · Waiting for QA slot
 [agents]
-Agent: running-agent · running · Linting changes
+Agent: running-agent · • ACTIVE · Linting changes
 [history]
 Latest: time unknown · Await QA -> waiting · Waiting for QA slot
 Latest: time unknown · Lint -> active · Linting changes
@@ -226,7 +334,7 @@ Round: Round 2/4
 [timeline]
 > … [wait] Review · waiting · waiting reason
 [agents]
-Agent: waiting-agent · waiting · waiting reason
+Agent: waiting-agent · … WAITING · waiting reason
 [history]
 Latest: time unknown · Review -> waiting · waiting reason
 [alerts]
@@ -243,7 +351,7 @@ Round: Round 2/4
 [timeline]
 > ! [decision] Review · blocked · blocked reason
 [agents]
-Agent: blocked-agent · blocked · blocked reason
+Agent: blocked-agent · ! BLOCKED · blocked reason
 [history]
 Latest: time unknown · Review -> blocked · blocked reason
 [alerts]
@@ -260,7 +368,7 @@ Round: Round 2/4
 [timeline]
 > ↻ Review · retrying · Retry 2 · retrying reason
 [agents]
-Agent: retrying-agent · retrying · retrying reason
+Agent: retrying-agent · ↻ RETRYING · retrying reason
 [history]
 Latest: time unknown · Review -> retrying · retrying reason
 [alerts]
@@ -277,7 +385,7 @@ Round: Round 2/4
 [timeline]
 > ✗ Review · failed · failed reason
 [agents]
-Agent: failed-agent · failed · failed reason
+Agent: failed-agent · ✗ FAILED · failed reason
 [history]
 Latest: time unknown · Review -> failed · failed reason
 [alerts]
@@ -294,7 +402,7 @@ Round: Round 2/4
 [timeline]
 > ✓ [terminal] Ship · done · done reason
 [agents]
-Agent: done-agent · completed · done reason
+Agent: done-agent · ✓ DONE · done reason
 [history]
 Latest: time unknown · Ship -> completed · done reason
 [alerts]
@@ -311,7 +419,7 @@ Phase: Execute
 Started: time unknown
 Round: Round 2/4
 [timeline]                                                   [agents]
-- ✓ Plan · done · Plan approved                              Agent: running-agent · running · Linting changes
+- ✓ Plan · done · Plan approved                              Agent: running-agent · • ACTIVE · Linting changes
   - • [group] Review · active · Parallel checks
     > • Lint · active · Linting changes
     - … [wait] Await QA · waiting · Waiting for QA slot
@@ -329,7 +437,7 @@ Phase: Execute
 Started: time unknown
 Round: Round 2/4
 [timeline]                                                   [agents]
-> … [wait] Review · waiting · waiting reason                 Agent: waiting-agent · waiting · waiting reason
+> … [wait] Review · waiting · waiting reason                 Agent: waiting-agent · … WAITING · waiting reason
 [history]                                                    [alerts]
 Latest: time unknown · Review -> waiting · waiting reason    Alert: waiting · Waiting Flow · Flow is waiting
                                                              Alert: waiting · Review · waiting reason`)
@@ -342,7 +450,7 @@ Phase: Execute
 Started: time unknown
 Round: Round 2/4
 [timeline]                                                   [agents]
-> ! [decision] Review · blocked · blocked reason             Agent: blocked-agent · blocked · blocked reason
+> ! [decision] Review · blocked · blocked reason             Agent: blocked-agent · ! BLOCKED · blocked reason
 [history]                                                    [alerts]
 Latest: time unknown · Review -> blocked · blocked reason    Alert: blocked · Blocked Flow · Flow is blocked
                                                              Alert: blocked · Review · blocked reason`)
@@ -355,7 +463,7 @@ Phase: Execute
 Started: time unknown
 Round: Round 2/4
 [timeline]                                                   [agents]
-> ↻ Review · retrying · Retry 2 · retrying reason            Agent: retrying-agent · retrying · retrying reason
+> ↻ Review · retrying · Retry 2 · retrying reason            Agent: retrying-agent · ↻ RETRYING · retrying reason
 [history]                                                    [alerts]
 Latest: time unknown · Review -> retrying · retrying reas…   Alert: retrying · Retrying Flow · Flow is retrying
                                                              Alert: retrying · Review · retrying reason`)
@@ -368,7 +476,7 @@ Phase: Execute
 Started: time unknown
 Round: Round 2/4
 [timeline]                                                   [agents]
-> ✗ Review · failed · failed reason                          Agent: failed-agent · failed · failed reason
+> ✗ Review · failed · failed reason                          Agent: failed-agent · ✗ FAILED · failed reason
 [history]                                                    [alerts]
 Latest: time unknown · Review -> failed · failed reason      Alert: failed · Failed Flow · Flow is failed
                                                              Alert: failed · Review · failed reason`)
@@ -381,7 +489,7 @@ Phase: Execute
 Started: time unknown
 Round: Round 2/4
 [timeline]                                                   [agents]
-> ✓ [terminal] Ship · done · done reason                     Agent: done-agent · completed · done reason
+> ✓ [terminal] Ship · done · done reason                     Agent: done-agent · ✓ DONE · done reason
 [history]                                                    [alerts]
 Latest: time unknown · Ship -> completed · done reason       Alert: done · Done Flow · Flow is done`)
   })

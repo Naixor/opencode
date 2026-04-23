@@ -1738,7 +1738,12 @@ describe("workflow progress schema", () => {
     if (!view) throw new Error("expected workflow projection")
     expect(view.header.title).toBe(workflowfallback.workflow)
     expect(view.timeline[0]).toMatchObject({ label: "review", reason: workflowfallback.reason, retry: "Retry 2" })
-    expect(view.agents[0]).toMatchObject({ name: "participant-1", status: "retrying" })
+    expect(view.agents[0]).toMatchObject({
+      name: "participant-1",
+      status: "retrying",
+      summary: "review waiting",
+      action: "review waiting",
+    })
     expect(view.history[0]).toMatchObject({
       label: "review",
       timestamp: workflowfallback.timestamp,

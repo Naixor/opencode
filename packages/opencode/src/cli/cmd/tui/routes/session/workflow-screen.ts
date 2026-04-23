@@ -78,6 +78,7 @@ export function workflowscreen(input: {
     {
       id: workflowfallback.agent,
       name: workflowfallback.agent,
+      summary: workflowfallback.reason,
       status: "pending",
       active: false,
     } satisfies WorkflowProjection["agents"][number],

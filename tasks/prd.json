@@ -153,8 +153,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed with dedicated agents-panel rendering in the workflow shell so rows read only the agents projection region, show normalized labels and summaries, and expose distinct active/waiting/blocked/retrying/done states. Added reducer coverage to keep agent summaries aligned with shared fallback tokens plus shell regressions that isolate the agents region from timeline, header, history, and alert content. Accepted unresolved reviewer notes: none."
     },
     {
       "id": "US-010",

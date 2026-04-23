@@ -701,17 +701,15 @@ function agentsview(progress: WorkflowProjectionInput): WorkflowProjectionAgentI
 
   const view = (list: WorkflowProjectionAgentSeed[]): WorkflowProjectionAgentItem => {
     const state = status(list)?.status ?? "pending"
+    const action_text = pick(list, (item) => item.action, action)?.action
+    const summary_text = pick(list, (item) => item.summary, source)?.summary ?? action_text ?? workflowfallback.reason
     return {
       id: list[0]?.id ?? workflowfallback.agent,
       name: name(list)?.name ?? list[0]?.id ?? workflowfallback.agent,
       ...(pick(list, (item) => item.role, source)?.role ? { role: pick(list, (item) => item.role, source)?.role } : {}),
       status: state,
-      ...(pick(list, (item) => item.summary, source)?.summary
-        ? { summary: pick(list, (item) => item.summary, source)?.summary }
-        : {}),
-      ...(pick(list, (item) => item.action, action)?.action
-        ? { action: pick(list, (item) => item.action, action)?.action }
-        : {}),
+      summary: summary_text,
+      ...(action_text ? { action: action_text } : {}),
       ...(pick(list, (item) => item.updated_at, source)?.updated_at
         ? { updated_at: pick(list, (item) => item.updated_at, source)?.updated_at }
         : {}),

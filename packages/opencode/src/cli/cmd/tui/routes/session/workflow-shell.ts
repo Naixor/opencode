@@ -59,6 +59,22 @@ function stepstate(status?: WorkflowScreenState["timeline"][number]["status"]) {
   return status ?? "pending"
 }
 
+function agentstate(status?: WorkflowScreenState["agents"][number]["status"]) {
+  if (status === "failed") return `${workflowicon("failed")} FAILED`
+  if (status === "blocked") return `${workflowicon("blocked")} BLOCKED`
+  if (status === "waiting") return `${workflowicon("waiting")} WAITING`
+  if (status === "retrying") return `${workflowicon("retrying")} RETRYING`
+  if (status === "completed") return `${workflowicon("done")} DONE`
+  if (status === "pending") return `${workflowicon("pending")} PENDING`
+  return `${workflowicon("running")} ACTIVE`
+}
+
+function agentlabel(item: WorkflowScreenState["agents"][number]) {
+  const name = filled(item.name)
+  if (name && name !== workflowfallback.agent) return name
+  return filled(item.role) ?? name ?? workflowfallback.agent
+}
+
 function steptag(kind?: WorkflowScreenState["timeline"][number]["kind"]) {
   if (kind === "group") return "[group]"
   if (kind === "wait") return "[wait]"
@@ -94,8 +110,7 @@ function timeline(input: { note?: string; rows: WorkflowScreenState["timeline"] 
 
 function agents(view: WorkflowScreenState) {
   return view.agents.slice(0, 4).map((item) => {
-    const bits = [item.status, item.action ?? item.summary].filter(Boolean)
-    return `Agent: ${item.name} · ${bits.join(" · ")}`
+    return `Agent: ${agentlabel(item)} · ${agentstate(item.status)} · ${item.action ?? item.summary ?? workflowfallback.reason}`
   })
 }
 
