@@ -91,6 +91,7 @@ import { UI } from "@/cli/ui.ts"
 import { useTuiConfig } from "../../context/tui-config"
 import { RalphLoop } from "@/session/hooks/ralph-loop"
 import { Log } from "@/util/log"
+import { WorkflowTool } from "./workflow-tool"
 
 addDefaultParsers(parsers.parsers)
 
@@ -1711,83 +1712,49 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     return true
   })
 
-  const toolprops = {
-    get metadata() {
-      return props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})
-    },
-    get input() {
-      return props.part.state.input ?? {}
-    },
-    get output() {
-      return props.part.state.status === "completed" ? props.part.state.output : undefined
-    },
-    get permission() {
+  const toolprops = sessiontoolprops({
+    part: () => props.part,
+    permission: () => {
+      const part = props.part
       const permissions = sync.data.permission[props.message.sessionID] ?? []
-      const permissionIndex = permissions.findIndex((x) => x.tool?.callID === props.part.callID)
-      return permissions[permissionIndex]
+      const i = permissions.findIndex((x) => x.tool?.callID === part.callID)
+      return permissions[i]
     },
-    get tool() {
-      return props.part.tool
-    },
-    get part() {
-      return props.part
-    },
-  }
+  })
 
   return (
     <Show when={!shouldHide()}>
-      <Switch>
-        <Match when={props.part.tool === "bash"}>
-          <Bash {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "glob"}>
-          <Glob {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "read"}>
-          <Read {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "grep"}>
-          <Grep {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "list"}>
-          <List {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "webfetch"}>
-          <WebFetch {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "codesearch"}>
-          <CodeSearch {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "websearch"}>
-          <WebSearch {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "write"}>
-          <Write {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "edit"}>
-          <Edit {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "task"}>
-          <Task {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "apply_patch"}>
-          <ApplyPatch {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "todowrite"}>
-          <TodoWrite {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "question"}>
-          <Question {...toolprops} />
-        </Match>
-        <Match when={props.part.tool === "skill"}>
-          <Skill {...toolprops} />
-        </Match>
-        <Match when={true}>
-          <GenericTool {...toolprops} />
-        </Match>
-      </Switch>
+      <SessionToolRoute {...toolprops} />
     </Show>
   )
+}
+
+export function sessiontoolprops(props: {
+  part: () => ToolPart
+  permission?: () => Record<string, unknown> | undefined
+}) {
+  return {
+    get metadata() {
+      const part = props.part()
+      return part.state.status === "pending" ? {} : (part.state.metadata ?? {})
+    },
+    get input() {
+      return props.part().state.input ?? {}
+    },
+    get output() {
+      const part = props.part()
+      return part.state.status === "completed" ? part.state.output : undefined
+    },
+    get permission() {
+      return props.permission?.() ?? {}
+    },
+    get tool() {
+      return props.part().tool
+    },
+    get part() {
+      return props.part()
+    },
+  }
 }
 
 type ToolProps<T extends Tool.Info> = {
@@ -1798,6 +1765,65 @@ type ToolProps<T extends Tool.Info> = {
   output?: string
   part: ToolPart
 }
+
+export function SessionToolRoute(props: ToolProps<any>) {
+  return (
+    <Switch>
+      <Match when={props.part.tool === "bash"}>
+        <Bash {...props} />
+      </Match>
+      <Match when={props.part.tool === "glob"}>
+        <Glob {...props} />
+      </Match>
+      <Match when={props.part.tool === "read"}>
+        <Read {...props} />
+      </Match>
+      <Match when={props.part.tool === "grep"}>
+        <Grep {...props} />
+      </Match>
+      <Match when={props.part.tool === "list"}>
+        <List {...props} />
+      </Match>
+      <Match when={props.part.tool === "webfetch"}>
+        <WebFetch {...props} />
+      </Match>
+      <Match when={props.part.tool === "codesearch"}>
+        <CodeSearch {...props} />
+      </Match>
+      <Match when={props.part.tool === "websearch"}>
+        <WebSearch {...props} />
+      </Match>
+      <Match when={props.part.tool === "write"}>
+        <Write {...props} />
+      </Match>
+      <Match when={props.part.tool === "edit"}>
+        <Edit {...props} />
+      </Match>
+      <Match when={props.part.tool === "task"}>
+        <Task {...props} />
+      </Match>
+      <Match when={props.part.tool === "apply_patch"}>
+        <ApplyPatch {...props} />
+      </Match>
+      <Match when={props.part.tool === "todowrite"}>
+        <TodoWrite {...props} />
+      </Match>
+      <Match when={props.part.tool === "question"}>
+        <Question {...props} />
+      </Match>
+      <Match when={props.part.tool === "skill"}>
+        <Skill {...props} />
+      </Match>
+      <Match when={props.part.tool === "workflow"}>
+        <WorkflowTool {...props} />
+      </Match>
+      <Match when={true}>
+        <GenericTool {...props} />
+      </Match>
+    </Switch>
+  )
+}
+
 function GenericTool(props: ToolProps<any>) {
   const { theme } = useTheme()
   const ctx = use()

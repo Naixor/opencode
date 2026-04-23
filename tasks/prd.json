@@ -68,8 +68,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed with a live workflow tool route that reads projection state through a shared workflow screen boundary instead of transcript text. Added the workflow screen/view/tool modules in `packages/opencode/src/cli/cmd/tui/routes/session`, routed `workflow` tool parts through `SessionToolRoute`, covered runtime updates plus zero-data and error fallbacks in `packages/opencode/test/cli`, and verified with targeted workflow TUI tests and `packages/opencode` typecheck. Accepted unresolved reviewer notes: QA: `packages/opencode/test/cli/workflow-tool-reactive.test.ts:44` places `15000` inside the spawned `bun -e` script instead of on the outer `Bun.spawnSync(..., { timeout })` call, so this test has no process-level timeout. If the OpenTUI render deadlocks or the child process hangs, CI can stall instead of failing fast. Move the timeout to the `Bun.spawnSync` options object and ideally include `run.stderr` in the failure assertion for easier diagnosis."
     },
     {
       "id": "US-005",
