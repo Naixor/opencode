@@ -2887,6 +2887,30 @@ describe("workflow progress schema", () => {
     expect(view.title).toBe("Workflow Implement story")
   })
 
+  test("workflowproject normalizes header fallback fields for all consumers", () => {
+    const view = workflowproject({
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "waiting", input: "Need approval" },
+        machine: { active_step_id: "write" },
+        step_definitions: [{ id: "write", label: "Write code" }],
+        step_runs: [{ step_id: "write", status: "waiting" }],
+        transitions: [{ level: "step", target_id: "write", reason: "Awaiting input" }],
+      },
+      name: "Implement story",
+    })
+
+    expect(view).toBeDefined()
+    if (!view) throw new Error("expected workflow projection")
+    expect(view.header).toEqual({
+      title: "Implement story",
+      status: "waiting",
+      phase: workflowfallback.phase,
+      summary: "Need approval",
+      started_at: workflowfallback.timestamp,
+    })
+  })
+
   test("preserves structurally empty v2 state-machine sections", () => {
     const val = WorkflowProgressV2.parse({
       version: "workflow-progress.v2",

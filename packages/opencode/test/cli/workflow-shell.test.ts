@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { workflowfallback } from "@lark-opencode/workflow-api/presentation"
+import { workflowshell } from "../../src/cli/cmd/tui/routes/session/workflow-shell"
 import { renderpage } from "./workflow-screen-browser"
 import { renderfixture, workflowfixtures } from "./workflow-screen-harness"
 
@@ -51,9 +52,43 @@ describe("workflowshell", () => {
     const inactive = renderfixture("inactive", 80).lines.join("\n")
 
     expect(empty).toContain(`No ${workflowfallback.workflow} state yet.`)
+    expect(empty).toContain(`Summary: ${workflowfallback.reason}`)
+    expect(empty).toContain(`Phase: ${workflowfallback.phase}`)
     expect(empty).toContain(`Step: ${workflowfallback.step} · pending`)
     expect(inactive).toContain(`No active ${workflowfallback.workflow}.`)
     expect(inactive).toContain(`Workflow: ${workflowfallback.workflow}`)
+  })
+
+  test("reads header lines from the header projection region", () => {
+    const shell = workflowshell({
+      width: 80,
+      view: {
+        mode: "projection",
+        empty: false,
+        state: "failed",
+        header: {
+          title: "Demo Flow",
+          status: "done",
+          phase: workflowfallback.phase,
+          summary: workflowfallback.reason,
+          started_at: workflowfallback.timestamp,
+        },
+        timeline: [],
+        agents: [],
+        history: [],
+        alerts: [],
+      },
+    })
+
+    expect(shell.lines.join("\n")).toContain("Status: ✓ DONE")
+  })
+
+  test("visibly distinguishes workflow states in the header", () => {
+    expect(renderfixture("running", 80).lines.join("\n")).toContain("Status: • RUNNING")
+    expect(renderfixture("waiting", 80).lines.join("\n")).toContain("Status: … WAITING")
+    expect(renderfixture("blocked", 80).lines.join("\n")).toContain("Status: ! BLOCKED")
+    expect(renderfixture("failed", 80).lines.join("\n")).toContain("Status: ✗ FAILED")
+    expect(renderfixture("done", 80).lines.join("\n")).toContain("Status: ✓ DONE")
   })
 
   test("preserves fallback and partial metadata states in the harness", () => {

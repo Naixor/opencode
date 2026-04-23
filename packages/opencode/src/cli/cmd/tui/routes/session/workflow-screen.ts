@@ -50,11 +50,7 @@ export function workflowscreen(input: {
       mode: "projection",
       empty: false,
       state: projection.state,
-      header: {
-        ...projection.header,
-        summary: projection.header.summary ?? projection.header.input ?? workflowfallback.reason,
-        started_at: projection.header.started_at ?? workflowfallback.timestamp,
-      },
+      header: projection.header,
       timeline: projection.timeline,
       agents: projection.agents,
       history: projection.history,
@@ -119,7 +115,8 @@ export function workflowscreen(input: {
     header: {
       title,
       status: state,
-      summary: notice,
+      phase: workflowfallback.phase,
+      summary: workflowfallback.reason,
       started_at: workflowfallback.timestamp,
     },
     timeline,

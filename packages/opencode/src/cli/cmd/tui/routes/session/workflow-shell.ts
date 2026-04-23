@@ -34,18 +34,25 @@ function pair(left: string[], right: string[], width: number) {
   })
 }
 
-function state(view: WorkflowScreenState) {
-  const list = [view.header.status, view.header.phase, view.header.round].filter(Boolean)
-  return list.join(" · ") || view.state
+function status(status?: WorkflowScreenState["header"]["status"]) {
+  if (status === "failed") return `${workflowicon(status)} FAILED`
+  if (status === "blocked") return `${workflowicon(status)} BLOCKED`
+  if (status === "waiting") return `${workflowicon(status)} WAITING`
+  if (status === "retrying") return `${workflowicon(status)} RETRYING`
+  if (status === "pending") return `${workflowicon(status)} PENDING`
+  if (status === "done") return `${workflowicon(status)} DONE`
+  return `${workflowicon(status)} RUNNING`
 }
 
 function header(view: WorkflowScreenState) {
   const name = filled(view.header.title) ?? workflowfallback.workflow
   return [
     `Workflow: ${name}`,
-    `State: ${workflowicon(view.state)} ${state(view)}`,
-    `Summary: ${view.header.summary ?? workflowfallback.reason}`,
-    `Started: ${view.header.started_at ?? workflowfallback.timestamp}`,
+    `Summary: ${view.header.summary}`,
+    `Status: ${status(view.header.status)}`,
+    `Phase: ${view.header.phase}`,
+    `Started: ${view.header.started_at}`,
+    ...(view.header.round ? [`Round: ${view.header.round}`] : []),
   ]
 }
 

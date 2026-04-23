@@ -17,11 +17,10 @@ export type WorkflowViewState = "pending" | "running" | "waiting" | "blocked" | 
 export type WorkflowProjectionHeader = {
   title: string
   status: WorkflowViewState
-  phase?: string
+  phase: string
   round?: string
-  summary?: string
-  input?: string
-  started_at?: string
+  summary: string
+  started_at: string
 }
 
 export type WorkflowProjectionTimelineItem = {
@@ -91,6 +90,7 @@ export const workflowfallback = {
   workflow: "workflow",
   step: "step",
   agent: "agent",
+  phase: "Phase unknown",
   timestamp: "time unknown",
   round: "Round unknown",
   reason: "No reason provided",
@@ -904,11 +904,10 @@ export function workflowproject(input: {
   const header = {
     title: progress.workflow.title,
     status: state,
-    ...(progress.phase ? { phase: progress.phase.title } : {}),
+    phase: progress.phase?.title ?? workflowfallback.phase,
     ...(progress.round ? { round: progress.round.title } : {}),
-    ...(progress.workflow.summary ? { summary: progress.workflow.summary } : {}),
-    ...(progress.workflow.input ? { input: progress.workflow.input } : {}),
-    ...(progress.workflow.started_at ? { started_at: progress.workflow.started_at } : {}),
+    summary: progress.workflow.summary ?? progress.workflow.input ?? workflowfallback.reason,
+    started_at: progress.workflow.started_at ?? workflowfallback.timestamp,
   }
   return {
     state,

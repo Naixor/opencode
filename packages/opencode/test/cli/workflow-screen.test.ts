@@ -55,7 +55,8 @@ describe("workflowscreen", () => {
     expect(view.header).toEqual({
       title: "demo",
       status: "running",
-      summary: "No workflow state yet.",
+      phase: workflowfallback.phase,
+      summary: workflowfallback.reason,
       started_at: workflowfallback.timestamp,
     })
     expect(view.timeline[0]).toMatchObject({ label: workflowfallback.step, reason: workflowfallback.reason })
@@ -71,6 +72,29 @@ describe("workflowscreen", () => {
 
     expect(view.header.title).toBe(workflowfallback.workflow)
     expect(view.empty).toBe(true)
+  })
+
+  test("fills projection header gaps with shared fallback tokens", () => {
+    const view = workflowscreen({
+      name: "demo",
+      tool_status: "running",
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", label: "Demo Flow", input: "Ship the header" },
+        machine: { active_step_id: "plan" },
+        step_definitions: [{ id: "plan", label: "Plan" }],
+        step_runs: [{ step_id: "plan", status: "active" }],
+        transitions: [{ level: "step", target_id: "plan", to_state: "active" }],
+      },
+    })
+
+    expect(view.header).toMatchObject({
+      title: "Demo Flow",
+      status: "running",
+      phase: workflowfallback.phase,
+      summary: "Ship the header",
+      started_at: workflowfallback.timestamp,
+    })
   })
 
   test("distinguishes inactive fallback state from named empty state", () => {

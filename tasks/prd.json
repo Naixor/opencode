@@ -118,8 +118,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by implement workflow after review. Commit records the workflow header panel projection so the TUI reads normalized header fields only, shows shared fallback tokens for missing header data, and visually distinguishes terminal and waiting states with focused regression coverage and typecheck/test verification. Accepted unresolved reviewer notes: none."
     },
     {
       "id": "US-008",
