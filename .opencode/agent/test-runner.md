@@ -30,6 +30,9 @@ BUN_BIN="$(command -v bun || true)"
 if [ -z "$BUN_BIN" ] && [ -x "$HOME/.bun/bin/bun" ]; then
   BUN_BIN="$HOME/.bun/bin/bun"
 fi
+if [ -z "$BUN_BIN" ] && [ -x ~/.bun/bin/bun ]; then
+  BUN_BIN="$(eval printf '%s' ~/.bun/bin/bun)"
+fi
 ```
 
 If `BUN_BIN` is still empty, STOP and return exactly:

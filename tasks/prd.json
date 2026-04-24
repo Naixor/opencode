@@ -203,7 +203,7 @@
       ],
       "priority": 12,
       "passes": true,
-      "notes": "Completed with grouped review child runs plus distinct repair and final verification retry runs in `.opencode/workflows/implement.ts`, and focused regression coverage in `packages/opencode/test/workflow/implement.test.ts` for mixed child states, repeated retries, workflow-screen projection, and fresh test-runner sessions per round. Verified with `bun run --cwd packages/opencode test:parallel --workers 1 --pattern \"**/implement.test.ts\"` and `bun run --cwd packages/opencode typecheck`. Accepted unresolved reviewer notes: none."
+      "notes": "Completed by implement workflow after 5 review round(s). Commit: 392936d83. {\"summary\":\"No code changes were needed in this repair round; I re-ran the focused US-012 verification and confirmed the grouped review/retry workflow emitter still passes tests and typecheck.\",\"files\":[],\"verify\":\"Passed `bun run --cwd packages/opencode test:parallel --workers 1 --pattern \\\"/Users/bytedance/GithubWorkspace/@Naixor/opencode/packages/opencode/test/workflow/implement.test.ts\\\"`, `bu"
     },
     {
       "id": "US-013",
@@ -217,8 +217,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by implement workflow after 2 review round(s). Commit: 5545bae6f0b7c6e3dad46b0a8044b98910031de5. {\"summary\":\"Added the missing QA-requested assertions so the US-013 end-to-end workflow test now verifies explicit completed transition events for `final_fix-1` and `retrospective-1`, not just completed step runs.\",\"files\":[\"packages/opencode/test/workflow/implement.test.ts\"],\"verify\":\"`bun run --cwd packages/opencode test:parallel --pattern \\\"**/workflow/implement.test.ts\\\"`; `bun run --cwd packa"
     },
     {
       "id": "US-014",
@@ -234,7 +234,7 @@
       ],
       "priority": 14,
       "passes": true,
-      "notes": "Completed with shared workflow contract guidance in `packages/workflow-api/README.md`, an executable external adoption example in `packages/workflow-api/src/example.ts`, and regression coverage in `packages/workflow-api/src/index.test.ts` plus `packages/opencode/test/cli/workflow-screen.test.ts` proving the shared normalizer, reducer, and TUI render external v2 metadata without custom UI logic. Verified with `bun test src/index.test.ts`, `bun test test/cli/workflow-screen.test.ts`, and `bun run typecheck` in `packages/workflow-api`. Accepted unresolved reviewer notes: none."
+      "notes": "Completed by implement workflow after 2 review round(s). Commit: 50301d1dd263. {\"summary\":\"Tightened the migration docs to reflect the real tolerant vs strict workflow-progress readers, and kept the external example repo-internal by removing the package export and updating the CLI test to import the example from source.\",\"files\":[\"packages/workflow-api/README.md\",\"packages/workflow-api/package.json\",\"packages/opencode/test/cli/workflow-screen.test.ts\"],\"verify\":\"`bun run typ"
     }
   ]
 }
