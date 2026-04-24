@@ -44,10 +44,15 @@ Use this agent when the user wants:
 
 Within `run(ctx, input)`, prefer these primitives:
 
-- `ctx.status({ title?, metadata? })` for progress
+- `ctx.status({ title?, metadata?, progress? })` for progress, usually with `workflow-progress.v2` stored under `workflow_progress`
 - `ctx.ask({ questions })` for explicit user decisions
 - `ctx.task({ description, prompt, subagent, category?, model?, session_id?, load_skills? })` for focused delegation
 - `ctx.workflow({ name, raw?, argv?, files? })` for nested workflow reuse
+
+Built-in reference points:
+
+- `implement` already emits full v2 state-machine progress for its main execution flow
+- `plan` now emits v2 progress with review, wait, and judge stages
 
 ## How to work
 
@@ -56,11 +61,12 @@ When creating or updating a workflow:
 1. Keep the input shape as simple as possible.
 2. Use default args unless stricter parsing is clearly needed.
 3. Make outputs concise and readable in a normal session transcript.
-4. Prefer robust error handling and clear failure messages.
-5. Reuse existing workflows with `ctx.workflow()` instead of duplicating behavior when that keeps the design clearer.
-6. Avoid cycles like `a -> a` or `a -> b -> a`.
-7. If useful, add or update examples under `.opencode/workflows`.
-8. If behavior changes, verify by running the relevant workflow tests or typecheck when appropriate.
+4. Prefer `ctx.status({ progress })` when the workflow has real phases, waits, or retries.
+5. Prefer robust error handling and clear failure messages.
+6. Reuse existing workflows with `ctx.workflow()` instead of duplicating behavior when that keeps the design clearer.
+7. Avoid cycles like `a -> a` or `a -> b -> a`.
+8. If useful, add or update examples under `.opencode/workflows`.
+9. If behavior changes, verify by running the relevant workflow tests or typecheck when appropriate.
 
 ## Debugging guidance
 

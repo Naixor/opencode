@@ -79,6 +79,20 @@ const builtin = new Set(["general", "explore", "omo-explore", "oracle"])
 type Base = z.infer<typeof opencode.args>
 type Ctx = WorkflowContext
 type Job = TaskInput
+type Node =
+  | "init"
+  | "pm"
+  | "review"
+  | "review_architect"
+  | "review_fe"
+  | "review_qa"
+  | "review_dba"
+  | "review_muse"
+  | "judge"
+  | "notify"
+  | "decide"
+  | "done"
+  | "failed"
 
 const args = opencode.args.transform((input: Base) => {
   let notify: string | undefined
@@ -141,6 +155,7 @@ export default opencode.workflow({
     let last: z.infer<typeof pmres> | undefined
     const mem: string[] = []
     const rounds: string[] = []
+    const prog = track(input.goal)
     const log = {
       goal: input.goal,
       prd_file: file,
@@ -152,206 +167,595 @@ export default opencode.workflow({
       final: null as null | Record<string, unknown>,
     }
 
-    await ctx.status({
-      title: "Initialize roles",
-      metadata: { roles: roles.map((item) => item.name), agents: use, file, dir },
-    })
-
-    for (let i = 1; i <= input.max_rounds; i++) {
-      const row = {
-        round: i,
-        pm: {} as Record<string, unknown>,
-        roles: {} as Record<string, unknown>,
-        judge: {} as Record<string, unknown>,
-        user_decisions: [] as Array<Record<string, unknown>>,
-      }
-      log.rounds.push(row)
-
+    try {
       await ctx.status({
-        title: `PM round ${i}`,
-        metadata: { round: i, file },
+        title: "Initialize roles",
+        metadata: { roles: roles.map((item) => item.name), agents: use, file, dir },
+        progress: prog.move("init", { summary: `Initialize plan workflow for ${input.goal}` }),
       })
 
-      const pm = await json(
-        ctx,
-        {
-          description: `PM round ${i}`,
-          prompt: pmPrompt({
-            round: i,
-            goal: input.goal,
-            file,
-            prd,
-            refs,
-            mem,
-            role: sys.pm,
-            min: input.min_rounds,
-            max: input.max_rounds,
-          }),
-          subagent: use.pm,
-          load_skills: ["prd"],
-        },
-        pmres,
-        `PM round ${i}`,
-        "pm",
-        row.pm,
-      )
-
-      last = pm
-      prd = pm.prd_markdown
-      await save(ctx, file, prd)
-      const items = uniq(pm.issues)
-      rounds.push(`Round ${i}: ${pm.summary}`)
-
-      if (items.length === 0) {
-        if (i >= input.min_rounds && (pm.done ?? true)) break
-        mem.push(
-          `Round ${i}: PM reported no unresolved questions. Re-check the PRD for hidden assumptions and remaining gaps.`,
-        )
-        continue
-      }
-
-      await ctx.status({
-        title: `Role review ${i}`,
-        metadata: { round: i, issues: items.length },
-      })
-
-      const peers = roles.filter((item) => item.id !== "pm")
-      const ans = await Promise.all(
-        peers.map(async (item) => ({
-          role: item.name,
-          data: await json(
-            ctx,
-            {
-              description: `${item.name} round ${i}`,
-              prompt: rolePrompt({
-                role: item.name,
-                sys: sys[item.id],
-                goal: input.goal,
-                file,
-                prd,
-                items,
-                refs,
-              }),
-              subagent: use[item.id],
-            },
-            roleres,
-            `${item.name} round ${i}`,
-            "role",
-            (row.roles[item.id] = {}),
-          ),
-        })),
-      )
-
-      const cmp = await json(
-        ctx,
-        {
-          description: `Judge round ${i}`,
-          prompt: judgePrompt({ goal: input.goal, items, ans }),
-          subagent: use.judge,
-        },
-        judge,
-        `Judge round ${i}`,
-        "judge",
-        row.judge,
-      )
-
-      if (cmp.similar && cmp.decisions.every((item) => item.similar)) {
-        mem.push(`Round ${i} consensus:\n${cmp.summary}`)
-        continue
-      }
-
-      if (!notify) {
-        const pick = await ctx.ask({
-          questions: [
-            {
-              header: "Lark target",
-              question:
-                "If you want a Lark notification for plan decisions, provide a chat_id/user_id. Otherwise choose Skip.",
-              options: [{ label: "Skip", description: "Do not send a Lark message this round" }],
-              custom: true,
-            },
-          ],
-        })
-        const val = pick.answers[0]?.[0]
-        if (val && val !== "Skip") notify = val
-      }
-
-      if (notify) {
-        note = await send(ctx, ctx.worktree, notify, message({ goal: input.goal, file, round: i, cmp, ans })).catch(
-          (err: unknown) => `Lark notification failed: ${err instanceof Error ? err.message : String(err)}`,
-        )
-        log.notification = note
-      }
-
-      const ask = cmp.decisions.filter((item) => !item.similar)
-      const res = await ctx.ask({
-        questions: ask.map((item, idx) => ({
-          header: `Decision ${idx + 1}`,
-          question: item.summary,
-          options:
-            item.options && item.options.length > 0
-              ? item.options
-              : [
-                  { label: item.recommended, description: "Recommended direction" },
-                  { label: "Need more analysis", description: "Keep researching before deciding" },
-                ],
-          custom: true,
-        })),
-      })
-
-      for (let j = 0; j < ask.length; j++) {
-        const item = ask[j]
-        const answer = res.answers[j]?.join(", ") || "No answer"
-        mem.push(`User decision for ${item.id}: ${answer}`)
-        const picked = {
-          id: item.id,
+      for (let i = 1; i <= input.max_rounds; i++) {
+        const row = {
           round: i,
-          answer,
+          pm: {} as Record<string, unknown>,
+          roles: {} as Record<string, unknown>,
+          judge: {} as Record<string, unknown>,
+          user_decisions: [] as Array<Record<string, unknown>>,
         }
-        row.user_decisions.push(picked)
-        log.decisions.push(picked)
+        log.rounds.push(row)
+
+        await ctx.status({
+          title: `PM round ${i}`,
+          metadata: { round: i, file },
+          progress: prog.move("pm", { summary: `Draft PRD round ${i}`, round: i }),
+        })
+
+        const pm = await json(
+          ctx,
+          {
+            description: `PM round ${i}`,
+            prompt: pmPrompt({
+              round: i,
+              goal: input.goal,
+              file,
+              prd,
+              refs,
+              mem,
+              role: sys.pm,
+              min: input.min_rounds,
+              max: input.max_rounds,
+            }),
+            subagent: use.pm,
+            load_skills: ["prd"],
+          },
+          pmres,
+          `PM round ${i}`,
+          "pm",
+          row.pm,
+        )
+
+        last = pm
+        prd = pm.prd_markdown
+        await save(ctx, file, prd)
+        const items = uniq(pm.issues)
+        rounds.push(`Round ${i}: ${pm.summary}`)
+
+        if (items.length === 0) {
+          await ctx.status({
+            title: `PM round ${i} result`,
+            metadata: { round: i, file, issues: 0 },
+            progress: prog.stepdone({ summary: pm.summary || `PM round ${i} found no unresolved questions` }),
+          })
+          if (i >= input.min_rounds && (pm.done ?? true)) break
+          mem.push(
+            `Round ${i}: PM reported no unresolved questions. Re-check the PRD for hidden assumptions and remaining gaps.`,
+          )
+          continue
+        }
+
+        const peers = roles.filter((item) => item.id !== "pm")
+        await ctx.status({
+          title: `Role review ${i}`,
+          metadata: { round: i, issues: items.length },
+          progress: prog.review({
+            summary: `Collect ${peers.length} role reviews for round ${i}`,
+            round: i,
+            roles: peers.map((item) => item.name),
+          }),
+        })
+
+        const ans = await Promise.all(
+          peers.map(async (item) => ({
+            role: item.name,
+            data: await json(
+              ctx,
+              {
+                description: `${item.name} round ${i}`,
+                prompt: rolePrompt({
+                  role: item.name,
+                  sys: sys[item.id],
+                  goal: input.goal,
+                  file,
+                  prd,
+                  items,
+                  refs,
+                }),
+                subagent: use[item.id],
+              },
+              roleres,
+              `${item.name} round ${i}`,
+              "role",
+              (row.roles[item.id] = {}),
+            ),
+          })),
+        )
+
+        await ctx.status({
+          title: `Judge round ${i}`,
+          metadata: { round: i, issues: items.length },
+          progress: prog.reviewdone({
+            summary: `Collected ${ans.length} role reviews for round ${i}`,
+            round: i,
+            roles: ans.map((item) => item.role),
+          }),
+        })
+
+        await ctx.status({
+          title: `Judge round ${i}`,
+          metadata: { round: i, issues: items.length },
+          progress: prog.move("judge", { summary: `Compare role feedback for round ${i}`, round: i }),
+        })
+
+        const cmp = await json(
+          ctx,
+          {
+            description: `Judge round ${i}`,
+            prompt: judgePrompt({ goal: input.goal, items, ans }),
+            subagent: use.judge,
+          },
+          judge,
+          `Judge round ${i}`,
+          "judge",
+          row.judge,
+        )
+
+        const ask = cmp.decisions.filter((item) => !item.similar)
+        await ctx.status({
+          title: `Judge round ${i} result`,
+          metadata: { round: i, similar: cmp.similar, pending: ask.length },
+          progress: prog.stepdone({
+            summary:
+              cmp.similar && ask.length === 0
+                ? `Round ${i} reached consensus`
+                : `Round ${i} needs ${ask.length} decision${ask.length === 1 ? "" : "s"}`,
+          }),
+        })
+
+        if (cmp.similar && ask.every((item) => item.similar)) {
+          mem.push(`Round ${i} consensus:\n${cmp.summary}`)
+          continue
+        }
+
+        if (!notify) {
+          await ctx.status({
+            title: `Notification target ${i}`,
+            metadata: { round: i },
+            progress: prog.wait("notify", { summary: `Await notification target for round ${i}`, round: i }),
+          })
+          const pick = await ctx.ask({
+            questions: [
+              {
+                header: "Lark target",
+                question:
+                  "If you want a Lark notification for plan decisions, provide a chat_id/user_id. Otherwise choose Skip.",
+                options: [{ label: "Skip", description: "Do not send a Lark message this round" }],
+                custom: true,
+              },
+            ],
+          })
+          const val = pick.answers[0]?.[0]
+          if (val && val !== "Skip") notify = val
+          await ctx.status({
+            title: `Notification target ${i} result`,
+            metadata: { round: i, notify: notify ?? null },
+            progress: prog.stepdone({
+              summary: notify ? `Notification target set for round ${i}` : `Skip notification for round ${i}`,
+            }),
+          })
+        }
+
+        if (notify) {
+          await ctx.status({
+            title: `Notify ${i}`,
+            metadata: { round: i, notify },
+            progress: prog.move("notify", { summary: `Send decision note for round ${i}`, round: i }),
+          })
+          note = await send(ctx, ctx.worktree, notify, message({ goal: input.goal, file, round: i, cmp, ans })).catch(
+            (err: unknown) => `Lark notification failed: ${err instanceof Error ? err.message : String(err)}`,
+          )
+          log.notification = note
+          await ctx.status({
+            title: `Notify ${i} result`,
+            metadata: { round: i, notify },
+            progress: prog.stepdone({ summary: note || `Sent decision note for round ${i}` }),
+          })
+        }
+
+        await ctx.status({
+          title: `Decision round ${i}`,
+          metadata: { round: i, decisions: ask.length },
+          progress: prog.wait("decide", {
+            summary: `Await ${ask.length} decision${ask.length === 1 ? "" : "s"} for round ${i}`,
+            round: i,
+          }),
+        })
+        const res = await ctx.ask({
+          questions: ask.map((item, idx) => ({
+            header: `Decision ${idx + 1}`,
+            question: item.summary,
+            options:
+              item.options && item.options.length > 0
+                ? item.options
+                : [
+                    { label: item.recommended, description: "Recommended direction" },
+                    { label: "Need more analysis", description: "Keep researching before deciding" },
+                  ],
+            custom: true,
+          })),
+        })
+
+        for (let j = 0; j < ask.length; j++) {
+          const item = ask[j]
+          const answer = res.answers[j]?.join(", ") || "No answer"
+          mem.push(`User decision for ${item.id}: ${answer}`)
+          const picked = {
+            id: item.id,
+            round: i,
+            answer,
+          }
+          row.user_decisions.push(picked)
+          log.decisions.push(picked)
+        }
+
+        await ctx.status({
+          title: `Decision round ${i} result`,
+          metadata: { round: i, decisions: ask.length },
+          progress: prog.stepdone({
+            summary:
+              ask.length === 1
+                ? `Recorded decision for ${ask[0]?.id ?? `round ${i}`}`
+                : `Recorded ${ask.length} decisions for round ${i}`,
+          }),
+        })
       }
-    }
 
-    log.final = {
-      latest_pm_summary: last?.summary ?? null,
-      rounds,
-      prd_saved: Boolean(prd),
-      notify: notify ?? null,
-    }
-    await save(ctx, `${dir}/run.json`, JSON.stringify(log, null, 2))
-    for (const item of log.rounds) {
-      const round = Number(item.round)
-      await save(ctx, `${dir}/round-${round}-pm.json`, JSON.stringify(item.pm ?? {}, null, 2))
-      await save(ctx, `${dir}/round-${round}-roles.json`, JSON.stringify(item.roles ?? {}, null, 2))
-      await save(ctx, `${dir}/round-${round}-judge.json`, JSON.stringify(item.judge ?? {}, null, 2))
-      await save(ctx, `${dir}/round-${round}-decisions.json`, JSON.stringify(item.user_decisions ?? [], null, 2))
-    }
-    if (prd) await save(ctx, `${dir}/final-prd.md`, prd)
+      await ctx.status({
+        title: "Plan workflow done",
+        metadata: { file, dir, rounds: log.rounds.length },
+        progress: prog.move("done", { summary: last?.summary || `Completed plan workflow for ${input.goal}` }),
+      })
 
-    return {
-      title: "Plan PRD loop",
-      output: [
-        `Goal: ${input.goal}`,
-        `PRD file: ${file}`,
-        `Log dir: ${dir}`,
-        note ? `Notification: ${note}` : undefined,
-        last ? `Latest PM summary: ${last.summary}` : undefined,
-        prd ? `Saved: ${file}` : undefined,
-        prd ? ["Final PRD draft:", prd].join("\n\n") : undefined,
-        mem.length > 0 ? ["Resolved context:", mem.join("\n")].join("\n\n") : undefined,
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      metadata: {
-        file,
-        log_dir: dir,
+      log.final = {
+        latest_pm_summary: last?.summary ?? null,
         rounds,
+        prd_saved: Boolean(prd),
         notify: notify ?? null,
-      },
+      }
+      await save(ctx, `${dir}/run.json`, JSON.stringify(log, null, 2))
+      for (const item of log.rounds) {
+        const round = Number(item.round)
+        await save(ctx, `${dir}/round-${round}-pm.json`, JSON.stringify(item.pm ?? {}, null, 2))
+        await save(ctx, `${dir}/round-${round}-roles.json`, JSON.stringify(item.roles ?? {}, null, 2))
+        await save(ctx, `${dir}/round-${round}-judge.json`, JSON.stringify(item.judge ?? {}, null, 2))
+        await save(ctx, `${dir}/round-${round}-decisions.json`, JSON.stringify(item.user_decisions ?? [], null, 2))
+      }
+      if (prd) await save(ctx, `${dir}/final-prd.md`, prd)
+
+      return {
+        title: "Plan PRD loop",
+        output: [
+          `Goal: ${input.goal}`,
+          `PRD file: ${file}`,
+          `Log dir: ${dir}`,
+          note ? `Notification: ${note}` : undefined,
+          last ? `Latest PM summary: ${last.summary}` : undefined,
+          prd ? `Saved: ${file}` : undefined,
+          prd ? ["Final PRD draft:", prd].join("\n\n") : undefined,
+          mem.length > 0 ? ["Resolved context:", mem.join("\n")].join("\n\n") : undefined,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        metadata: {
+          file,
+          log_dir: dir,
+          rounds,
+          notify: notify ?? null,
+        },
+      }
+    } catch (err) {
+      await ctx.status({
+        title: "Plan workflow failed",
+        metadata: { file, dir },
+        progress: prog.move("failed", {
+          summary: err instanceof Error && err.message ? err.message : String(err),
+        }),
+      })
+      throw err
     }
   },
 })
+
+function track(name: string) {
+  const start = stamp()
+  const flow = [
+    { id: "init", kind: "task", label: "Initialize roles", next: ["pm"] },
+    { id: "pm", kind: "task", label: "PM draft", next: ["review", "done"] },
+    {
+      id: "review",
+      kind: "group",
+      label: "Role review",
+      children: ["review_architect", "review_fe", "review_qa", "review_dba", "review_muse"],
+      next: ["judge"],
+    },
+    { id: "review_architect", kind: "decision", parent_id: "review", label: "Architect review" },
+    { id: "review_fe", kind: "decision", parent_id: "review", label: "FE review" },
+    { id: "review_qa", kind: "decision", parent_id: "review", label: "QA review" },
+    { id: "review_dba", kind: "decision", parent_id: "review", label: "DBA review" },
+    { id: "review_muse", kind: "decision", parent_id: "review", label: "Muse review" },
+    { id: "judge", kind: "decision", label: "Judge alignment", next: ["pm", "notify", "decide", "done"] },
+    { id: "notify", kind: "task", label: "Send notification", next: ["decide", "pm", "done"] },
+    { id: "decide", kind: "wait", label: "Await decisions", next: ["pm", "done"] },
+    { id: "done", kind: "terminal", label: "Done" },
+    { id: "failed", kind: "terminal", label: "Failed" },
+  ] as const
+  const runs = [] as Array<Record<string, unknown>>
+  const trans = [] as Array<Record<string, unknown>>
+  const seen = {
+    init: 0,
+    pm: 0,
+    review: 0,
+    review_architect: 0,
+    review_fe: 0,
+    review_qa: 0,
+    review_dba: 0,
+    review_muse: 0,
+    judge: 0,
+    notify: 0,
+    decide: 0,
+    done: 0,
+    failed: 0,
+  }
+  let node: Node | undefined
+  let run: string | undefined
+  let kids: string[] = []
+  let state: "running" | "waiting" | "failed" | "done" = "running"
+  let note = `Initialize plan workflow for ${name}`
+
+  function row(id?: string) {
+    if (!id) return
+    return runs.find((item) => item.id === id)
+  }
+
+  function live(val: unknown) {
+    return val === "active" || val === "waiting"
+  }
+
+  function source(item?: Record<string, unknown>) {
+    if (!item?.actor || typeof item.actor !== "object" || Array.isArray(item.actor)) return
+    const actor = item.actor as Record<string, unknown>
+    return {
+      type: "agent",
+      ...(typeof actor.id === "string" ? { id: actor.id } : {}),
+      ...(typeof actor.name === "string" ? { name: actor.name } : {}),
+      ...(typeof actor.role === "string" ? { role: actor.role } : {}),
+      ...(typeof item.step_id === "string" ? { step_id: item.step_id } : {}),
+      ...(typeof item.id === "string" ? { run_id: item.id } : {}),
+    }
+  }
+
+  function flowstatus(status?: unknown, step?: unknown) {
+    if (step === "done") return "done" as const
+    if (step === "failed" || status === "failed") return "failed" as const
+    if (status === "waiting") return "waiting" as const
+    return "running" as const
+  }
+
+  function phasestatus(status?: unknown, step?: unknown) {
+    if (step === "done" || status === "completed") return "completed" as const
+    if (step === "failed" || status === "failed") return "failed" as const
+    if (status === "waiting") return "waiting" as const
+    return "active" as const
+  }
+
+  function sync(time: string, next?: Node, status?: unknown) {
+    if (next) node = next
+    const to = flowstatus(status, node)
+    if (state === to) return
+    trans.push({
+      id: `workflow:${to}:${trans.length}`,
+      seq: trans.length,
+      timestamp: time,
+      level: "workflow",
+      target_id: "workflow",
+      from_state: state,
+      to_state: to,
+    })
+    state = to
+  }
+
+  function close(id: string | undefined, status: "completed" | "failed", time: string, summary?: string) {
+    const item = row(id)
+    if (!item || item.ended_at || !live(item.status)) return
+    const from = item.status
+    item.status = status
+    item.ended_at = time
+    if (summary) {
+      item.summary = summary
+      item.reason = summary
+    }
+    trans.push({
+      id: `${item.id}:${status}:${trans.length}`,
+      seq: trans.length,
+      timestamp: time,
+      level: "step",
+      target_id: item.step_id,
+      run_id: item.id,
+      from_state: from,
+      to_state: status,
+      ...(summary ? { reason: summary } : {}),
+      ...(source(item) ? { source: source(item) } : {}),
+    })
+  }
+
+  function closekids(time: string, summary?: string) {
+    kids.forEach((id) => close(id, "completed", time, summary))
+    kids = []
+  }
+
+  function enter(
+    next: Node,
+    input: {
+      summary: string
+      round?: number
+      parent?: string
+      actor?: Record<string, unknown>
+      status?: "active" | "completed" | "failed" | "waiting"
+    },
+  ) {
+    const time = stamp()
+    seen[next] += 1
+    const id = `${next}-${seen[next]}`
+    const status = input.status ?? "active"
+    runs.push({
+      id,
+      seq: runs.length,
+      step_id: next,
+      status,
+      summary: input.summary,
+      reason: input.summary,
+      started_at: time,
+      ...(input.parent ? { parent_run_id: input.parent } : {}),
+      ...(input.round ? { round: { current: input.round, label: `Round ${input.round}` } } : {}),
+      ...(input.actor ? { actor: input.actor } : {}),
+      ...(status === "completed" || status === "failed" ? { ended_at: time } : {}),
+    })
+    trans.push({
+      id: `${id}:start`,
+      seq: trans.length,
+      timestamp: time,
+      level: "step",
+      target_id: next,
+      run_id: id,
+      to_state: status,
+      reason: input.summary,
+      ...(source(runs[runs.length - 1]) ? { source: source(runs[runs.length - 1]) } : {}),
+    })
+    return { id, time }
+  }
+
+  function snapshot(time: string) {
+    const item = row(run)
+    return structuredClone({
+      version: "workflow-progress.v2",
+      workflow: {
+        status: state,
+        name,
+        label: "Plan workflow",
+        summary: note,
+        started_at: start,
+        ...(state === "done" || state === "failed" ? { ended_at: time } : {}),
+      },
+      phase: {
+        status: phasestatus(item?.status, node),
+        key: node,
+        label: flow.find((item) => item.id === node)?.label ?? "Workflow",
+        summary: note,
+      },
+      machine: {
+        id: name,
+        key: name,
+        label: "Plan workflow",
+        root_step_id: "init",
+        ...(node ? { active_step_id: node } : {}),
+        ...(run ? { active_run_id: run } : {}),
+        started_at: start,
+        updated_at: time,
+      },
+      step_definitions: flow,
+      step_runs: runs,
+      transitions: trans,
+      participants: [],
+    } as const)
+  }
+
+  function move(next: Node, input: { summary: string; round?: number }) {
+    note = input.summary
+    const time = stamp()
+    closekids(time)
+    close(run, next === "failed" ? "failed" : "completed", time)
+    const actor =
+      next === "pm"
+        ? { name: "PM", role: "planner", status: "running" }
+        : next === "judge"
+          ? { name: "Judge", role: "judge", status: "running" }
+          : next === "notify"
+            ? { name: "Notifier", role: "notifier", status: "running" }
+            : undefined
+    const item = enter(next, {
+      summary: input.summary,
+      round: input.round,
+      actor,
+      status: next === "done" ? "completed" : next === "failed" ? "failed" : "active",
+    })
+    run = item.id
+    sync(item.time, next, row(item.id)?.status)
+    return snapshot(item.time)
+  }
+
+  function wait(next: "notify" | "decide", input: { summary: string; round?: number }) {
+    note = input.summary
+    const time = stamp()
+    closekids(time)
+    close(run, "completed", time)
+    const item = enter(next, {
+      summary: input.summary,
+      round: input.round,
+      status: "waiting",
+    })
+    run = item.id
+    sync(item.time, next, row(item.id)?.status)
+    return snapshot(item.time)
+  }
+
+  function review(input: { summary: string; round: number; roles: string[] }) {
+    note = input.summary
+    const time = stamp()
+    closekids(time)
+    close(run, "completed", time)
+    const group = enter("review", { summary: input.summary, round: input.round })
+    const map = {
+      Architect: "review_architect",
+      FE: "review_fe",
+      QA: "review_qa",
+      DBA: "review_dba",
+      Muse: "review_muse",
+    } as const
+    kids = input.roles.flatMap((role) => {
+      const step = map[role as keyof typeof map]
+      if (!step) return []
+      return [
+        enter(step, {
+          summary: `${role} review in progress`,
+          round: input.round,
+          parent: group.id,
+          actor: { name: role, role: "reviewer", status: "running" },
+        }).id,
+      ]
+    })
+    run = group.id
+    sync(group.time, "review", row(group.id)?.status)
+    return snapshot(group.time)
+  }
+
+  function reviewdone(input: { summary: string; round: number; roles: string[] }) {
+    note = input.summary
+    const time = stamp()
+    closekids(time, `Round ${input.round} feedback collected`)
+    close(run, "completed", time, input.summary)
+    sync(time, undefined, row(run)?.status)
+    return snapshot(time)
+  }
+
+  function stepdone(input: { summary: string }) {
+    note = input.summary
+    const time = stamp()
+    close(run, "completed", time, input.summary)
+    sync(time, undefined, row(run)?.status)
+    return snapshot(time)
+  }
+
+  return { move, wait, review, reviewdone, stepdone }
+}
 
 function clamp(input: string) {
   const val = Number.parseInt(input, 10)
@@ -369,6 +773,10 @@ function slug(input: string) {
 
 function time() {
   return new Date().toISOString().replace(/[:.]/g, "-")
+}
+
+function stamp() {
+  return new Date().toISOString()
 }
 
 function uniq(items: z.infer<typeof issue>[]) {

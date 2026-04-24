@@ -147,14 +147,26 @@ Every workflow gets a context object and parsed input.
 
 Use this to expose progress while the workflow is running.
 
+Prefer `ctx.status({ progress })` and store workflow progress under `workflow_progress` using the public `workflow-progress.v2` shape.
+
 ```ts
 await ctx.status({
   title: "Comparing options",
-  metadata: { step: "analysis" },
+  progress: {
+    version: "workflow-progress.v2",
+    workflow: { status: "running", label: "Clarify workflow" },
+    machine: {},
+    step_definitions: [],
+    step_runs: [],
+    transitions: [],
+    participants: [],
+  },
 })
 ```
 
-Use it early and before expensive work.
+Use it early and before expensive work. Keep the payload small and deterministic.
+
+Built-in examples: `implement` already tracks its main flow with full v2 state-machine progress, and `plan` now emits v2 progress for init, PM, review, judge, notify, decide, done, and failed stages.
 
 ### `ctx.ask(...)`
 
@@ -310,7 +322,18 @@ Important:
 export default opencode.workflow({
   description: "Compare requirement options before asking the user",
   async run(ctx, input) {
-    await ctx.status({ title: "Running internal review" })
+    await ctx.status({
+      title: "Running internal review",
+      progress: {
+        version: "workflow-progress.v2",
+        workflow: { status: "running", label: "Clarify workflow" },
+        machine: {},
+        step_definitions: [],
+        step_runs: [],
+        transitions: [],
+        participants: [],
+      },
+    })
 
     const pm = await ctx.task({
       description: "PM review",
@@ -440,7 +463,7 @@ If nested workflow calls fail:
 If a workflow runs but returns bad output:
 
 - Return a string or `{ title?, output?, metadata? }`
-- Use `ctx.status()` to narrow down where it fails
+- Use `ctx.status({ progress })` to narrow down where it fails
 - Keep `metadata` small and serializable
 
 If custom parsing behaves unexpectedly:
@@ -463,6 +486,7 @@ When writing a workflow for the user:
 7. Keep top-level code safe so load failures stay isolated
 8. Avoid workflow cycles and unnecessary nesting
 9. Return short, readable output that works well inside a session transcript
+10. Prefer `workflow-progress.v2` progress snapshots when the workflow has meaningful phases or waits
 
 ---
 
