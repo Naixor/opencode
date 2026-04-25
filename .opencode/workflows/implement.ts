@@ -467,7 +467,7 @@ async function runstory(
         ...(impl ? { session_id: impl } : {}),
       }),
     )
-    impl = i > 1 && (await rotates(job.value.session_id)) ? undefined : job.value.session_id
+    impl = i > 1 && (await rotates(ctx, job.value.session_id)) ? undefined : job.value.session_id
     handoff = job.value.text.trim()
     out.sessions = {
       impl,
@@ -475,7 +475,7 @@ async function runstory(
     }
     await save(ctx, join(dir, `${item.id}-work-${i}.md`), job.value.text)
 
-    const files = uniq(await changed(job.value.session_id))
+    const files = uniq(await changed(ctx, job.value.session_id))
     const names = reviewers(files)
     await ctx.status({
       title: `${item.id} review ${i}`,
@@ -1003,17 +1003,14 @@ async function verifytask(ctx: Pick<Ctx, "task">, input: Job, label: string) {
   throw new Error(`${label} did not return valid verification output after 3 attempts`)
 }
 
-async function changed(id: string) {
-  const mod = await import("../../packages/opencode/src/session/index.ts")
-  const diffs = mod.Session?.diff ? await mod.Session.diff(id).catch(() => []) : []
+async function changed(ctx: Pick<Ctx, "session">, id: string) {
+  const diffs = await ctx.session.diff(id).catch(() => [])
   return diffs.map((item: { file: string }) => item.file)
 }
 
-async function rotates(id?: string) {
+async function rotates(ctx: Pick<Ctx, "session">, id?: string) {
   if (!id) return false
-  const mod = await import("../../packages/opencode/src/session/index.ts")
-  if (!mod.Session?.messages) return false
-  const msg = await mod.Session.messages({ sessionID: id })
+  const msg = await ctx.session.messages(id)
   let count = 0
   for (const item of msg) {
     if (item.parts.some((part: { type: string }) => part.type === "compaction")) count += 1

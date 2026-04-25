@@ -767,6 +767,32 @@ export type WorkflowTaskResult = {
   text: string
 }
 
+export type WorkflowSessionDiff = {
+  file: string
+  before: string
+  after: string
+  additions: number
+  deletions: number
+  status?: "added" | "deleted" | "modified"
+}
+
+export type WorkflowSessionMessage = {
+  info: {
+    id: string
+    sessionID: string
+    role: "user" | "assistant"
+  }
+  parts: Array<{
+    type: string
+  }>
+}
+
+export type WorkflowSession = {
+  [key: string]: unknown
+  diff(input: string | { sessionID: string }): Promise<WorkflowSessionDiff[]>
+  messages(input: string | { sessionID: string; limit?: number; before?: string }): Promise<WorkflowSessionMessage[]>
+}
+
 export type WorkflowInvokeInput = {
   name: string
   raw?: string
@@ -813,6 +839,7 @@ export type WorkflowContext<Input = WorkflowArgs> = {
     }>
   }>
   task(input: WorkflowTaskInput): Promise<WorkflowTaskResult>
+  session: WorkflowSession
   workflow(input: WorkflowInvokeInput): Promise<WorkflowInvokeResult>
 }
 
@@ -1970,6 +1997,9 @@ export type Args = WorkflowArgs
 export type Result = WorkflowResult
 export type TaskInput = WorkflowTaskInput
 export type TaskResult = WorkflowTaskResult
+export type Session = WorkflowSession
+export type SessionDiff = WorkflowSessionDiff
+export type SessionMessage = WorkflowSessionMessage
 export type WorkflowInput = WorkflowInvokeInput
 
 export const runtime = {

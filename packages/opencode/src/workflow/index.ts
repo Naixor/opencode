@@ -179,7 +179,7 @@ const docs = [
   "",
 ].join("\n")
 const decl = [
-  `import { Args, File, WorkflowProgressKey, define, result, type TaskInput, type WorkflowContext, type WorkflowDefinition, type WorkflowProgress, type WorkflowStatusUpdate, type WorkflowStatusUpdateInput } from \"${api}\"`,
+  `import { Args, File, WorkflowProgressKey, define, result, type Session, type SessionDiff, type SessionMessage, type TaskInput, type WorkflowContext, type WorkflowDefinition, type WorkflowProgress, type WorkflowStatusUpdate, type WorkflowStatusUpdateInput } from \"${api}\"`,
   "",
   "declare global {",
   "  const Bun: {",
@@ -199,7 +199,7 @@ const decl = [
   "}",
   "",
   "export { Args, File, WorkflowProgressKey, define, result }",
-  "export type { TaskInput, WorkflowContext, WorkflowDefinition, WorkflowProgress, WorkflowStatusUpdate, WorkflowStatusUpdateInput }",
+  "export type { Session, SessionDiff, SessionMessage, TaskInput, WorkflowContext, WorkflowDefinition, WorkflowProgress, WorkflowStatusUpdate, WorkflowStatusUpdateInput }",
   "",
 ].join("\n")
 const example = [
@@ -677,6 +677,7 @@ function context(input: {
     task(val: TaskInput) {
       return task(val, input)
     },
+    session: Session,
     workflow(val: WorkflowInput) {
       const raw = val.raw?.trim() ?? (val.argv ?? []).join(" ")
       const argv =

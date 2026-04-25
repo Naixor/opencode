@@ -42,6 +42,14 @@ describe("feature workflow", () => {
       async task() {
         throw new Error("task should not be called in this test")
       },
+      session: {
+        async diff() {
+          return []
+        },
+        async messages() {
+          return []
+        },
+      },
       async workflow(input) {
         calls.push(input.name)
         if (input.name === "plan") {
@@ -153,6 +161,14 @@ describe("feature workflow", () => {
       },
       async task() {
         throw new Error("task should not be called in this test")
+      },
+      session: {
+        async diff() {
+          return []
+        },
+        async messages() {
+          return []
+        },
       },
       async workflow(input) {
         calls.push(input.name)

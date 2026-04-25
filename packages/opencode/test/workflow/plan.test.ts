@@ -62,6 +62,14 @@ describe("plan workflow", () => {
 
         throw new Error(`unexpected task: ${input.description}`)
       },
+      session: {
+        async diff() {
+          return []
+        },
+        async messages() {
+          return []
+        },
+      },
       async workflow() {
         throw new Error("nested workflow should not be called in this test")
       },

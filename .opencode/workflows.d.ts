@@ -3,6 +3,9 @@ import {
   File,
   define,
   result,
+  type Session,
+  type SessionDiff,
+  type SessionMessage,
   type TaskInput,
   type WorkflowContext,
   type WorkflowDefinition,
@@ -26,4 +29,4 @@ declare global {
 }
 
 export { Args, File, define, result }
-export type { TaskInput, WorkflowContext, WorkflowDefinition }
+export type { Session, SessionDiff, SessionMessage, TaskInput, WorkflowContext, WorkflowDefinition }
