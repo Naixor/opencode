@@ -52,6 +52,8 @@ export namespace SecurityAccess {
    * Returns rules that apply directly or are inherited from parent directories.
    */
   export function getInheritanceChain(filePath: string): InheritedRule[] {
+    if (!SecurityConfig.isEnabled()) return []
+
     const config = SecurityConfig.resolveForPath(filePath)
 
     if (!config.rules || config.rules.length === 0) {
@@ -135,6 +137,8 @@ export namespace SecurityAccess {
    * - Less restrictive child rules do NOT override parent restrictions
    */
   export function checkAccess(filePath: string, operation: SecuritySchema.Operation, role: string): AccessResult {
+    if (!SecurityConfig.isEnabled()) return { allowed: true }
+
     const config = SecurityConfig.resolveForPath(filePath)
 
     // Resolve symbolic links before checking access
@@ -269,6 +273,8 @@ export namespace SecurityAccess {
    * Check a file path against each allowlist layer and return per-layer match details.
    */
   export function checkAllowlistLayers(filePath: string): AllowlistMatchResult[] {
+    if (!SecurityConfig.isEnabled()) return []
+
     const config = SecurityConfig.resolveForPath(filePath)
     if (config.resolvedAllowlist.length === 0) return []
 

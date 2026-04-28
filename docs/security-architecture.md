@@ -30,7 +30,17 @@ User Input → Agent Selection → SessionPrompt.build() → LLM.stream()
 
 ### 2.1 配置系统（`config.ts`）
 
-安全策略通过 `.opencode-security.json` 文件定义，支持多级作用域。
+安全策略通过 `.opencode-security.json` 文件定义，支持多级作用域。可在 `lark-opencode.json` 中关闭应用层安全：
+
+```json
+{
+  "security": {
+    "enabled": false
+  }
+}
+```
+
+关闭后会忽略 `.opencode-security.json`，文件工具、BashScanner、LLM 扫描等应用层访问控制不再生效；OS 级 sandbox 仍由 `sandbox.enabled` 独立控制。
 
 #### 配置文件示例
 

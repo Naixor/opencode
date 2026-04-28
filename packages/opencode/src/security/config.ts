@@ -3,6 +3,7 @@ import { Log } from "../util/log"
 import { Bus } from "../bus"
 import { FileWatcher } from "../file/watcher"
 import { Global } from "../global"
+import { Config } from "../config/config"
 import path from "path"
 import fs from "fs"
 import crypto from "crypto"
@@ -33,6 +34,7 @@ export namespace SecurityConfig {
   let scopedConfigs: ScopedConfig[] = []
   let projectRootDir: string = ""
   let configLoaded = false
+  let enabled = true
 
   // --- Reload callback ---
 
@@ -60,6 +62,15 @@ export namespace SecurityConfig {
   // --- In-memory scan cache ---
 
   let scanCache: { root: string; configs: ScopedConfig[] } | null = null
+
+  async function configured() {
+    return Config.get()
+      .then((cfg) => cfg.security?.enabled !== false)
+      .catch((err) => {
+        log.debug("security config switch unavailable, defaulting enabled", { error: (err as Error).message })
+        return true
+      })
+  }
 
   // --- In-memory resolveForPath cache ---
 
@@ -95,6 +106,17 @@ export namespace SecurityConfig {
     opts?: { forceWalk?: boolean },
   ): Promise<SecuritySchema.ResolvedSecurityConfig> {
     projectRootDir = path.resolve(projectRoot)
+    enabled = await configured()
+
+    if (!enabled) {
+      scopedConfigs = []
+      scanCache = null
+      resolveCache.clear()
+      configLoaded = true
+      log.info("security config disabled by config")
+      return emptyConfig
+    }
+
     const gitRoot = findGitRoot(projectRootDir)
     const scanRoot = gitRoot ?? projectRootDir
 
@@ -662,6 +684,7 @@ export namespace SecurityConfig {
    * For per-path resolution, use resolveForPath() instead.
    */
   export function getSecurityConfig(): SecuritySchema.ResolvedSecurityConfig {
+    if (!enabled) return emptyConfig
     if (!configLoaded) {
       log.warn("getSecurityConfig called before config was loaded, returning empty config")
       return emptyConfig
@@ -673,13 +696,19 @@ export namespace SecurityConfig {
    * Get all loaded scoped configs. Used by doctor and advanced callers.
    */
   export function getScopedConfigs(): readonly ScopedConfig[] {
+    if (!enabled) return []
     return scopedConfigs
+  }
+
+  export function isEnabled(): boolean {
+    return enabled
   }
 
   export function resetConfig(): void {
     scopedConfigs = []
     projectRootDir = ""
     configLoaded = false
+    enabled = true
     scanCache = null
     resolveCache.clear()
     if (reloadTimer) {

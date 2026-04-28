@@ -34,7 +34,7 @@ export async function InstanceBootstrap() {
   await LlmLogScheduler.init()
   SecurityAccess.setProjectRoot(Instance.directory)
   await SecurityConfig.loadSecurityConfig(Instance.directory)
-  SecurityConfig.watchForChanges()
+  if (SecurityConfig.isEnabled()) SecurityConfig.watchForChanges()
 
   // Initialize sandbox after security config is loaded (needs allowlist/deny rules)
   Bus.publish(TuiEvent.ToastShow, {

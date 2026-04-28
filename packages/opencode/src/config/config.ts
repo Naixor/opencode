@@ -1358,6 +1358,16 @@ export namespace Config {
         .array(z.string())
         .optional()
         .describe("List of built-in MCP server names to disable even when their API key is available"),
+      security: z
+        .object({
+          enabled: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe("Enable .opencode-security.json access controls (default: true)"),
+        })
+        .optional()
+        .describe("Application-level security configuration"),
       swarm: z
         .object({
           max_workers: z

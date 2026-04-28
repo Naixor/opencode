@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from "bun:test"
+import { describe, test, expect, afterEach, spyOn, mock } from "bun:test"
 import fs from "fs"
 import os from "os"
 import path from "path"
@@ -6,8 +6,10 @@ import { SecurityConfig } from "@/security/config"
 import { SecurityAccess } from "@/security/access"
 import { SecuritySchema } from "@/security/schema"
 import { loadBaseConfig, setupSecurityConfig, teardownSecurityConfig } from "../helpers"
+import { Config } from "@/config/config"
 
 afterEach(() => {
+  mock.restore()
   teardownSecurityConfig()
 })
 
@@ -124,7 +126,10 @@ describe("CASE-CFG-004: Child config cannot REMOVE restrictions from parent", ()
     }
 
     // Merge: parent first (least specific), then child (most specific)
-    const merged = SecurityConfig.mergeSecurityConfigs([{ config: parentConfig, path: "test" }, { config: childConfig, path: "test" }])
+    const merged = SecurityConfig.mergeSecurityConfigs([
+      { config: parentConfig, path: "test" },
+      { config: childConfig, path: "test" },
+    ])
 
     // Both rules should be present (union)
     expect(merged.rules).toHaveLength(2)
@@ -161,7 +166,10 @@ describe("CASE-CFG-004: Child config cannot REMOVE restrictions from parent", ()
       rules: [],
     }
 
-    const merged = SecurityConfig.mergeSecurityConfigs([{ config: parentConfig, path: "test" }, { config: childConfig, path: "test" }])
+    const merged = SecurityConfig.mergeSecurityConfigs([
+      { config: parentConfig, path: "test" },
+      { config: childConfig, path: "test" },
+    ])
     const dir = await setupSecurityConfig(merged)
 
     // Parent restriction on secrets/** should still block viewer
@@ -172,7 +180,30 @@ describe("CASE-CFG-004: Child config cannot REMOVE restrictions from parent", ()
   })
 })
 
-describe("CASE-CFG-005: Conflicting role definitions across nested configs throws error", () => {
+describe("CASE-CFG-005: Config switch disables security", () => {
+  test("security.enabled false ignores .opencode-security.json", async () => {
+    spyOn(Config, "get").mockResolvedValue({ security: { enabled: false } } as Config.Info)
+
+    const config: SecuritySchema.SecurityConfig = {
+      version: "1.0",
+      rules: [
+        {
+          pattern: "secrets/**",
+          type: "directory",
+          deniedOperations: ["read", "write", "llm"],
+          allowedRoles: ["admin"],
+        },
+      ],
+    }
+    await setupSecurityConfig(config)
+
+    expect(SecurityConfig.isEnabled()).toBe(false)
+    expect(SecurityConfig.getScopedConfigs()).toHaveLength(0)
+    expect(SecurityAccess.checkAccess("secrets/key.pem", "read", "viewer").allowed).toBe(true)
+  })
+})
+
+describe("CASE-CFG-006: Conflicting role definitions across nested configs throws error", () => {
   test("same role name with different levels throws error", () => {
     const configA: SecuritySchema.SecurityConfig = {
       version: "1.0",
@@ -184,9 +215,12 @@ describe("CASE-CFG-005: Conflicting role definitions across nested configs throw
       roles: [{ name: "admin", level: 50 }],
     }
 
-    expect(() => SecurityConfig.mergeSecurityConfigs([{ config: configA, path: "test" }, { config: configB, path: "test" }])).toThrow(
-      /Role conflict.*admin.*100.*50/,
-    )
+    expect(() =>
+      SecurityConfig.mergeSecurityConfigs([
+        { config: configA, path: "test" },
+        { config: configB, path: "test" },
+      ]),
+    ).toThrow(/Role conflict.*admin.*100.*50/)
   })
 
   test("same role name with same level does not throw", () => {
@@ -200,14 +234,17 @@ describe("CASE-CFG-005: Conflicting role definitions across nested configs throw
       roles: [{ name: "admin", level: 100 }],
     }
 
-    const merged = SecurityConfig.mergeSecurityConfigs([{ config: configA, path: "test" }, { config: configB, path: "test" }])
+    const merged = SecurityConfig.mergeSecurityConfigs([
+      { config: configA, path: "test" },
+      { config: configB, path: "test" },
+    ])
     expect(merged.roles).toHaveLength(1)
     expect(merged.roles![0].name).toBe("admin")
     expect(merged.roles![0].level).toBe(100)
   })
 })
 
-describe("CASE-CFG-006: Config with empty rules means no protection", () => {
+describe("CASE-CFG-007: Config with empty rules means no protection", () => {
   test("empty rules array results in all access allowed", async () => {
     const config: SecuritySchema.SecurityConfig = {
       version: "1.0",
@@ -247,7 +284,7 @@ describe("CASE-CFG-006: Config with empty rules means no protection", () => {
   })
 })
 
-describe("CASE-CFG-007: Config with 1000+ rules does not crash or timeout", () => {
+describe("CASE-CFG-008: Config with 1000+ rules does not crash or timeout", () => {
   test("loading and checking access with 1000 rules completes in < 5 seconds", async () => {
     const rules: SecuritySchema.Rule[] = Array.from({ length: 1000 }, (_, i) => ({
       pattern: `generated/path_${i}/**`,

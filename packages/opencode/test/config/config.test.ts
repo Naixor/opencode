@@ -237,6 +237,32 @@ test("merges multiple config files with correct precedence", async () => {
   })
 })
 
+test("lark-opencode security config overrides opencode", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        $schema: "https://opencode.ai/config.json",
+        security: { enabled: true },
+      })
+      await writeConfig(
+        dir,
+        {
+          $schema: "https://opencode.ai/config.json",
+          security: { enabled: false },
+        },
+        "lark-opencode.json",
+      )
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await Config.get()
+      expect(config.security?.enabled).toBe(false)
+    },
+  })
+})
+
 test("handles environment variable substitution", async () => {
   const originalEnv = process.env["TEST_VAR"]
   process.env["TEST_VAR"] = "test-user"
