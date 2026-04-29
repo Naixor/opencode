@@ -9,6 +9,7 @@ import PROMPT_COMPACT from "./template/compact.txt"
 import PROMPT_DEBUG from "./template/debug.txt"
 import PROMPT_TEST from "./template/test.txt"
 import PROMPT_EXPLAIN from "./template/explain.txt"
+import PROMPT_WORKFLOW_DEBUG from "./template/workflow-debug.txt"
 import PROMPT_RALPH_LOOP from "./template/ralph-loop.txt"
 import PROMPT_ULTRAWORK from "./template/ultrawork.txt"
 import PROMPT_REMEMBER from "./template/remember.txt"
@@ -72,6 +73,8 @@ export namespace Command {
     EXPLAIN: "explain",
     WORKFLOW: "workflow",
     WORKFLOW_INIT: "workflow:init",
+    WORKFLOW_DEBUG: "workflow:debug",
+    WORKFLOW_RELOAD: "workflow:reload",
     RALPH_LOOP: "ralph-loop",
     ULTRAWORK: "ultrawork",
     MEMORY_REMEMBER: "memory:remember",
@@ -155,6 +158,25 @@ export namespace Command {
         source: "command",
         get template() {
           return "Initialize workflow scaffolding for this project"
+        },
+        hints: [],
+      },
+      [Default.WORKFLOW_DEBUG]: {
+        name: Default.WORKFLOW_DEBUG,
+        description: "debug local workflow files with workflow-author",
+        agent: "workflow-author",
+        source: "command",
+        get template() {
+          return PROMPT_WORKFLOW_DEBUG
+        },
+        hints: hints(PROMPT_WORKFLOW_DEBUG),
+      },
+      [Default.WORKFLOW_RELOAD]: {
+        name: Default.WORKFLOW_RELOAD,
+        description: "reload local workflow and agent definitions",
+        source: "command",
+        get template() {
+          return "Reload local workflow definitions for this project"
         },
         hints: [],
       },

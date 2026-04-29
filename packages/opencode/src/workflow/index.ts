@@ -130,6 +130,7 @@ const docs = [
   "## What it adds",
   "",
   "- `.lark-opencode/workflows.d.ts` for local workflow typing",
+  "- `.lark-opencode/agent/workflow-author.md` for workflow authoring and debugging",
   "- `docs/workflow-authoring.md` with the local authoring guide",
   "- `.lark-opencode/workflows/example.ts` as a minimal starting point",
   `- \`${api}\` in \`package.json\``,
@@ -171,11 +172,62 @@ const docs = [
   "- `ctx.task({ ... })` for focused subagent work",
   "- `ctx.workflow({ ... })` for nested workflow reuse",
   "",
+  "## Debugging",
+  "",
+  "- Use `/workflow:debug <workflow name or issue>` to ask the local `workflow-author` agent to inspect, fix, and verify workflows.",
+  "- Use `/workflow:reload` after adding or editing workflow or agent files so the current session sees the latest definitions.",
+  "",
   "## Next steps",
   "",
   "1. Run your package manager install command so the new dependency is available.",
   "2. Edit `.lark-opencode/workflows/example.ts` or add more workflows under `.lark-opencode/workflows/`.",
   "3. Run `/workflow example hello` to verify the setup.",
+  "",
+].join("\n")
+const author = [
+  "---",
+  "description: Design, implement, and debug executable OpenCode workflows.",
+  "mode: subagent",
+  'color: "#2F80ED"',
+  "tools:",
+  '  "*": false',
+  "  read: true",
+  "  glob: true",
+  "  grep: true",
+  "  write: true",
+  "  edit: true",
+  "  apply_patch: true",
+  "  bash: true",
+  "---",
+  "",
+  "You are workflow-author, a specialist for executable OpenCode workflows.",
+  "",
+  "Your job is to design, write, refine, and debug workflows that live in `.lark-opencode/workflows/*.ts` or `.opencode/workflows/*.ts` and run through `/workflow <name>`.",
+  "",
+  "## Core rules",
+  "",
+  "- Prefer workflow code over markdown commands when logic, branching, or orchestration is required.",
+  "- Use `export default opencode.workflow({ ... })` for workflow files.",
+  "- Default input is `{ raw, argv, files }` unless a custom Zod schema is clearly useful.",
+  "- Return either a string or `{ title?, output?, metadata? }`.",
+  "- Use `ctx.status({ title?, metadata?, progress? })` for visible progress.",
+  "- Use `ctx.ask({ questions })` for explicit user choices.",
+  "- Use `ctx.task({ description, prompt, subagent, category?, model?, session_id?, load_skills? })` for focused delegation.",
+  "- Use `ctx.workflow({ name, raw?, argv?, files? })` for nested workflow reuse.",
+  "- Keep top-level code minimal so workflow load failures stay isolated.",
+  "",
+  "## Workflow names",
+  "",
+  "The workflow name is the file path relative to the workflow directory without the extension. For example, `.lark-opencode/workflows/release/notes.ts` runs as `/workflow release/notes`.",
+  "",
+  "## Debugging checklist",
+  "",
+  "- If a workflow is not found, check the file path and invoked name.",
+  "- If a workflow fails to load, inspect imports, syntax errors, and top-level throws.",
+  "- Run `/workflow:reload` after editing workflow or agent files.",
+  "- If nested workflow calls fail, check names, cycles, and nesting depth.",
+  "- If input parsing is awkward, start from `{ raw, argv, files }` and derive fields inside `run()`.",
+  "- When useful, read `docs/workflow-authoring.md` for the local authoring guide.",
   "",
 ].join("\n")
 const decl = [
@@ -286,6 +338,21 @@ export namespace Workflow {
     return state().then((x) => x.err[name])
   }
 
+  export async function reload(input: CommandInput) {
+    const run = await begin(input, {
+      tool: "workflow:reload",
+      input: {},
+      parts: input.parts ?? [],
+    })
+    const res = await refresh().catch((err: unknown) => ({
+      title: "Workflow reload failed",
+      output: `Workflow reload failed: ${err instanceof Error ? err.message : String(err)}`,
+      metadata: { error: err instanceof Error ? err.message : String(err) },
+    }))
+    await finish(run, res)
+    return MessageV2.get({ sessionID: input.sessionID, messageID: run.assistant.id })
+  }
+
   export async function init(input: CommandInput) {
     const run = await begin(input, {
       tool: "workflow:init",
@@ -358,6 +425,15 @@ export namespace Workflow {
   }
 }
 
+async function refresh(): Promise<WorkflowResultShape> {
+  await Instance.dispose()
+  return {
+    title: "Workflow reload",
+    output:
+      "Workflow definitions reloaded. You can now run `/workflow <name>` or ask `@workflow-author` to continue debugging.",
+  }
+}
+
 async function scaffold() {
   const made: string[] = []
   const kept: string[] = []
@@ -365,6 +441,7 @@ async function scaffold() {
   const dir = ConfigPaths.resolveDirectory(Instance.worktree)
   const files = [
     [path.relative(Instance.worktree, path.join(dir, "workflows.d.ts")), decl],
+    [path.relative(Instance.worktree, path.join(dir, "agent", "workflow-author.md")), author],
     ["docs/workflow-authoring.md", docs],
     [path.relative(Instance.worktree, path.join(dir, "workflows", "example.ts")), example],
   ] as const
@@ -383,8 +460,9 @@ async function scaffold() {
     "",
     "Next:",
     "1. Run your package manager install command.",
-    `2. Edit \`${path.relative(Instance.worktree, path.join(dir, "workflows", "example.ts"))}\`.`,
-    "3. Run `/workflow example hello`.",
+    "2. Ask `@workflow-author` to create or debug workflows.",
+    `3. Edit \`${path.relative(Instance.worktree, path.join(dir, "workflows", "example.ts"))}\`.`,
+    "4. Run `/workflow example hello`.",
   ]
     .filter(Boolean)
     .join("\n")

@@ -1,0 +1,17 @@
+Debug the local OpenCode workflow described by the user.
+
+User request:
+$ARGUMENTS
+
+Use the local workflow-authoring context. Focus on workflows under `.lark-opencode/workflows` and `.opencode/workflows`, and commands run through `/workflow <name>`.
+
+Recommended debugging flow:
+
+1. Identify the workflow name or file from the request.
+2. Inspect the workflow file, `docs/workflow-authoring.md`, and related helpers if needed.
+3. Check whether `/workflow:reload` is needed after file edits or new workflow files.
+4. Diagnose load errors, bad imports, syntax errors, input parsing issues, nested workflow cycles, and `ctx.task`/`ctx.workflow` misuse.
+5. Make the smallest safe fix when the issue is clear.
+6. Verify with `/workflow:reload` and the relevant `/workflow <name> ...` invocation when practical.
+
+Return a concise report with the cause, files changed, and exact verification command.

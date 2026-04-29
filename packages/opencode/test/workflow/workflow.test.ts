@@ -36,6 +36,23 @@ describe("workflow", () => {
     })
   })
 
+  test("registers workflow debug and reload commands", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const debug = await Command.get(Command.Default.WORKFLOW_DEBUG)
+        expect(debug?.name).toBe("workflow:debug")
+        expect(debug?.agent).toBe("workflow-author")
+        expect(await debug?.template).toContain("Debug the local OpenCode workflow")
+
+        const reload = await Command.get(Command.Default.WORKFLOW_RELOAD)
+        expect(reload?.name).toBe("workflow:reload")
+        expect(reload?.description).toContain("reload")
+      },
+    })
+  })
+
   test("scaffolds workflow starter files with /workflow:init", async () => {
     await using tmp = await tmpdir({
       git: true,
@@ -66,8 +83,14 @@ describe("workflow", () => {
         expect(text.text).toContain("Workflow init complete")
 
         expect(await Bun.file(path.join(tmp.path, ".lark-opencode", "workflows.d.ts")).exists()).toBe(true)
+        expect(await Bun.file(path.join(tmp.path, ".lark-opencode", "agent", "workflow-author.md")).exists()).toBe(true)
         expect(await Bun.file(path.join(tmp.path, ".lark-opencode", "workflows", "example.ts")).exists()).toBe(true)
         expect(await Bun.file(path.join(tmp.path, "docs", "workflow-authoring.md")).exists()).toBe(true)
+        expect(text.text).toContain("@workflow-author")
+
+        const agent = await Bun.file(path.join(tmp.path, ".lark-opencode", "agent", "workflow-author.md")).text()
+        expect(agent).toContain("mode: subagent")
+        expect(agent).toContain("ctx.task")
 
         const pkg = JSON.parse(await Bun.file(path.join(tmp.path, "package.json")).text()) as {
           dependencies?: Record<string, string>
@@ -87,6 +110,62 @@ describe("workflow", () => {
         expect(next.text).toContain("Kept:")
 
         await Session.remove(session.id)
+      },
+    })
+  })
+
+  test("reloads local workflow definitions with /workflow:reload", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        expect(await Workflow.list()).toHaveLength(0)
+
+        await Filesystem.write(
+          path.join(tmp.path, ".opencode", "workflows", "late.ts"),
+          [
+            "export default opencode.workflow({",
+            '  description: "late workflow",',
+            "  run() {",
+            '    return "late loaded"',
+            "  },",
+            "})",
+          ].join("\n"),
+        )
+
+        expect((await Workflow.list()).some((item) => item.name === "late")).toBe(false)
+
+        const session = await Session.create({})
+        const msg = await SessionPrompt.command({
+          sessionID: session.id,
+          command: "workflow:reload",
+          arguments: "",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+
+        const text = msg.parts.findLast((part) => part.type === "text")
+        expect(text?.type).toBe("text")
+        if (text?.type !== "text") throw new Error("expected text output")
+        expect(text.text).toContain("Workflow definitions reloaded")
+        await Session.remove(session.id)
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        expect((await Workflow.list()).some((item) => item.name === "late")).toBe(true)
       },
     })
   })
