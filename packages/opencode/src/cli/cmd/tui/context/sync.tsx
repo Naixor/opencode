@@ -419,7 +419,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             }),
             sdk.client.provider.auth().then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
             sdk.client.vcs.get().then((x) => setStore("vcs", reconcile(x.data))),
-            sdk.client.path.get().then((x) => setStore("path", reconcile(x.data!))),
+            sdk.client.path.get().then((x) => x.data && setStore("path", reconcile(x.data))),
             sdk
               .fetch(`${sdk.url}/sandbox`)
               .then((r) => r.json())
