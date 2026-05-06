@@ -90,6 +90,7 @@ const StatusSchema = z
   .strict()
 
 type RuntimeContext<Input = WorkflowArgs> = WorkflowContext<Input> & {
+  signal: AbortSignal
   workflow_stack(): string[]
 }
 
@@ -270,6 +271,8 @@ const example = [
 ].join("\n")
 
 export namespace Workflow {
+  const runs = Instance.state(async () => new Map<string, AbortController>())
+
   const state = Instance.state(async () => {
     const out: Record<string, Loaded> = {}
     const err: Record<string, Failed> = {}
@@ -384,6 +387,9 @@ export namespace Workflow {
       parts: files,
     })
 
+    const abort = new AbortController()
+    const active = await runs()
+    active.set(run.assistant.id, abort)
     const ctx = context({
       name: name ?? "",
       raw: rest,
@@ -394,6 +400,7 @@ export namespace Workflow {
       userID: run.user.info.id,
       model: run.user.info.model,
       stack: [],
+      signal: abort.signal,
       update: async (val: WorkflowStatusUpdateInput) => {
         if (run.part.state.status !== "running") return
         run.part = (await Session.updatePart({
@@ -409,9 +416,10 @@ export namespace Workflow {
       },
     })
 
-    const res = await Promise.resolve(
-      !name ? help() : execute(ctx, { name, raw: rest, argv: argv.slice(1), files }),
-    ).catch((err: unknown) => {
+    const res = await Promise.race([
+      Promise.resolve(!name ? help() : execute(ctx, { name, raw: rest, argv: argv.slice(1), files })),
+      aborted(abort.signal),
+    ]).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
       return {
         title: "Workflow failed",
@@ -420,9 +428,190 @@ export namespace Workflow {
       } satisfies WorkflowResultShape
     })
 
+    active.delete(run.assistant.id)
+    const part = await MessageV2.parts(run.assistant.id)
+      .then((items) => items.find((item) => item.id === run.part.id))
+      .catch(() => undefined)
+    if (part?.type === "tool" && part.state.status !== "running") {
+      return MessageV2.get({ sessionID: input.sessionID, messageID: run.assistant.id })
+    }
     await finish(run, res)
     return MessageV2.get({ sessionID: input.sessionID, messageID: run.assistant.id })
   }
+
+  export async function stop(input: CommandInput) {
+    return control(input, "stopped")
+  }
+
+  export async function suspend(input: CommandInput) {
+    return control(input, "suspended")
+  }
+
+  async function control(input: CommandInput, mode: "stopped" | "suspended") {
+    const run = await begin(input, {
+      tool: input.command,
+      input: {},
+      parts: input.parts ?? [],
+    })
+    const res = await pick(input.sessionID, run.assistant.id, mode).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      return {
+        title: "Workflow control failed",
+        output: `Workflow control failed: ${msg}`,
+        metadata: { error: msg },
+      } satisfies WorkflowResultShape
+    })
+    await finish(run, res)
+    return MessageV2.get({ sessionID: input.sessionID, messageID: run.assistant.id })
+  }
+
+  async function pick(sessionID: string, current: string, mode: "stopped" | "suspended"): Promise<WorkflowResultShape> {
+    const items = await running(sessionID, current)
+    if (items.length === 0) {
+      return {
+        title: "No running workflows",
+        output: "No running workflows were found in this session.",
+      }
+    }
+
+    const labels = new Map(items.map((item) => [item.label, item]))
+    const answer = await Question.ask({
+      sessionID,
+      questions: [
+        {
+          question: `Select a running workflow to ${mode === "stopped" ? "stop" : "suspend"}.`,
+          header: "Workflow",
+          custom: false,
+          options: [
+            ...items.map((item) => ({
+              label: item.label,
+              description: label(item),
+            })),
+            {
+              label: "Cancel",
+              description: "Leave all workflows running.",
+            },
+          ],
+        },
+      ],
+    }).then((out) => out.answers[0]?.[0])
+
+    const item = answer ? labels.get(answer) : undefined
+    if (!item) {
+      return {
+        title: "Workflow control cancelled",
+        output: "No workflow was changed.",
+      }
+    }
+
+    const active = await runs()
+    active.get(item.assistant.id)?.abort(mode)
+    await terminate(item, mode)
+    active.delete(item.assistant.id)
+    return {
+      title: mode === "stopped" ? "Workflow stopped" : "Workflow suspended",
+      output: `Workflow \`${label(item)}\` was ${mode}.`,
+      metadata: { workflow_control: mode, workflow_message_id: item.assistant.id },
+    }
+  }
+
+  async function running(sessionID: string, current: string) {
+    const seen = new Map<string, number>()
+    return (await Session.messages({ sessionID })).flatMap((msg): Active[] => {
+      if (msg.info.role !== "assistant" || msg.info.id === current) return []
+      const part = msg.parts.find(
+        (item): item is MessageV2.ToolPart =>
+          item.type === "tool" && item.tool === "workflow" && item.state.status === "running",
+      )
+      if (!part) return []
+      const name = workflowname(part)
+      const count = (seen.get(name) ?? 0) + 1
+      seen.set(name, count)
+      return [
+        {
+          id: part.id,
+          part,
+          assistant: msg.info,
+          label: count === 1 ? name : `${name} #${count}`,
+        },
+      ]
+    })
+  }
+}
+
+type Active = {
+  id: string
+  part: MessageV2.ToolPart
+  assistant: MessageV2.Assistant
+  label: string
+}
+
+function aborted(signal: AbortSignal) {
+  return new Promise<WorkflowResultShape>((resolve) => {
+    const done = () => {
+      const mode = signal.reason === "suspended" ? "suspended" : "stopped"
+      resolve({
+        title: mode === "suspended" ? "Workflow suspended" : "Workflow stopped",
+        output: `Workflow was ${mode}.`,
+        metadata: { workflow_control: mode },
+      })
+    }
+    if (signal.aborted) return done()
+    signal.addEventListener("abort", done, { once: true })
+  })
+}
+
+function label(item: Active) {
+  const title = item.part.state.status === "running" ? item.part.state.title : undefined
+  const age =
+    item.part.state.status === "running"
+      ? `started ${new Date(item.part.state.time.start).toLocaleString()}`
+      : "running"
+  return [workflowname(item.part), title, age].filter((item): item is string => !!item).join(" - ")
+}
+
+function workflowname(part: MessageV2.ToolPart) {
+  const val = part.state.input.name
+  return typeof val === "string" && val.trim() ? val.trim() : "workflow"
+}
+
+async function terminate(item: Active, mode: "stopped" | "suspended") {
+  const end = Date.now()
+  await Promise.all(
+    (await Question.list())
+      .filter((ask) => ask.tool?.messageID === item.assistant.id)
+      .map((ask) => Question.reject(ask.id)),
+  )
+  const metadata = finalmeta(
+    item.part,
+    mergemeta(item.part.state.status === "running" ? item.part.state.metadata : undefined, { workflow_control: mode }),
+    "error",
+    new Date(end).toISOString(),
+  )
+  await Session.updatePart({
+    ...item.part,
+    state: {
+      status: "error",
+      input: item.part.state.input,
+      error: `Workflow ${mode}`,
+      ...(metadata ? { metadata } : {}),
+      time: {
+        start: item.part.state.status === "running" ? item.part.state.time.start : Date.now(),
+        end,
+      },
+    },
+  })
+  await Session.updatePart({
+    id: Identifier.ascending("part"),
+    messageID: item.assistant.id,
+    sessionID: item.assistant.sessionID,
+    type: "text",
+    text: `Workflow was ${mode}.`,
+    metadata: { workflow_control: mode },
+  })
+  item.assistant.finish = "stop"
+  item.assistant.time.completed = end
+  await Session.updateMessage(item.assistant)
 }
 
 async function refresh(): Promise<WorkflowResultShape> {
@@ -706,6 +895,7 @@ async function execute(
     assistantID: ctx.assistantMessageID,
     model: { providerID: "", modelID: "" },
     stack: [...stack, input.name],
+    signal: ctx.signal,
     update: ctx.status,
   })
   const val = wf.input ? await wf.input.parseAsync(input) : ArgsSchema.parse(input)
@@ -727,6 +917,7 @@ function context(input: {
   assistantID: string
   model: { providerID: string; modelID: string }
   stack: string[]
+  signal: AbortSignal
   update(input: WorkflowStatusUpdate): Promise<void>
 }): RuntimeContext {
   const ctx: RuntimeContext = {
@@ -739,6 +930,7 @@ function context(input: {
     assistantMessageID: input.assistantID,
     directory: Instance.directory,
     worktree: Instance.worktree,
+    signal: input.signal,
     status(val: WorkflowStatusUpdateInput) {
       return input.update(parseStatusUpdate(val))
     },
@@ -750,6 +942,7 @@ function context(input: {
       return Question.ask({
         sessionID: input.sessionID,
         questions: val.questions,
+        tool: { messageID: input.assistantID, callID: input.assistantID },
       })
     },
     task(val: TaskInput) {

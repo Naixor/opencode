@@ -1995,11 +1995,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     if (
       input.command === Command.Default.WORKFLOW ||
       input.command === Command.Default.WORKFLOW_INIT ||
-      input.command === Command.Default.WORKFLOW_RELOAD
+      input.command === Command.Default.WORKFLOW_RELOAD ||
+      input.command === Command.Default.WORKFLOW_STOP ||
+      input.command === Command.Default.WORKFLOW_SUSPEND
     ) {
       const { Workflow } = await import("../workflow")
       if (input.command === Command.Default.WORKFLOW_INIT) return Workflow.init(input)
       if (input.command === Command.Default.WORKFLOW_RELOAD) return Workflow.reload(input)
+      if (input.command === Command.Default.WORKFLOW_STOP) return Workflow.stop(input)
+      if (input.command === Command.Default.WORKFLOW_SUSPEND) return Workflow.suspend(input)
       return Workflow.run(input)
     }
     const command = await Command.get(input.command)

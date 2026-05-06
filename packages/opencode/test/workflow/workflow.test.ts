@@ -4,12 +4,21 @@ import { WorkflowProgressKey, WorkflowProgressWorkflowTargetId } from "@lark-ope
 import { Command } from "../../src/command"
 import { Filesystem } from "../../src/util/filesystem"
 import { Instance } from "../../src/project/instance"
+import { Question } from "../../src/question"
 import { Session } from "../../src/session"
 import { SessionPrompt } from "../../src/session/prompt"
 import { Workflow } from "../../src/workflow"
 import { tmpdir } from "../fixture/fixture"
 
 const future = { version: "workflow-progress.v3", workflow: { status: "running" } } as const
+
+async function wait(fn: () => Promise<boolean>) {
+  for (let i = 0; i < 40; i++) {
+    if (await fn()) return
+    await Bun.sleep(25)
+  }
+  throw new Error("timed out")
+}
 
 describe("workflow", () => {
   test("registers the /workflow command", async () => {
@@ -49,6 +58,22 @@ describe("workflow", () => {
         const reload = await Command.get(Command.Default.WORKFLOW_RELOAD)
         expect(reload?.name).toBe("workflow:reload")
         expect(reload?.description).toContain("reload")
+      },
+    })
+  })
+
+  test("registers workflow stop and suspend commands", async () => {
+    await using tmp = await tmpdir({ git: true, config: {} })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const stop = await Command.get(Command.Default.WORKFLOW_STOP)
+        expect(stop?.name).toBe("workflow:stop")
+        expect(stop?.description).toContain("stop")
+
+        const suspend = await Command.get(Command.Default.WORKFLOW_SUSPEND)
+        expect(suspend?.name).toBe("workflow:suspend")
+        expect(suspend?.description).toContain("suspend")
       },
     })
   })
@@ -216,6 +241,76 @@ describe("workflow", () => {
         expect(text.text).toBe("hello world")
 
         await Session.remove(session.id)
+      },
+    })
+  })
+
+  test("stops a selected running workflow", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+      init: async (dir) => {
+        await Filesystem.write(
+          path.join(dir, ".opencode", "workflows", "wait.ts"),
+          [
+            "export default opencode.workflow({",
+            "  async run(ctx) {",
+            "    await ctx.ask({ questions: [{ question: 'Keep waiting?', header: 'Wait', options: [{ label: 'Yes', description: 'Continue waiting' }], custom: false }] })",
+            "    return 'done'",
+            "  },",
+            "})",
+          ].join("\n"),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const ses = await Session.create({})
+        const flow = SessionPrompt.command({
+          sessionID: ses.id,
+          command: "workflow",
+          arguments: "wait",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+
+        await wait(async () => (await Question.list()).some((item) => item.questions[0]?.header === "Wait"))
+
+        const stop = SessionPrompt.command({
+          sessionID: ses.id,
+          command: "workflow:stop",
+          arguments: "",
+          agent: "build",
+          model: "openai/gpt-5.2",
+        })
+
+        await wait(async () => (await Question.list()).some((item) => item.questions[0]?.header === "Workflow"))
+        const ask = (await Question.list()).find((item) => item.questions[0]?.header === "Workflow")
+        if (!ask) throw new Error("expected workflow selection")
+        await Question.reply({ requestID: ask.id, answers: [["wait"]] })
+
+        const msg = await stop
+        const text = msg.parts.findLast((part) => part.type === "text")
+        expect(text?.type).toBe("text")
+        if (text?.type !== "text") throw new Error("expected text output")
+        expect(text.text).toContain("was stopped")
+
+        await flow
+        const all = await Session.messages({ sessionID: ses.id })
+        const out = all.find((item) =>
+          item.parts.some((part) => part.type === "tool" && part.tool === "workflow" && part.state.status === "error"),
+        )
+        expect(out).toBeTruthy()
+
+        await Session.remove(ses.id)
       },
     })
   })

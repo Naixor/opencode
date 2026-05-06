@@ -75,6 +75,8 @@ export namespace Command {
     WORKFLOW_INIT: "workflow:init",
     WORKFLOW_DEBUG: "workflow:debug",
     WORKFLOW_RELOAD: "workflow:reload",
+    WORKFLOW_STOP: "workflow:stop",
+    WORKFLOW_SUSPEND: "workflow:suspend",
     RALPH_LOOP: "ralph-loop",
     ULTRAWORK: "ultrawork",
     MEMORY_REMEMBER: "memory:remember",
@@ -177,6 +179,24 @@ export namespace Command {
         source: "command",
         get template() {
           return "Reload local workflow definitions for this project"
+        },
+        hints: [],
+      },
+      [Default.WORKFLOW_STOP]: {
+        name: Default.WORKFLOW_STOP,
+        description: "stop a running workflow",
+        source: "command",
+        get template() {
+          return "Stop a running workflow"
+        },
+        hints: [],
+      },
+      [Default.WORKFLOW_SUSPEND]: {
+        name: Default.WORKFLOW_SUSPEND,
+        description: "suspend a running workflow",
+        source: "command",
+        get template() {
+          return "Suspend a running workflow"
         },
         hints: [],
       },
