@@ -379,7 +379,7 @@ export namespace File {
       }
 
       const set = new Set<string>()
-      for await (const file of Ripgrep.files({ cwd: Instance.directory })) {
+      for await (const file of Ripgrep.files({ cwd: Instance.directory, noIgnore: true })) {
         result.files.push(file)
         let current = file
         while (true) {

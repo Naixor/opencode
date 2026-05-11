@@ -207,6 +207,32 @@ describe("file/index Filesystem patterns", () => {
     })
   })
 
+  describe("File.search()", () => {
+    test("includes gitignored files for prompt references", async () => {
+      await using tmp = await tmpdir({
+        init: async (dir) => {
+          await fs.writeFile(path.join(dir, ".gitignore"), "generated\n", "utf-8")
+          await fs.mkdir(path.join(dir, "generated"), { recursive: true })
+          await fs.writeFile(path.join(dir, "generated", "output.txt"), "hello", "utf-8")
+        },
+      })
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const find = async (count = 20): Promise<string[]> => {
+            const files = await File.search({ query: "generated/output", type: "file" })
+            if (files.includes("generated/output.txt") || count === 0) return files
+            await Bun.sleep(25)
+            return find(count - 1)
+          }
+          const files = await find()
+          expect(files).toContain("generated/output.txt")
+        },
+      })
+    })
+  })
+
   describe("File.changed() - Filesystem.readText() for untracked files", () => {
     test("reads untracked files via Filesystem.readText()", async () => {
       await using tmp = await tmpdir({ git: true })

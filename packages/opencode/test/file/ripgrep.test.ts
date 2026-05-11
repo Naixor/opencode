@@ -36,4 +36,18 @@ describe("file.ripgrep", () => {
     expect(hasVisible).toBe(true)
     expect(hasHidden).toBe(false)
   })
+
+  test("noIgnore includes gitignored files", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, ".gitignore"), "generated\n")
+        await fs.mkdir(path.join(dir, "generated"), { recursive: true })
+        await Bun.write(path.join(dir, "generated", "output.txt"), "hello")
+      },
+    })
+
+    const ignored = path.join("generated", "output.txt")
+    const files = await Array.fromAsync(Ripgrep.files({ cwd: tmp.path, noIgnore: true }))
+    expect(files.includes(ignored)).toBe(true)
+  })
 })
